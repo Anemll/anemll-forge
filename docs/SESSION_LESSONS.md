@@ -69,6 +69,14 @@ Thinking budgets were later enforced by the server to reserve answer space. A re
 - Keep optional FP8 research tooling separate from the requirements for serving prebuilt mixed-LUT artifacts.
 - Recover raw benchmark records before advertising hardware ceilings or resolving the 10.61 GB verifier-byte discrepancy. This session does not resolve that discrepancy.
 
+## Release-preparation diagnostic: cached GPU fallback (September 29)
+
+A separate synthetic per-binding probe found a 5.7-second stall in the first target chunk at both 8K and 16K. Its cached specialization placed all 12 entries on GPU, although the requested compute was ANE, compile mode was `2`, the top-level cache field said no GPU adapter, and live driver logs confirmed bonded requests on both ANE units. Those requests verified the other active ANE work, not placement of every target chunk.
+
+The bad cache's creation time matched a failed sandbox launch. The source package was unchanged. After preserving only that specialization and recompiling with permitted hardware access, the chunk's prefill took 22.7–24.7 ms and verification 6.0–7.7 ms; whole target verifier plans took 106–141 ms in the bounded synthetic probe. Stopping the local benchmark VM alone had not repaired the stall. These measurements diagnose placement and do not establish release throughput or quality. The evidence supports a sandbox-created GPU specialization being reused; it does not demonstrate general ANE eviction or a permanent hardware limitation.
+
+The lesson is to combine per-binding timing with per-entry placement evidence (`mps.fullyPlacedOnANE`, `mps.noGPUActivity`, ANE/GPU region symbols). Preferred compute, cache mode, package metadata and bonded driver activity each answer a narrower question. Preserve and repair a verified affected cache, then recheck placement before timing; see [the troubleshooting procedure](SPECULATIVE_DECODING.md#cached-gpu-placement-can-look-like-an-ane-stall).
+
 ## Current release interpretation
 
 DFlash2 is a required part of the intended fast Core AI release, not an optional side experiment. Preserve the historical findings above, including unsuccessful recalibration and stale-head checks, while using [the current pairing guide](SPECULATIVE_DECODING.md) for release assets and flags. The earlier observations are not new validation of the assembled download.

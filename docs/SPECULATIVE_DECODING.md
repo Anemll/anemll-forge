@@ -99,7 +99,38 @@ The research found several distinct failure modes. Calling all of them "model ev
 
 **Repeated multi-second verifier calls need a new diagnosis.** Low free memory, compression or swap activity makes residency pressure plausible, but those counters alone do not prove repeated ANE program eviction. Separate load/recompile time from warmed `draft`, `verify`, host selection and context-update timing. Capture system memory and disk headroom, concurrent workloads, compile mode/cache metadata and ANE placement. When available, correlate `aned` program-load events with slow calls; a process's disk/page-in counters do not account for all device or daemon activity.
 
-First compare a fixed short prompt on the same pinned target/drafter pair with competing model servers and benchmark VMs stopped. Change one condition at a time and retain failed-run records. If a smaller-context **compiled package** is tested, verify its target/head identity and numerical parity: `--ctx 16384` on the 12-entry package limits usable context but does not remove its largest-entry scratch allocation. A measured chunk needed 151 MB more scratch for the 8K–64K package than the 16K/24K package; the full-target 2.4 GB figure is a projection from that chunk. Filtering Python handles alone is not an established fix. Recompile an affected cache for an actual load/cache failure; indiscriminate cache deletion during live serving is not a latency workaround. See [program/scratch measurements](../COREAI_PORT_NOTES.md#context-ladder-8k-64k-12-entry-points-per-chunk-2026-09-28) and [session lessons](SESSION_LESSONS.md#runtime-memory-different-problems-need-different-mitigations).
+First compare a fixed short prompt on the same pinned target/drafter pair with competing model servers and benchmark VMs stopped. Change one condition at a time and retain failed-run records. If a smaller-context **compiled package** is tested, verify its target/head identity and numerical parity: `--ctx 16384` on the 12-entry package limits usable context but does not remove its largest-entry scratch allocation. A measured chunk needed 151 MB more scratch for the 8K–64K package than the 16K/24K package; the full-target 2.4 GB figure is a projection from that chunk. Filtering Python handles alone is not an established fix. Recompile only an affected cache for a verified load or placement failure; indiscriminate cache deletion during live serving is not a latency workaround. See [program/scratch measurements](../COREAI_PORT_NOTES.md#context-ladder-8k-64k-12-entry-points-per-chunk-2026-09-28) and [session lessons](SESSION_LESSONS.md#runtime-memory-different-problems-need-different-mitigations).
+
+### Cached GPU placement can look like an ANE stall
+
+A September 29 release-preparation diagnostic isolated a repeated 5.7-second verifier stall to `chunk_L00-03`. Its cached specialization placed all 12 entries on GPU; the other 15 target chunks, head and drafter remained fast. A Core AI worker waited for Metal command completion. Stopping the local benchmark VM did not remove the stall. This was a placement/cache failure, not demonstrated ANE model eviction.
+
+The bad cache's creation time matched a failed sandbox launch; the original reason that specialization chose GPU remains unresolved. Preserving only that chunk's cached specialization and recompiling the unchanged source in an environment with permitted hardware access restored ANE placement. Synthetic 8K/16K probes then measured that chunk's prefill at 22.7–24.7 ms and verification at 6.0–7.7 ms; full target verifier plans took 106–141 ms. These are bounded diagnostic timings, not release throughput, acceptance or quality benchmarks.
+
+To investigate this failure:
+
+1. Attribute latency to exact packages and functions. The Swift bridge's `Plan.run(times=True)` returns native wall milliseconds per binding while retaining the existing combined plan.
+2. Inspect every loaded entry's cached specialization. The successful entries had `mps.fullyPlacedOnANE`, `mps.noGPUActivity` and ANE region callees; the failed entries had GPU region symbols and `mps.disableNDX`. Neither preferred ANE compute, compile mode `2`, nor the top-level `GPU adapter present: NO` field established ANE placement. Cache-mode alignment checks the mode, not the selected device. These internal fields can change with the OS and compiler; interpret them alongside function timing and driver evidence.
+3. Correlate driver records with those function timings. A passive capture during inference is:
+
+   ```sh
+   /usr/bin/log stream --level debug \
+     --predicate 'sender == "AppleH16ANEInterface"'
+   ```
+
+   `Using Bonded NID` followed by ANE0 and ANE1 completion of the same `removeRequestByUUID` UUID proves bonded execution for that request. `fNumANEs: 2` alone describes available units. Bonded records do not prove that every target chunk reached ANE; a GPU chunk is absent from that request stream.
+4. For a verified bad specialization, stop the owned model process and preserve that package's exact cache entry, identified by OS build, executable and source `main.hash`. Re-specialize it with the intended settings and check each entry's placement before repeating the bounded timing probe. Retain the old cache and failed-run evidence. Do not wipe unrelated caches or clear caches during live serving.
+
+The read-only [cache audit utility](../coreai/inspect_coreai_cache.py) checks these entry attributes without loading or compiling models:
+
+```sh
+python coreai/inspect_coreai_cache.py \
+  --model-dir /path/to/bundle/coreai \
+  --drafter /path/to/bundle/drafter/dflash2_lut4_gptq.aimodel \
+  --executable /path/to/inference/python --strict
+```
+
+Use the serving process's OS build and executable identity. For an archived cache, set `--os-build` and `--cache-root`. The JSON report marks fully ANE, GPU regions, or unknown evidence; `--strict` exits `1` for GPU or unknown/missing placement, and malformed inputs exit `2`. Run it after a permitted specialization has created the cache; a missing cache is not a placement failure. If several specializations exist, the audit conservatively checks all of them and cannot determine which one a live process chose. It does not establish numerical correctness or live hardware execution.
 
 ## Stops and generation policies
 
