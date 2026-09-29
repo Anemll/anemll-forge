@@ -16,6 +16,16 @@ Perplexity is a useful additional language-model diagnostic, particularly for co
 
 Our historical [`qwen38_kl.py`](../scripts/qwen38_kl.py) uses teacher top-256 plus an aggregate tail bucket, scores prompt and answer positions, and averages over tokens in nats. That coarsening loses distinctions within the tail and is a lower bound on full-vocabulary KL for the same distributions. Its MPS evaluation of reconstructed export weights is also distinct from evaluating the compiled Core AI graph. Preserve the historical metric for continuity; add explicitly named public, assistant-only and full-vocabulary checks as new evaluations. See [the quantization guide](QUANTIZATION.md#interpret-kl-carefully).
 
+## The original model is the primary baseline
+
+The [upstream Qwen3.8-27B card](https://huggingface.co/Qwen/Qwen3.8-27B) reports **Terminal-Bench 2.1 (Terminus) 73.0**, **IFBench 79.5**, **GPQA Diamond 89.2** and **LiveCodeBench v6 90.3**. These are upstream-reported results, not measurements of Forge. Some listed agent evaluations use 256K context. The card does not provide the complete Terminal-Bench protocol or all general-task grading/sampling details, so the table alone is insufficient for exact reproduction.
+
+Use published scores as external context, then run a **matched BF16 baseline** for our own experiments. Match task IDs/revisions, prompt and agent harness, reasoning mode, sampling, output/turn budgets, usable context and compaction policy, grader and number of trials. Our prepared Core AI build reaches roughly 64K context, with a 65,472-row capacity in the largest entry; choose a common usable window with output headroom for BF16 and ANE. That constrained experiment is distinct from an upstream larger-context result.
+
+Run BF16 on M3U or another suitable machine and ANE on M6, or sequentially on one host if each model fits individually. For fixed question benchmarks, save each model's responses and grade them offline. For Terminal-Bench, every model must run its own agent trajectory from a fresh task environment; replaying BF16's actions only tests imitation, not task success. Neither approach requires the models resident together.
+
+Publish three separately labeled values where available: **upstream reported score**, **our BF16 score under our protocol**, and **our ANE score under that same protocol**. Quantization/runtime retention is assessed by the latter pair, with per-task wins/losses and uncertainty. Differences from an upstream score may also come from the evaluation setup. Model-quality and latency differences across engines should remain identifiable.
+
 ## What the other providers publish
 
 ### Unsloth Dynamic 3.0
@@ -59,7 +69,7 @@ For IFEval plus HumanEval+, **705 answers averaging 400–800 generated tokens**
 - **[MMLU-Pro](https://github.com/TIGER-AI-Lab/MMLU-Pro):** use a fixed stratified 280-question screen (20 per domain) if broad knowledge coverage is needed. The full set has over 12,000 questions. A short direct-answer variant or subset is not the published CoT benchmark. Do not substitute forced-choice likelihood scoring for generated reasoning without labeling the change.
 - **Tool use:** a pinned non-live BFCL subset, or an explicitly custom public set of 50–100 tool-schema cases, can cheaply expose malformed calls, wrong arguments and unnecessary repeated calls. Do not label the custom set as BFCL or agent success. Multi-turn environment execution is a separate evaluation.
 
-Defer full SWE/Terminal-Bench agents and repeated long-budget AIME/LiveCodeBench runs until the short tests and integration checks work. A small number of AIME questions does not make it cheap when each is sampled repeatedly with tens of thousands of reasoning tokens. Vision benchmarks do not apply to our text-only runtime bundle.
+Defer full SWE/Terminal-Bench agents and repeated long-budget AIME/LiveCodeBench runs until the short tests and integration checks work; the Terminal-Bench pilot below can start after endpoint integration. A small number of AIME questions does not make it cheap when each is sampled repeatedly with tens of thousands of reasoning tokens. Vision benchmarks do not apply to our text-only runtime bundle.
 
 ### 4. A public fidelity report on the compiled ANE graph
 
@@ -70,6 +80,22 @@ Report mean/median/p95/p99 KL, teacher top-1 agreement, target-token NLL/perplex
 The current HTTP server provides generated chat responses, not a logprob scoring endpoint. Adapt direct runtime scoring for this stage: `CoreAIQwen.call(ids)` returns all logits for up to eight teacher-forced rows. Follow each call with `accept(len(ids))` to commit those rows before the next batch, and reset state between independent sequences. `call()` alone does not advance the committed position. The 64-row prefill API returns only the final row's logits, so it cannot supply all-position KL by itself. [`qwen38_coreai_verify.py`](../scripts/qwen38_coreai_verify.py) demonstrates eight-row scoring, but its default comparison is Core ML versus Core AI on a local WikiText stream; it is not a ready-made upstream-BF16 quality benchmark. Estimate time using measured **teacher-forced rows/s**, not ordinary generated tokens/s. Building the teacher reference is a separate cost and can be done on another machine.
 
 An additional 100–300 public-prompt, 32-token greedy comparison can test first divergence and short free-generation behavior. Call this our own trajectory screen unless the exact Unsloth prompt set and scorer are available. Output mismatch alone does not establish incorrect answers.
+
+### 5. Terminal-Bench pilot against BF16
+
+Terminal-Bench tests completed work in container environments and can reveal cumulative mistakes, recovery failures, command/output handling and repeated-action loops. It measures the **agent plus model plus environment**, so hold the rest of that system fixed. Use **2.1**, the version named by Qwen, and pin its task revision rather than mixing results with 2.0. [Official dataset](https://github.com/harbor-framework/terminal-bench-2-1).
+
+[Harbor's Terminus-2 reference agent](https://www.harborframework.com/docs/agents/terminus-2) supports a custom model endpoint, turn limits and context summarization. First run an integration task to verify that our server's final-answer JSON, reasoning fields and stop behavior work with the agent parser; a compatible chat API alone does not establish working agent integration. Execute task tools in the benchmark's Linux containers, separately from the macOS ANE model server. Verify container architecture and dependencies before timing model performance.
+
+Then preselect **10–15 tasks**, spanning code repair, shell/file operations and data processing, before viewing model outcomes. Run BF16 and ANE with the same task verifier, agent commit/parser, resources, context policy, reasoning effort, sampling and budgets. Start with one trial per model/task as a labeled pilot. Retain every selected task, including failures; publish IDs and trajectories. Expand to repeated trials and the complete set after estimating cost from the pilot. It is not a leaderboard score.
+
+Record task success, first-pass and repeated-trial outcomes, total generated tokens including reasoning and summarization, turns, malformed agent messages, command failures, loops, timeouts, context compactions and elapsed time. Separate environment/verifier failures from model failures without silently dropping trials. If summaries are used, pin that policy and identify which model generates them.
+
+For quality retention, allow enough wall time that a slower ANE server is not simply denied the matched token/turn budget. Also report a separate fixed-deadline deployment test if completion speed is part of the objective. Altered timeouts must be disclosed and cannot be presented as the standard benchmark protocol.
+
+As a planning illustration, **10 trials consuming 20K generated tokens each at 20 tokens/s** take **2.78 hours of decoding per model**, or **5.56 hours for the BF16/ANE pair if both run at that rate**. This is not an enforced Harbor budget or measured duration. Repeated multi-turn prefill, summaries, environment setup, command execution and verification add time; BF16 may have a different rate. Use pilot observations for scheduling.
+
+The current [submission documentation](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/README.md) specifies at least five trials per task and currently closes community submissions. With 89 tasks, five trials would mean 445 agent runs per model, or 890 for the pair, before any competitor models. Local research can remain private and needs no public upload. Do not use the documentation's public-upload flags during private release preparation.
 
 ## Fair comparison and implementation details
 
