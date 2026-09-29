@@ -48,6 +48,31 @@ class CacheAuditTests(unittest.TestCase):
             next(c.rglob('model.mpsgraph')).unlink()
             self.assertEqual(audit.inspect_package(p, ['v8_8k'], c, 'TEST', 'my_python')['status'], 'unknown')
 
+    def test_empty_or_unrecognized_graph_is_unknown(self):
+        for graph in (b'', b'opaque newer compiler format', b'other_entry_ANE_region_0'):
+            with self.subTest(graph=graph), tempfile.TemporaryDirectory() as tmp:
+                p, c = self.fixture(Path(tmp), ['mps.fullyPlacedOnANE', 'mps.noGPUActivity'], graph)
+                self.assertEqual(audit.inspect_package(p, ['v8_8k'], c, 'TEST', 'my_python')['status'], 'unknown')
+
+    def test_compiled_override_cannot_be_hidden_by_good_source_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            p, c = self.fixture(root, ['mps.fullyPlacedOnANE', 'mps.noGPUActivity'], b'v8_8k_hash_0_ANE_region_0')
+            compiled = root / 'custom-override.aimodelc'
+            compiled.mkdir()
+            result = audit.inspect_package(p, ['v8_8k'], c, 'TEST', 'my_python', compiled)
+            self.assertEqual(result['status'], 'unknown')
+            self.assertEqual(result['compiled_override'], str(compiled))
+
+    def test_manifest_custom_override_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'manifest.json').write_text(json.dumps({'chunks': [{'file': 'chunk.aimodel', 'entries': ['v8_8k'],
+                                                                     'compiled': 'custom.aimodelc'}],
+                                                           'head': {'file': 'head.aimodel'}}))
+            self.assertEqual(audit.package_entries(root)[0][2], root / 'custom.aimodelc')
+            self.assertEqual(audit.package_entries(root)[1][2], root / 'head.aimodelc')
+
     def test_missing_expected_entry_unknown(self):
         with tempfile.TemporaryDirectory() as tmp:
             p, c = self.fixture(Path(tmp), ['mps.fullyPlacedOnANE', 'mps.noGPUActivity'])
@@ -57,7 +82,7 @@ class CacheAuditTests(unittest.TestCase):
     def test_strict_missing_returns_one_without_loading_models(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with patch.object(audit, 'package_entries', return_value=[(root / 'absent.aimodel', ['v8_8k'])]):
+            with patch.object(audit, 'package_entries', return_value=[(root / 'absent.aimodel', ['v8_8k'], None)]):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     code = audit.main(['--model-dir', tmp, '--os-build', 'TEST', '--strict'])
                 self.assertEqual(code, 1)

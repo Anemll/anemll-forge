@@ -12,9 +12,13 @@ from pathlib import Path
 
 def package_entries(model_dir, drafter=None):
     manifest = json.loads((model_dir / 'manifest.json').read_text())
-    result = [(model_dir / c['file'], c['entries']) for c in manifest['chunks']]
+    def target_record(record):
+        package = model_dir / record['file']
+        compiled = model_dir / record['compiled'] if record.get('compiled') else package.with_suffix('.aimodelc')
+        return package, record.get('entries', ['h8']), compiled
+    result = [target_record(c) for c in manifest['chunks']]
     head = manifest['head']
-    result.append((model_dir / head['file'], head.get('entries', ['h8'])))
+    result.append(target_record(head))
     if drafter:
         # Extract actual drafter entry names from its matching sidecar.
         sidecar = drafter.with_suffix('.json')
@@ -24,14 +28,18 @@ def package_entries(model_dir, drafter=None):
             entries = list(entries)
         if not isinstance(entries, list) or not all(isinstance(x, str) for x in entries):
             entries = []  # Unknown contract; never invent entries and pass the audit.
-        result.append((drafter, entries))
+        result.append((drafter, entries, None))  # Drafter loads its explicit package directly.
     return result
 
 
-def inspect_package(package, expected, cache_root, os_build, executable):
+def inspect_package(package, expected, cache_root, os_build, executable, compiled_override=None):
     hashfile = package / 'main.hash'
     result = {'package': str(package), 'expected_entries': expected,
               'status': 'unknown', 'specializations': []}
+    if compiled_override is not None and compiled_override.exists():
+        result.update(reason='compiled override exists; selected artifact is outside this source-cache audit',
+                      compiled_override=str(compiled_override))
+        return result
     if not hashfile.is_file():
         result['reason'] = 'missing source main.hash'
         return result
@@ -54,7 +62,7 @@ def inspect_package(package, expected, cache_root, os_build, executable):
             for version, fields in versions.items():
                 for module in fields.get('Optimized Modules', {}).values():
                     attrs = module.get('Entry Function Attributes', {})
-                    records.extend((name, a, version) for name, a in attrs.items())
+                    ane_symbols = set()
                     filename = module.get('File Name')
                     if filename:
                         graph = (mf.parent / filename).resolve()
@@ -62,23 +70,29 @@ def inspect_package(package, expected, cache_root, os_build, executable):
                             raise ValueError('graph path escapes cache package')
                         if graph.is_file():
                             blob = graph.read_bytes()
+                            ane_symbols = {x.decode('ascii') for x in re.findall(rb'[A-Za-z0-9_-]+_ANE_region_[A-Za-z0-9_]+', blob)}
                             item['graphs'].append({'file': str(graph), 'bytes': len(blob),
                                 'sha256': hashlib.sha256(blob).hexdigest(),
                                 'gpu_region_name_count': len(set(re.findall(rb'[A-Za-z0-9_-]+_GPU_region_[A-Za-z0-9_]+', blob))),
-                                'ane_region_name_count': len(set(re.findall(rb'[A-Za-z0-9_-]+_ANE_region_[A-Za-z0-9_]+', blob)))})
+                                'ane_region_name_count': len(ane_symbols)})
                         else:
                             missing_graph = True
                     else:
                         missing_graph = True
+                    records.extend((name, a, version, any(s.startswith(name + '_ANE_region_') for s in ane_symbols))
+                                   for name, a in attrs.items())
             for entry in expected:
-                found = [(n, a, v) for n, a, v in records if n == entry or n.startswith(entry + '_')]
-                full = bool(found) and all('mps.fullyPlacedOnANE' in a and 'mps.noGPUActivity' in a for _, a, _ in found)
+                found = [(n, a, v, recognized) for n, a, v, recognized in records if n == entry or n.startswith(entry + '_')]
+                full = bool(found) and all(isinstance(a, list) and 'mps.fullyPlacedOnANE' in a
+                                          and 'mps.noGPUActivity' in a and recognized
+                                          for _, a, _, recognized in found)
                 item['entries'][entry] = {'status': 'fully_ane' if full else 'unknown',
-                    'matching_symbols': [n for n, _, _ in found]}
+                    'matching_symbols': [n for n, _, _, _ in found]}
             gpu = any(g['gpu_region_name_count'] for g in item['graphs'])
             if gpu:
                 item['status'] = 'gpu_regions_present'
-            elif not missing_graph and item['graphs'] and expected and all(e['status'] == 'fully_ane' for e in item['entries'].values()):
+            elif (not missing_graph and item['graphs'] and all(g['ane_region_name_count'] for g in item['graphs'])
+                  and expected and all(e['status'] == 'fully_ane' for e in item['entries'].values())):
                 item['status'] = 'fully_ane'
         except (OSError, ValueError, TypeError, AttributeError, plistlib.InvalidFileException) as exc:
             item['reason'] = str(exc)
@@ -107,7 +121,8 @@ def main(argv=None):
         if not build or '/' in build or build in ('.', '..'):
             raise ValueError('invalid OS build')
         packages = package_entries(args.model_dir.expanduser(), args.drafter.expanduser() if args.drafter else None)
-        results = [inspect_package(p, e, args.cache_root.expanduser(), build, args.executable) for p, e in packages]
+        results = [inspect_package(p, e, args.cache_root.expanduser(), build, args.executable, compiled)
+                   for p, e, compiled in packages]
         report = {'os_build': build, 'executable_identity': Path(args.executable).name.replace('_', '-'),
                   'scope': 'cached specializations, not proof of live hardware execution or numerical correctness',
                   'packages': results}

@@ -130,7 +130,7 @@ python coreai/inspect_coreai_cache.py \
   --executable /path/to/inference/python --strict
 ```
 
-Use the serving process's OS build and executable identity. For an archived cache, set `--os-build` and `--cache-root`. The JSON report marks fully ANE, GPU regions, or unknown evidence; `--strict` exits `1` for GPU or unknown/missing placement, and malformed inputs exit `2`. Run it after a permitted specialization has created the cache; a missing cache is not a placement failure. If several specializations exist, the audit conservatively checks all of them and cannot determine which one a live process chose. It does not establish numerical correctness or live hardware execution.
+Use the serving process's OS build and executable identity. For an archived cache, set `--os-build` and `--cache-root`. The JSON report marks fully ANE, GPU regions, or unknown evidence; `--strict` exits `1` for GPU or unknown/missing placement, and malformed inputs exit `2`. Full ANE status requires recognized ANE region symbols for each expected entry as well as the manifest attributes. Run it after a permitted specialization has created the cache; a missing cache is not a placement failure. An existing target `.aimodelc` override produces `unknown`: this utility inspects source caches and cannot establish placement of a selected compiled override. If several specializations exist, the audit conservatively checks all of them and cannot determine which one a live process chose. It does not establish numerical correctness or live hardware execution.
 
 ## Stops and generation policies
 
