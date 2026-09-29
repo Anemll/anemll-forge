@@ -17,7 +17,8 @@ os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dflash2_drafter_ref import rope_cos_sin  # noqa: E402
 
-BRIDGE_DIR = Path(__file__).resolve().parents[1] / "coreai" / "swift_bridge"
+BRIDGE_DIR = Path(os.path.expanduser(os.environ.get(
+    "COREAI_BRIDGE_DIR", str(Path(__file__).resolve().parents[1] / "coreai" / "swift_bridge"))))
 f16 = np.float16
 NEG = -1e4
 

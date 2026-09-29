@@ -61,7 +61,7 @@ class SmokeTests(unittest.TestCase):
         return values
 
     def smoke(self, *, runtime="coreml", ctx=64, tokens=3):
-        return hf_release.smoke(self.root, self.manifest, runtime, ctx, "short prompt", tokens)
+        return hf_release.smoke(self.root, self.manifest, runtime, ctx, "short prompt", tokens, plain=True)
 
     def test_greedy_generation_is_bounded_and_uses_last_prompt_logits(self):
         self.model.feed.return_value = self.logits(2)
@@ -131,7 +131,8 @@ class SmokeTests(unittest.TestCase):
 
     def test_coreai_pins_context_and_checked_bridge(self):
         self.model.feed.return_value = self.logits(2)
-        os.environ.update(COREAI_BRIDGE_DIR="/wrong/directory", COREAI_BRIDGE_LIB="/wrong/library")
+        os.environ.pop("COREAI_BRIDGE_DIR", None)
+        os.environ.pop("COREAI_BRIDGE_LIB", None)
         bridge = Path(hf_release.__file__).resolve().parents[1] / "coreai/swift_bridge/libcoreai_bridge.dylib"
         original_is_file = Path.is_file
 

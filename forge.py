@@ -42,7 +42,11 @@ def parser():
             q.add_argument("--build", type=path, required=True)
             q.add_argument("--ctx", type=int, default=16384)
             if name == "serve":
-                q.add_argument("--runtime", choices=("coreml", "coreai"), default="coreml")
+                q.add_argument("--runtime", choices=("coreml", "coreai"), default="coreai")
+                modes = q.add_mutually_exclusive_group()
+                modes.add_argument("--draft", type=path, help="Core AI DFlash2 package; default: bundle/drafter/dflash2_lut4_gptq.aimodel")
+                modes.add_argument("--plain", action="store_true", help="diagnostic target-only generation")
+                q.add_argument("--drafter", type=path, help="drafter config/selector directory; default: package parent")
                 q.add_argument("--host", default="127.0.0.1")
                 q.add_argument("--port", type=int, default=8765)
             else:
@@ -109,7 +113,19 @@ def prepare(a):
         script = "qwen38_server.py" if a.command == "serve" else "qwen38_chat.py"
         args = ["--hf", str(a.model), "--model-dir", str(a.build), "--ctx", str(a.ctx)]
         if a.command == "serve":
-            args += ["--host", a.host, "--port", str(a.port)]
+            args += ["--host", a.host, "--port", str(a.port), "--runtime", runtime]
+            if a.plain:
+                if a.drafter:
+                    raise ValueError("--drafter cannot be combined with diagnostic --plain")
+                args += ["--plain"]
+            else:
+                if runtime != "coreai":
+                    raise ValueError("The release uses Core AI target + drafter; --runtime coreml requires --plain diagnostics")
+                pkg, directory = hf_release.drafter_paths(a.build, a.draft, a.drafter)
+                hf_release.check_drafter_pair(pkg, directory, json.loads(manifest.read_text()), cfg)
+                args += ["--draft", str(pkg), "--drafter", str(directory)]
+                env["DRAFTER"] = str(directory)
+                env["COREAI_DRAFTER_COMPUTE"] = "ane"
         else:
             if a.prompt is not None:
                 args += ["--prompt", a.prompt]

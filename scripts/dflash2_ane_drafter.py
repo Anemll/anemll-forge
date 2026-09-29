@@ -572,9 +572,12 @@ class LazyEmbedding:
         return self.t[int(i):int(i) + 1][0].to(torch.float16).numpy()
 
 
-def load_codebooks(path=DRAFTER):
+def load_codebooks(path=None):
     from safetensors import safe_open
-    with safe_open(Path(path) / "model.safetensors", framework="pt") as f:
+    path = Path(path) if path is not None else DRAFTER
+    # Prepared inference releases contain only the two selector tables, not the full drafter checkpoint.
+    compact = path / "selector.safetensors"
+    with safe_open(compact if compact.is_file() else path / "model.safetensors", framework="pt") as f:
         return {k: f.get_tensor(k) for k in ("candidate_selector.predecessor_codebook",
                                              "candidate_selector.successor_codebook")}
 

@@ -1,6 +1,6 @@
 # Core AI release bundle on Hugging Face
 
-The M6 release uses **Core AI inference**. Upload the Core AI chunk/head packages, matching config/tokenizer assets and prepared embedding table. **Core ML model packages are not required for this release.** The repository retains Core ML conversion and experiment code for reproduction and learning.
+The intended fast M6 release uses **Core AI inference with the matching DFlash2 speculative drafter**. Upload target chunk/head packages, matching config/tokenizer/embedding assets, and the drafter package, metadata, configuration, compact selector codebooks and provenance/license files. **Core ML model packages are not required for this release.** The repository retains Core ML conversion and experiment code for reproduction and learning.
 
 HF destination: **`anemll/anemll-forge-qwen3.8-27B`** under [ANEMLL](https://huggingface.co/anemll). The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and ANE benchmarks to be added when measured. The download helper defaults to this repository.
 
@@ -23,6 +23,14 @@ bundle/
   coreai/
     manifest.json
     ...all referenced chunk and head packages
+  drafter/
+    dflash2_lut4_gptq.aimodel/
+    dflash2_lut4_gptq.json
+    config.json
+    selector.safetensors
+    LICENSE
+    NOTICE
+    DFLASH2_SOURCE.json
   export/                         # optional quantized conversion weights
     ...complete quantized export
   README.md                       # model card
@@ -37,6 +45,8 @@ Use config, tokenizer and embeddings from the **exact pinned checkpoint used to 
 The `model/` directory accepts only the supported tokenizer/config files and the embedding array; do not copy original weight shards there. Optional files include generation/special-token configuration, chat templates, vocabulary and merges. Copy the five prepared files from `release/huggingface/` into the bundle root; they are required, hashed and downloaded with the model. Copy actual file contents, not cache symlinks.
 
 Preserve Core AI's `manifest.json`, its `ctxs`, and every referenced chunk/head asset with the same relative names. Include source `.aimodel` packages so the target OS can compile them; a precompiled `.aimodelc` alone may be incompatible with another OS/toolchain. Include any explicitly referenced compiled packages too. Existing sibling `.aimodelc` packages are inventoried because the runtime can prefer them. Added runtime files absent from the inventory are rejected. The helper requires T=8 and ordered chunk ranges covering all 64 layers. Do not rename files without updating their runtime manifest.
+
+The required `drafter/` contains the matching Core AI DFlash2 artifact and sidecar, checkpoint config and compact predecessor/successor codebooks. Preserve the separate upstream LICENSE/NOTICE and pinned source evidence. See [the exact compatibility contract](SPECULATIVE_DECODING.md); neither original BF16 drafter weights nor a Core ML drafter package is required for serving.
 
 The optional `export/` is for rebuilding/conversion, not required to run a prepared bundle. Include only reviewed export assets. The manifest generator inventories everything under runtime and export directories; it is not a private-data filter. Exclude calibration sessions, logs, unrelated checkpoints and temporary experiments.
 
@@ -70,7 +80,7 @@ python forge.py download \
   --output /path/to/downloaded-bundle
 ```
 
-Authenticate with your own HF credentials when downloading a private or gated repository. `--repo` defaults to `anemll/anemll-forge-qwen3.8-27B` and can be overridden. The helper resolves a branch/tag to a commit before downloading, selects `model/` plus `coreai/` and the required release documents, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
+Authenticate with your own HF credentials when downloading a private or gated repository. `--repo` defaults to `anemll/anemll-forge-qwen3.8-27B` and can be overridden. The helper resolves a branch/tag to a commit before downloading, selects `model/`, `coreai/`, `drafter/` and the required release documents, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
 
 Add `--include-export` only when conversion weights are needed and the release includes them. The download step checks export hashes too when requested. For revision pinning, filtered downloads and local-directory behavior, see the [official Hugging Face download guide](https://huggingface.co/docs/huggingface_hub/guides/download).
 
@@ -94,6 +104,18 @@ python forge.py quick-test \
   --report /path/to/smoke-report.json
 ```
 
-The smallest advertised context is selected by default; `--ctx` accepts a context listed for Core AI. Keep `--report` outside the bundle directory. The smoke path runs short greedy generation without a drafter. It checks finite vocabulary-shaped logits and visible generated text, and reports load/generation time. It does not assert an expected answer, benchmark performance, certify placement or establish long-context quality.
+The smallest advertised context is selected by default; `--ctx` accepts a context listed for Core AI. Keep `--report` outside the bundle directory. The default smoke path runs actual greedy speculative generation with the matching drafter, target verification and acceptance. It checks finite vocabulary-shaped logits and visible generated text and records runtime details. A `--plain` smoke is an explicitly labeled target-only diagnostic; it does not validate the release pair. It does not assert an expected answer, benchmark performance, certify placement or establish long-context quality.
 
-Actual inference requires macOS and compatible model hardware/toolchain. It loads the full target even for 16 tokens, and first-load compilation can take minutes. Run it when adequate memory and the ANE are available. Current Python imports still include PyTorch, safetensors, coremltools and research helpers; tokenizers is also required. Core AI additionally needs the native Swift bridge and compatible system framework. The current coremltools dependency does not require distributing Core ML model packages. Installing `huggingface_hub` only enables download, and a clean public dependency recipe remains a release gate.
+Actual inference requires macOS and compatible model hardware/toolchain. It loads the full target and drafter even for 16 tokens, and first-load compilation can take minutes. Run it when adequate memory and the ANE are available. Current Python imports still include PyTorch, safetensors, coremltools and research helpers; tokenizers is also required. Core AI additionally needs the native Swift bridge and compatible system framework. The current coremltools dependency does not require distributing Core ML model packages. Installing `huggingface_hub` only enables download, and a clean public dependency recipe remains a release gate.
+
+## 5. Serve the complete release
+
+```sh
+python forge.py serve --runtime coreai \
+  --model /path/to/downloaded-bundle/model \
+  --build /path/to/downloaded-bundle/coreai --ctx 16384
+```
+
+The launcher resolves the matching sibling `drafter/` by default; missing assets are an error. Explicit `--draft` and `--drafter` paths support other layouts. `download --plain`, `quick-test --plain` and `serve --plain` deliberately select the target-only diagnostic path; do not use their results as validation or timing of the complete release. Regenerate `release.json` after adding or replacing drafter assets, then test the exact uploaded revision. The earlier target-only upload is not the final speculative bundle.
+
+For the fixed-shape entry ladder, KV-buffer resizing, cache retention and the separate drafter ring, see [how ANE context expansion works](SPECULATIVE_DECODING.md#how-ane-context-expansion-is-implemented).

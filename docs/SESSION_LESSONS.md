@@ -28,11 +28,12 @@ Fluent output and good final cosine concealed large recurrent-layer errors. Stab
 
 The final Core ML recipe and the rejected variants are preserved in [ANE_DELTANET_NUMERICS.md](../ANE_DELTANET_NUMERICS.md). The early statement that MLP SiLU was unaffected was later superseded by the MLP measurements. Tiny graphs running on CPU are not evidence that the same operations behave correctly on ANE.
 
-## Runtime memory: three different problems
+## Runtime memory: different problems need different mitigations
 
 1. **Core ML function residency:** shared package weights did not imply one resident weight copy across loaded functions.
 2. **Core AI Python outputs:** allocation/pooling failure was isolated to the Python binding in the recorded tests. A Swift bridge with preallocated output views later passed 5,000 small-model calls and a reported 2,000-call full-model run with flat memory. These are finite tests, not a universal leak-free guarantee.
 3. **Compiled variants:** much of the Core AI program overhead was attributed to bonded/nonbonded variants. Mode 2 reduced it in the tested stack. The setting is undocumented and version-sensitive; the attempted analogous Core ML bonded-only mode caused timeouts and is not part of the supported recipe.
+4. **Compiled-cache availability:** near-full-disk load failures were repaired by purging the affected package cache and recompiling. Purgeable ANE program-cache eviction was suspected. This load-time failure is distinct from repeated eviction or residency pressure during generation; neither the observed scheduling stalls nor system swap counters establish that diagnosis. The current [inference troubleshooting guide](SPECULATIVE_DECODING.md#eviction-memory-pressure-and-stalled-calls) explains the implemented retry and how to isolate slow calls.
 
 Report source-package bytes, compiled program bytes, scratch, KV storage and system wired memory separately. A small package can require a much larger runtime allocation. Larger Qwen Core AI chunks also failed despite working Core ML counterparts; that is evidence about a particular graph/toolchain, not a proven universal maximum number of attention layers or ANE weight bytes.
 
@@ -67,3 +68,7 @@ Thinking budgets were later enforced by the server to reserve answer space. A re
 - Retain failed experiments with dates and supersession notes; distinguish measured results, projections and hypotheses.
 - Keep optional FP8 research tooling separate from the requirements for serving prebuilt mixed-LUT artifacts.
 - Recover raw benchmark records before advertising hardware ceilings or resolving the 10.61 GB verifier-byte discrepancy. This session does not resolve that discrepancy.
+
+## Current release interpretation
+
+DFlash2 is a required part of the intended fast Core AI release, not an optional side experiment. Preserve the historical findings above, including unsuccessful recalibration and stale-head checks, while using [the current pairing guide](SPECULATIVE_DECODING.md) for release assets and flags. The earlier observations are not new validation of the assembled download.

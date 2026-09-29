@@ -40,3 +40,7 @@ Core ML multifunction packages reduced disk duplication without achieving the sa
 Placement checks, numerical comparisons, and latency measurements support claims about the tested execution path. Patent diagrams and compiler strings help form hypotheses; they do not identify the exact physical implementation in a chip. In particular, a measured 256-value codebook boundary is not proof of a 256-byte SRAM. Preserve this distinction in public explanations.
 
 Keep failed experiments when they isolate a useful constraint, but record the version, reproduction command, expected failure, and whether later work superseded it. Never promote a CPU fallback parity result into evidence of ANE numerical correctness.
+
+## DFlash2 is part of the fast release
+
+The target verifier runs an anchor plus seven DFlash2 proposals as a T=8 batch. It commits only the accepted prefix and uses the target's logits for rejection/continuation. Speed depends on acceptance as well as graph latency, drafter scheduling, context updates and prefill. Nominal compression or eight verifier rows does not imply an eightfold speedup. The intended release includes the exact matching Core AI drafter; plain decoding isolates target behavior for diagnostics. See [the algorithm, compatibility contract and caveats](SPECULATIVE_DECODING.md).

@@ -29,7 +29,7 @@ Original module names are retained to keep the research trail navigable. Histori
 - `coreai/qwen38_coreai_build.py`: graph mirror, LUT injection, multiple entries, blocked attention.
 - `scripts/qwen38_coreai_model.py`: Python/Swift runtime selection, buffers, context changes and cache handling.
 - `coreai/swift_bridge/CoreAIBridge.swift` and `coreai_bridge.py`: native bridge source and Python wrapper.
-- `scripts/dflash2_*` and `coreai/dflash2_*`: optional drafter work.
+- `scripts/dflash2_*` and `coreai/dflash2_*`: drafter conversion, runtime and experiments. Matching DFlash2 is required for the intended fast release; alternative quantizers and probes remain research paths. See [the current speculative-decoding guide](SPECULATIVE_DECODING.md).
 - `scripts/qwen38_spec_unit_test.py`: a CPU statistical sampler test (large sample count, not a fast unit test).
 - [Core AI notebook](../COREAI_PORT_NOTES.md) and [DFlash2 notebook](../DFLASH2_ANE_PLAN.md).
 
@@ -45,3 +45,5 @@ Original module names are retained to keep the research trail navigable. Histori
 - Research probes may overwrite their own output directories or clear selected compiler caches. They are not part of the fast test suite and are not automatically run.
 
 The per-file source hashes in [provenance.json](provenance.json) identify the source working-tree bytes before editing. They matter because much of this work was untracked at the source HEAD.
+
+The bridge shell workflows `validate_full_model.sh`, `run_full_bench.sh` and probe `run_mode.sh` measure target parity, target-only chunk timing and single-chunk memory respectively. They do not validate the complete DFlash2 speculative release; use the paired smoke and evaluation workflow in [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md).

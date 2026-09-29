@@ -1,0 +1,63 @@
+{
+  "providers": {
+    "ane-qwen38": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8765/v1",
+      "apiKey": "local-no-auth",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": true,
+        "supportsStore": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "qwen38-27b-ane",
+          "name": "Qwen3.8 27B Core AI + DFlash2 (16K)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 16384,
+          "maxTokens": 4096,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "thinkingLevelMap": {
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh",
+            "xhigh": "xhigh",
+            "max": "xhigh"
+          },
+          "samplingParams": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20,
+            "presence_penalty": 0,
+            "dry_multiplier": 0
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "thinkingTokenBudgetField": "thinking_budget",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort",
+                "omitWhenOff": true
+              },
+              "preserve_thinking": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,7 @@
 > Historical research notes imported on 2026-09-29. Paths were generalized; results were not rerun. Later sections may supersede earlier findings. See the current [release workflow](docs/WORKFLOW.md).
 
+> Release context — 2026-09-29: the living-document status, early target name, Core ML RTN commands and optional-GPTQ recommendation below belong to the preserved research record. The intended release now pairs the Core AI `mix25in_mixr_lr64mix` target with the matching Core AI `dflash2_lut4_gptq.aimodel`, full target head and compact selector assets. DFlash2 is required for the fast release; plain inference is a diagnostic. Use [the current speculative-decoding guide](docs/SPECULATIVE_DECODING.md) for assets, flags, provenance and validation. No historical result below has been rerun by this update.
+
 # DFlash2 speculative decoding for Qwen3.8-27B on the ANE: plan and spec
 
 Status: living document. Numbers in section 9 are updated as they are measured.

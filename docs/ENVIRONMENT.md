@@ -15,3 +15,7 @@ The source Core AI build requirements report coreai-core 1.0.0b2, coreai-opt 0.2
 The code uses NumPy, PyTorch, SciPy, safetensors, ml_dtypes and coremltools for the Core ML build path. Calibration/reference generation also uses transformers/tokenizers; k-means needs scikit-learn. Core AI and Swift require their own compatible toolchain. The launcher, bundle manifest/integrity commands and their portable tests use the standard library. Download additionally needs `huggingface_hub`. The inference smoke test needs tokenizers plus the existing ML runtime imports; Core AI's Swift bridge avoids the Python Core AI SDK but still imports the Core ML model module and its dependencies.
 
 No dependency installation or full model conversion was performed during this first port. Run `python forge.py doctor` to capture versions without importing ML frameworks. A supported clean-environment recipe is a release gate, not something to infer from successful imports in the original research venv.
+
+## DFlash2 release runtime
+
+The fast release loads a Core AI DFlash2 drafter through the same Swift bridge. It needs package metadata, checkpoint configuration and predecessor/successor selector codebooks, plus the target's matching embeddings. The host uses PyTorch for candidate selection and fixes its CPU thread count to one; NumPy and safetensors remain runtime dependencies. A target-only smoke environment does not validate the complete bundle. See [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) for scheduling settings and warm-up requirements.

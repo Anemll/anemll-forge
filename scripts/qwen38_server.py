@@ -11,7 +11,7 @@ new prompt extends it; the Gated DeltaNet states are also snapshotted at the end
 that re-renders the last answer differently still reuses everything up to that prompt (KV rows past the
 position are masked, so only the DeltaNet recurrent / conv states need the snapshot).
 
-    ~/venvs/vq27b/bin/python qwen38_server.py --host 0.0.0.0 --port 8765 --ctx 8192
+    python qwen38_server.py --hf /path/to/bundle/model --model-dir /path/to/bundle/coreai --ctx 8192
 """
 import argparse
 import json
@@ -40,12 +40,13 @@ THINK_STOP = ("\n\nConsidering the limited time by the user, I have to give the 
 ANSWER_RESERVE = 4096
 
 
-def parse():
+def parse(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
-    p.add_argument("--model-dir", default="~/Models/vq27b/ane/full_mix25_mixer4_head4")
-    p.add_argument("--hf", default="~/Models/Qwen3.8-27B", help="checkpoint dir: tokenizer, chat template, embedding")
+    p.add_argument("--model-dir", required=True, help="Core AI target package directory")
+    p.add_argument("--hf", required=True, help="checkpoint/bundle dir: tokenizer, chat template, embedding")
+    p.add_argument("--runtime", choices=("coreai", "coreml"), default="coreai")
     p.add_argument("--ctx", type=int, default=8192, help="context length the chunks were built for")
     p.add_argument("--think", action="store_true", help="enable thinking by default (clients can override)")
     p.add_argument("--max-tokens", type=int, default=4096, help="default completion limit")
@@ -60,9 +61,16 @@ def parse():
     p.add_argument("--dry-allowed", type=int, default=8, help="repeated run length (tokens) tolerated before DRY acts")
     p.add_argument("--loop-guard", type=int, default=6, help="stop when the output tail repeats this many times with "
                    "the same period (0 = off)")
-    p.add_argument("--draft", nargs="?", const="~/Models/dflash2/ane/dflash2_lut4_rtn.mlpackage",
-                   help="DFlash2 speculative decoding with this ANE drafter package (needs a v3/v4 build)")
-    return p.parse_args()
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--draft", help="Core AI DFlash2 package (default: bundle/drafter/dflash2_lut4_gptq.aimodel)")
+    modes.add_argument("--plain", action="store_true", help="diagnostic target-only generation")
+    p.add_argument("--drafter", help="drafter config/selector directory (default: drafter package parent)")
+    args = p.parse_args(argv)
+    if args.plain and args.drafter:
+        p.error("--drafter cannot be combined with --plain")
+    if args.runtime != "coreai" and not args.plain:
+        p.error("Core ML is a plain diagnostic path; supply --plain")
+    return args
 
 
 def log(msg):
@@ -115,12 +123,25 @@ class Engine:
     def __init__(self, a):
         mdir = Path(os.path.expanduser(a.model_dir))
         hf = Path(os.path.expanduser(a.hf))
+        # Fail on a wrong/missing head or tap pairing before allocating either large model.
+        self.runtime = a.runtime
+        dpath, ddir, dcfg = None, None, None
+        if not a.plain:
+            from hf_release import drafter_paths, check_drafter_pair
+            dpath, ddir = drafter_paths(mdir, a.draft, a.drafter)
+            target = json.loads((mdir / "manifest.json").read_text())
+            target_cfg = json.loads((hf / "config.json").read_text())["text_config"]
+            dcfg, _ = check_drafter_pair(dpath, ddir, target, target_cfg)
+            os.environ.update(DRAFTER=str(ddir), COREAI_DRAFTER_COMPUTE="ane")
+            a.draft = str(dpath)
         os.environ.update(ANE_OUT=str(mdir.parent), EXPORT_DIR=mdir.name, CTX=str(a.ctx), MODEL=str(hf))
+        prepared_embedding = hf / "embed_tokens_fp16.npy"
+        if prepared_embedding.is_file():
+            os.environ["EMBED_NPY"] = str(prepared_embedding)
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import qwen38_ane_model as M
         from transformers import AutoTokenizer
         t = time.time()
-        self.runtime = os.environ.get("RUNTIME", "coreml")
         if self.runtime == "coreai":  # Core AI build (qwen38_coreai_build.py): all context / prefill entry points of a
             os.environ["COREAI_DIR"] = str(mdir)  # chunk share one weight copy; the context grows through the ladder
             import qwen38_coreai_model as A
@@ -132,26 +153,12 @@ class Engine:
         self.drafter, self.cycles, self.verify_end = None, 0, 0.0
         self.tm = dict.fromkeys(("draft", "verify", "sample", "ctx", "host"), 0.0)
         self.acc_hist = [0] * 8  # accepted drafts per cycle (0..7), this request
-        if a.draft:
+        if not a.plain:
             assert hasattr(self.model, "call"), "--draft needs a v3/v4 build (one T=8 function per chunk)"
-            os.environ.setdefault("DRAFTER", os.path.expanduser("~/Models/dflash2/checkpoint"))
             import dflash2_ane_drafter as D
-            dcfg = json.loads((D.DRAFTER / "config.json").read_text())
-            dpath = Path(os.path.expanduser(a.draft))
-            if dpath.suffix == ".aimodel":  # Core AI drafter (coreai/dflash2_coreai_build.py): bonded on both ANE units
-                from dflash2_coreai_drafter import CoreAIDrafter
-                self.drafter = CoreAIDrafter(dpath, dcfg, D.load_codebooks(), self.model.emb)
-            else:                            # Core ML drafter package (dflash2_ane_drafter.py build)
-                self.drafter = D.AneDrafter(dpath, dcfg, D.load_codebooks(), self.model.emb)
-            log(f"drafter: {'Core AI' if dpath.suffix == '.aimodel' else 'Core ML'} {dpath.name}")
-            meta = dpath.with_suffix(".json")
-            head = json.loads(meta.read_text()).get("head_export") if meta.exists() else None
-            target = (getattr(self.model, "man", None) or {}).get("export")
-            if head and target and Path(head).parent.name != Path(target).name:
-                log(f"WARNING: the drafter drafts with the lm_head of {Path(head).parent.name}, the target is "
-                    f"{Path(target).name}: rebuild the drafter with that export's head (lower acceptance otherwise)")
-            elif not head:
-                log("drafter head export unknown (no metadata); make sure it matches the target's export")
+            from dflash2_coreai_drafter import CoreAIDrafter
+            self.drafter = CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
+            log(f"drafter: Core AI {dpath.name}")
         self.tok = AutoTokenizer.from_pretrained(str(hf))
         self.a = a
         # usable positions: a Core AI 64K entry holds 65472 KV rows (the ANE caps [history | block] at 65536)

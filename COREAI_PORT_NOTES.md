@@ -1,5 +1,7 @@
 > Historical research notes imported on 2026-09-29. Paths were generalized; results were not rerun. Later sections may supersede earlier findings. See the current [release workflow](docs/WORKFLOW.md).
 
+> Release context — 2026-09-29: this notebook spans older Core ML drafter packages, target-only timing probes and later Core AI speculative serving. They are different configurations. The intended release uses the matching Core AI target and DFlash2 drafter together; historical RTN/Core ML cache instructions are not its default workflow. See [the current pairing and benchmark caveats](docs/SPECULATIVE_DECODING.md). Target-only verifier timings and sums of separately loaded chunks are not end-to-end speculative serving throughput.
+
 # Core AI port notes (Qwen3.8-27B target on the M6 ANE)
 
 Why: Core ML multifunction models wire one weight copy per loaded function on the ANE

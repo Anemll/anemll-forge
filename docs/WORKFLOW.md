@@ -1,6 +1,6 @@
 # First port workflow
 
-For the planned **Core AI M6 release**, start with [the Core AI Hugging Face bundle guide](HUGGING_FACE.md). The Core ML build/inference steps below preserve the research baseline for conversion and experiments; they do not require uploading Core ML model packages.
+For the planned **Core AI M6 release with matching DFlash2 speculative decoding**, start with [the Core AI Hugging Face bundle guide](HUGGING_FACE.md). The Core ML build/inference steps below preserve the research baseline for conversion and experiments; they do not require uploading Core ML model packages.
 
 Run commands from the repository root. Paths below are examples to replace, not bundled assets. `--dry-run` validates basic inputs and prints the command without loading models. Full builds can use substantial memory and disk space; this port has not rerun them.
 
@@ -59,27 +59,30 @@ The launcher fixes the `ane7i` numerical recipe: tanh SiLU in DeltaNet and MLP, 
 
 The build is stored under `$BUILDS/qwen38-27b-vq2`. Compilation alone does not prove ANE placement or accuracy. Check compute plans, same-weight reference parity, recurrent-state behavior, and teacher-forced quality before drawing performance conclusions.
 
-## 4. Run inference
+## 4. Run the Core ML diagnostic baseline
 
 ```sh
 python forge.py chat --model "$MODEL" --build "$BUILDS/qwen38-27b-vq2" --ctx 16384 --no-think --prompt 'Explain vector quantization.'
-python forge.py serve --model "$MODEL" --build "$BUILDS/qwen38-27b-vq2" --ctx 16384
+python forge.py serve --runtime coreml --plain --model "$MODEL" --build "$BUILDS/qwen38-27b-vq2" --ctx 16384
 ```
 
-The server binds to `127.0.0.1:8765`; stop with Ctrl-C. No personal agent configuration is changed. A prepared `$MODEL/embed_tokens_fp16.npy` takes precedence; inference then needs no original checkpoint shards or index. Otherwise the embedding table is cached under `$MODEL/.anemll-forge/`; the checkpoint directory must be writable, or invoke the underlying script with an explicit `EMBED_NPY` in a writable location. See [the Hugging Face bundle workflow](HUGGING_FACE.md) for downloading prepared artifacts and running an integrity/inference smoke test.
+The `chat` command remains the plain Core ML research interface. The example server explicitly selects Core ML and `--plain`; the main release serving command below uses Core AI plus DFlash2. The server binds to `127.0.0.1:8765`; stop with Ctrl-C. No personal agent configuration is changed. A prepared `$MODEL/embed_tokens_fp16.npy` takes precedence; inference then needs no original checkpoint shards or index. Otherwise the embedding table is cached under `$MODEL/.anemll-forge/`; the checkpoint directory must be writable, or invoke the underlying script with an explicit `EMBED_NPY` in a writable location. See [the Hugging Face bundle workflow](HUGGING_FACE.md) for downloading prepared artifacts and running an integrity/inference smoke test.
 
-## 5. Core AI research path
+## 5. Convert and pair the Core AI release
 
 The port preserves the latest Core AI build/runtime and Swift bridge. Use a separate compatible Core AI environment. Build the bridge with `bash coreai/swift_bridge/build.sh` using the selected Xcode (`DEVELOPER_DIR` if needed). No prebuilt dylib is included.
 
 ```sh
 MODEL="$MODEL" EXPORT_DIR="$RUNS/export/qwen38-27b-vq2" OUT=/path/to/coreai-builds \
   python coreai/qwen38_coreai_build.py all --ctx 8192,16384 --pctx 8192,16384
-python forge.py serve --runtime coreai --model "$MODEL" --build /path/to/coreai-builds/qwen38-27b-vq2 --ctx 16384
+python forge.py serve --runtime coreai --model "$MODEL" --build /path/to/coreai-builds/qwen38-27b-vq2 --ctx 16384 \
+  --draft /path/to/matching-drafter/dflash2_lut4_gptq.aimodel --drafter /path/to/matching-drafter
 ```
+
+A freshly quantized target needs its own matched and validated drafter/head pairing; the prepared `mix25in_mixr_lr64mix` drafter is not automatically compatible with the example export above. For the ready-made pair, use the downloaded bundle workflow instead. The drafter conversion source is `coreai/dflash2_coreai_build.py`; pin `DRAFT_EXPORT`, `HEAD_EXPORT`, `DRAFTER`, numerical settings and metadata. Read [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) before building or changing that pair.
 
 These Core AI commands remain unverified in a clean environment. Start with a single `chunk 0-3` build. The current runtime defaults to compile mode 2 and removes incompatible cache specializations for the selected package before loading; inspect this behavior before changing modes on an existing installation. The Python binding has documented long-run allocation problems; the Swift bridge was the later research solution.
 
 ## Validation before release
 
-Start with CPU tests, then one chunk, then the full model: finite outputs, relative L2 and norms (not just cosine), Core ML CPU vs ANE on the same graph, PyTorch same-weight parity, teacher-forced perplexity/KL, context transitions, and prolonged generation. Record hardware, OS/Xcode, dependencies, checkpoint/export hashes, numerical settings, placement, warm-up policy, latency distribution, memory baseline, and sample counts. Keep quantization error separate from runtime numerical error.
+Start with CPU tests, then one chunk, then the full model: finite outputs, relative L2 and norms (not just cosine), Core ML CPU vs ANE on the same graph, PyTorch same-weight parity, teacher-forced perplexity/KL, context transitions, and prolonged speculative generation with the matching drafter. Include accepted-prefix/stop/cap behavior, cache restoration and separately labeled plain diagnostics. Record hardware, OS/Xcode, dependencies, checkpoint/export hashes, numerical settings, placement, warm-up policy, latency distribution, memory baseline, and sample counts. Keep quantization error separate from runtime numerical error.

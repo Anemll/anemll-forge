@@ -52,3 +52,7 @@ Next measurements should:
 5. Repeat interleaved context measurements to distinguish attention cost from load, temperature and run-order effects; collect hardware counters where supported.
 
 This session is useful as an observed user-workload baseline. It should remain separate from isolated microbenchmarks and controlled quality/throughput comparisons in the historical notebooks.
+
+## Release scope
+
+This historical session describes speculative target-plus-drafter serving. The intended fast release retains the matching Core AI DFlash2 drafter. A plain target-only benchmark cannot reproduce these serving timings. Record the paired artifacts, acceptance, context ladder, warm-up, prefill and serving policies using [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md); no new benchmark is claimed here.

@@ -1,6 +1,6 @@
 # Quality benchmarks for the Core AI ANE release
 
-Research checked on **2026-09-29**. This is a proposed evaluation plan, not measured results. Keep the model card's KL-only status until a versioned report from the actual release bundle is available. Start with the smallest context that fits each complete prompt and output budget, using the Swift Core AI runtime.
+Research checked on **2026-09-29**. This is a proposed evaluation plan, not measured results. Keep the model card's KL-only status until a versioned report from the actual release bundle is available. Start with the smallest context that fits each complete prompt and output budget, using the Swift Core AI runtime **with the matching DFlash2 drafter enabled**. Plain target-only runs are separately labeled numerical and acceptance diagnostics.
 
 ## What KL can and cannot establish
 
@@ -103,7 +103,7 @@ Include the original pinned Qwen3.8 reference, our Core AI bundle, nearby Unslot
 
 Run Forge on ANE and competitors on their supported engines. There is no requirement to convert all comparator formats to Core AI. Save raw requests and outputs and use one evaluator to score them. Record engine numerical differences as a confounder; task quality and ANE speed are separate comparisons.
 
-Keep upstream checkpoint/tokenizer identity, rendered prompts, thinking mode, stop tokens, total output cap, context, sampling/seed, penalties and scorer fixed. Start without a drafter. For sampled tests use identical sampling parameters and sufficient repetitions; a common seed alone cannot guarantee identical random streams across engines.
+Keep upstream checkpoint/tokenizer identity, rendered prompts, thinking mode, stop tokens, total output cap, context, sampling/seed, penalties and scorer fixed. Run the ANE release with its pinned DFlash2 drafter. Record target/drafter hashes, accepted drafts per cycle, emitted tokens per verifier call and drafter/verify/context-update time. Use `--plain` only for a separately labeled matched diagnostic; its timings do not represent release serving performance. For sampled tests use identical sampling parameters and sufficient repetitions; a common seed alone cannot guarantee identical random streams across engines.
 
 Our server expects `chat_template_kwargs: {"enable_thinking": false}`; Mirai S's documented API uses a top-level `enable_thinking`. Adapters must verify rendered behavior rather than silently sending the same JSON field to incompatible engines. Set explicit temperature; do not inherit different server defaults. Use concurrency one for our single-request runtime.
 
@@ -111,6 +111,6 @@ For a thinking comparison, set our `thinking_budget: 0` to disable injected earl
 
 Report each task separately with paired score changes and confidence intervals, including reference-correct → candidate-wrong and the reverse. Do not average unrelated metrics or combine text-only results with a vendor aggregate containing vision and long-horizon agents. Do not tune the quantizer on the final test set. Record crashes, parser failures, empty answers, loops, timeouts and truncation rates alongside accuracy.
 
-Show **effective weight bytes**, full download bytes, and loaded memory separately, with common inclusion rules for embeddings, head, MTP and vision. Our historical 9.069 GiB weight estimate and approximately 13.2 GB Core AI release download have different scopes. Neither can be directly placed on a vendor's weight-only size axis without reconciliation.
+Show **effective weight bytes**, full download bytes, and loaded memory separately, with common inclusion rules for embeddings, head, MTP and vision. Our historical 9.069 GiB weight estimate and approximately 13.2 GB target-only staging inventory have different scopes. The complete speculative bundle adds the drafter and selector assets; report their download bytes and loaded memory explicitly. Neither can be directly placed on a vendor's weight-only size axis without reconciliation.
 
 Before claiming a release score, save the HF/Git commits, artifact hashes, hardware/OS/compiler, harness/dataset revisions, sample IDs, request configuration, output tokens, wall time, scorer outputs and uncertainty. The existing [validation status](VALIDATION.md) remains unchanged until these runs are executed. No new model downloads or benchmark executions were performed for this research plan.

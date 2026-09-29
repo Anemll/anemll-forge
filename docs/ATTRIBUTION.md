@@ -28,3 +28,9 @@ Copy [release/huggingface/](../release/huggingface/) into the bundle root before
 The model card uses `base_model: Qwen/Qwen3.8-27B`, `base_model_relation: quantized` and `license: apache-2.0`. It identifies the Core AI/Swift runtime and text-only scope. The upstream vision/video features, native context claims, Transformers loading examples and upstream benchmark scores are not claims about this conversion.
 
 This model-artifact license does not select a license for independently authored ANEMLL source code or clear other bundled components. Before publication, finish the source-code attribution/license review, SDK/toolchain redistribution checks, calibration/data provenance review, actual modified-file notices and artifact lineage/validation recorded in [RELEASE.md](RELEASE.md). No public upload or visibility change is performed by this preparation.
+
+## Separate DFlash2 provenance
+
+The release also derives a drafter from [ProCreations/Ternary-Bonsai-2-27B-DFlash2](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2/tree/4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b), pinned at `4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b`. The source checkpoint SHA-256 was checked against that upstream revision during private preparation. Its Apache 2.0 LICENSE and upstream NOTICE must be preserved separately under `drafter/`, alongside `DFLASH2_SOURCE.json`. Extracted selector codebooks remain derived source material; they need the same provenance and notices. This verification does not reconstruct the lineage of the compiled Core AI body or settle licensing of independently adapted source code.
+
+The historical [DFlash2 notebook](../DFLASH2_ANE_PLAN.md) also identifies reference code `dflash-07ebd93`. Preserve and audit that separate code attribution before publication. Do not infer that the Qwen target's license establishes rights for every drafter or code component. See [the release pairing guide](SPECULATIVE_DECODING.md).

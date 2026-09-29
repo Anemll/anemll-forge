@@ -53,7 +53,7 @@ class LauncherTests(unittest.TestCase):
         build = self.root / "build"
         build.mkdir()
         (build / "manifest_ctx16384_v4.json").write_text('{}')
-        cmd, env = forge.prepare(self.args("serve", "--build", str(build)))
+        cmd, env = forge.prepare(self.args("serve", "--runtime", "coreml", "--plain", "--build", str(build)))
         self.assertEqual(cmd[cmd.index("--host")+1], "127.0.0.1")
         self.assertEqual(env["EMBED_NPY"], str(self.model / ".anemll-forge/embed_tokens_fp16.npy"))
 
@@ -74,7 +74,7 @@ class LauncherTests(unittest.TestCase):
         (build / "manifest_ctx16384_v4.json").write_text('{}')
         published = self.model / "embed_tokens_fp16.npy"
         published.write_bytes(b"fixture")
-        _, env = forge.prepare(self.args("serve", "--build", str(build)))
+        _, env = forge.prepare(self.args("serve", "--runtime", "coreml", "--plain", "--build", str(build)))
         self.assertEqual(env["EMBED_NPY"], str(published))
 
     def test_coreai_rejects_contexts_outside_manifest(self):
@@ -83,8 +83,8 @@ class LauncherTests(unittest.TestCase):
         (build / "manifest.json").write_text('{"ctxs": [8192, 16384]}')
         for ctx in (2048, 12000, 32768):
             with self.subTest(ctx=ctx), self.assertRaisesRegex(ValueError, "Unsupported Core AI"):
-                forge.prepare(self.args("serve", "--runtime", "coreai", "--build", str(build), "--ctx", str(ctx)))
-        _, env = forge.prepare(self.args("serve", "--runtime", "coreai", "--build", str(build), "--ctx", "8192"))
+                forge.prepare(self.args("serve", "--runtime", "coreai", "--plain", "--build", str(build), "--ctx", str(ctx)))
+        _, env = forge.prepare(self.args("serve", "--runtime", "coreai", "--plain", "--build", str(build), "--ctx", "8192"))
         self.assertEqual(env["RUNTIME"], "coreai")
 
     def test_coreml_rejects_competing_v5_manifest(self):
@@ -93,7 +93,7 @@ class LauncherTests(unittest.TestCase):
         for v in (4, 5):
             (build / f"manifest_ctx16384_v{v}.json").write_text('{}')
         with self.assertRaisesRegex(ValueError, "competing v5"):
-            forge.prepare(self.args("serve", "--build", str(build)))
+            forge.prepare(self.args("serve", "--runtime", "coreml", "--plain", "--build", str(build)))
 
     def test_quantizer_requires_dataset_and_safe_tag(self):
         wiki = self.root / "wiki"

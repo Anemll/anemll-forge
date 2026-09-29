@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const modules=process.env.PI_MODULES;
+if (!modules) throw Error('Set PI_MODULES to the installed Pi node_modules directory');
+const {ModelConfig}=await import(pathToFileURL(modules+'/@earendil-works/pi-coding-agent/dist/core/model-config.js'));
+const {streamSimple}=await import(pathToFileURL(modules+'/@earendil-works/pi-ai/dist/api/openai-completions.js'));
+const {normalizeContext}=await import(pathToFileURL(modules+'/@earendil-works/pi-ai/dist/utils/transcript.js'));
+const {clampMaxTokensToContext}=await import(pathToFileURL(modules+'/@earendil-works/pi-ai/dist/api/simple-options.js'));
+const config=await ModelConfig.load(new URL('models.json',import.meta.url).pathname);
+assert.equal(config.getError(),undefined);
+const p=config.getProvider('ane-qwen38');
+const model={...p.models[0],provider:'ane-qwen38',api:p.api,baseUrl:p.baseUrl,compat:{...p.compat,...p.models[0].compat}};
+let captured;
+const fetch=async(url,opts)=>{
+ assert.equal(String(url),'http://127.0.0.1:8765/v1/chat/completions');
+ captured=JSON.parse(opts.body);
+ const chunks=[{choices:[{index:0,delta:{role:'assistant',reasoning_content:'Check the repository.'},finish_reason:null}]},{choices:[{index:0,delta:{tool_calls:[{index:0,id:'call_test',type:'function',function:{name:'read',arguments:'{"path":"README.md"}'}}]},finish_reason:null}]},{choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:100,completion_tokens:20,total_tokens:120}}];
+ return new Response(chunks.map(x=>'data: '+JSON.stringify(x)+'\n\n').join('')+'data: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
+};
+const context={systemPrompt:'You are a coding assistant.',messages:[{role:'user',content:'Read the README.',timestamp:0}],tools:[{name:'read',description:'Read a file',parameters:{type:'object',properties:{path:{type:'string'}},required:['path']}}]};
+let reply;
+for (const [reasoning,budget] of [['off',undefined],['low',2048],['medium',3072],['high',3072]]) {
+ reply=await streamSimple(model,normalizeContext(context),{apiKey:'local-no-auth',reasoning,fetch,maxRetries:0}).result();
+ assert.notEqual(reply.stopReason,'error',reply.errorMessage);
+ assert.equal(captured.max_tokens,4096);
+ assert.equal(captured.chat_template_kwargs.enable_thinking,reasoning!=='off');
+ assert.equal(captured.chat_template_kwargs.preserve_thinking,true);
+ assert.equal(captured.thinking_budget,budget);
+ assert.equal(captured.temperature,.6);assert.equal(captured.top_p,.95);assert.equal(captured.top_k,20);
+ assert.equal(captured.presence_penalty,0);assert.equal(captured.dry_multiplier,0);
+ assert.equal(captured.messages[0].role,'system');
+ assert.equal(reply.content.find(x=>x.type==='toolCall').arguments.path,'README.md');
+}
+const replay={...context,messages:[...context.messages,reply,{role:'toolResult',toolCallId:'call_test',toolName:'read',content:[{type:'text',text:'Example README.'}],isError:false,timestamp:1}]};
+await streamSimple(model,normalizeContext(replay),{apiKey:'local-no-auth',reasoning:'low',fetch,maxRetries:0}).result();
+assert.equal(captured.messages.find(x=>x.role==='assistant').reasoning_content,'Check the repository.');
+assert.equal(captured.messages.find(x=>x.role==='tool').tool_call_id,'call_test');
+const long={messages:[{role:'user',content:'x'.repeat(60000),timestamp:0}]};
+assert.equal(clampMaxTokensToContext(model,long,4096),1);
+console.log('PASS: Pi0.87.1 schema; off/low/medium/high request payloads; reasoning/tool replay; context clamp. All requests used mock fetch; no server contacted.');

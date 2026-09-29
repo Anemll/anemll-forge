@@ -1,23 +1,37 @@
 # Modification notice
 
-**ANEMLL has modified the original Qwen3.8-27B model weights for ANE inference.** The converted artifacts are derivatives of the Qwen Team's model, not original upstream distributions.
+**ANEMLL has modified the Qwen3.8-27B target and the paired ProCreations DFlash2 drafter for Core AI inference on the Apple Neural Engine.** Converted artifacts are derivatives of their upstream models.
 
-Source: [Qwen/Qwen3.8-27B at revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`](https://huggingface.co/Qwen/Qwen3.8-27B/tree/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0). The upstream weights carry Copyright 2026 Alibaba Cloud and the [upstream Apache-2.0 license](https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/LICENSE).
+The target source is [Qwen/Qwen3.8-27B at `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`](https://huggingface.co/Qwen/Qwen3.8-27B/tree/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0). Its weights carry Copyright 2026 Alibaba Cloud and the original Apache-2.0 license, preserved in [LICENSE](LICENSE).
 
-## Changes represented by the planned bundle
+The drafter source is [ProCreations/Ternary-Bonsai-2-27B-DFlash2 at `4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b`](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2/tree/4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b), with its original Apache-2.0 [LICENSE](drafter/LICENSE) and [NOTICE](drafter/NOTICE) copied unchanged. Its source notice credits the z-lab DFlash2 donor and Prism Bonsai training target; pinned identities remain in [drafter/DFLASH2_SOURCE.json](drafter/DFLASH2_SOURCE.json).
 
-- **Core AI `.aimodel` and optional `.aimodelc` packages:** model graph conversion, partitioning and runtime packaging for ANE inference, with quantized weights and the selected numerical implementation. Compiled packages additionally reflect a particular compiler/toolchain; record that provenance in the release metadata.
-- **`coreai/manifest.json`:** copied from the deployed research build; the historical machine-local `export` path is replaced by the portable export identifier `mix25in_mixr_lr64mix`. The staged manifest adds an ANEMLL modification notice for this metadata edit. Runtime package names and context entries are preserved.
-- **`embed_tokens_fp16.npy`:** the upstream embedding tensor converted to FP16 and packaged as a NumPy array for memory-mapped host lookup.
-- **Optional quantized export:** transformed weight representations, codebooks, indices, scales, rotation metadata, and residual factors where present. The deployed research recipe uses mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations, and rank-64 residual corrections. The inventory and actual export metadata must identify which transformations apply to each released artifact.
-- **Configuration and tokenizer assets:** intended to remain verbatim copies from the pinned upstream revision. Verify their hashes before release. If a text asset is changed, explicitly identify that change rather than describing the file as an unchanged upstream copy.
+## Target conversion and packaging
 
-The default target is text-only Core AI inference on M6 through the Swift bridge. Vision, MTP, and a speculative drafter are not included in the default bundle. Final runtime contexts, tensor inventory, export provenance, and full hardware validation remain pending.
+- **`coreai/*.aimodel`:** model graph conversion, partitioning and packaging with quantized weights and selected numerical implementations. The target recipe uses mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections. Per-artifact inventory and export metadata identify the applicable transforms.
+- **`coreai/manifest.json`:** copied from the deployed research build. The historical local export path was replaced by `mix25in_mixr_lr64mix`, with an ANEMLL modification notice. Package names and context entries were preserved.
+- **`model/embed_tokens_fp16.npy`:** the original target embedding tensor converted to FP16 and packaged as a NumPy array for host lookup.
+- **Target configuration/tokenizer assets:** copies of the pinned upstream files, retained without content changes.
+- **Optional quantized exports:** transformed weight representations, codebooks, indices, scales, rotations and residual factors, where included. These are separate reproduction artifacts rather than required runtime assets.
 
-## Recording changes in the release
+## Paired drafter conversion and packaging
 
-Retain this prominent notice alongside the original upstream license and ANEMLL's added [NOTICE](NOTICE). The release inventory must include per-file `modification_notice` metadata tying modified binary families to this explanation and identifying verbatim upstream assets.
+- **`drafter/dflash2_lut4_gptq.aimodel`:** the selected Core AI source package carries LUT4 GPTQ drafter weights, the paired mixr target head and mask-row scale 0.7. It uses the historical `q7_cal` calibration export, a five-layer drafter, a 2,048-row context ring and a block of one anchor plus seven proposals. The existing package was copied without changing its bytes; these notices identify the upstream weight transformations already represented in it.
+- **`drafter/dflash2_lut4_gptq.json`:** source numerical/entry metadata was retained. Local `export`, `target_export` and `head_export` paths were replaced by portable identifiers, and an ANEMLL modification notice was added. Target/head association is `mix25in_mixr_lr64mix`.
+- **`drafter/selector.safetensors`:** ANEMLL extracted only `candidate_selector.predecessor_codebook` and `candidate_selector.successor_codebook` from the pinned upstream BF16 checkpoint. Both tables retain their original BF16 values and shapes; raw tensor hashes were compared after serialization. This new container adds source and modification metadata and excludes all other checkpoint tensors.
+- **`drafter/config.json`:** the pinned upstream configuration was copied without modification. It preserves target feature taps 5, 19, 33, 47 and 61, selector rank 256/top-k 16 and sliding window 2,048.
+- **`drafter/LICENSE` and `drafter/NOTICE`:** unchanged upstream files. **`drafter/DFLASH2_SOURCE.json`** is an ANEMLL-added provenance record describing the source hashes, selector extraction and remaining reconstruction gaps.
 
-Where the model package format supports descriptive metadata, include the modification notice there before computing final hashes. Do not insert arbitrary text into compiled binaries or alter package contents in ways that invalidate their structure. For modified text files, include an appropriate prominent modification notice in the file where its format permits, with the corresponding inventory entry recording the change; preserve parseable configuration and tokenizer formats.
+The default release includes both Core AI target and speculative drafter. Vision and MTP remain outside this text-generation bundle. Original BF16 checkpoints are not required for prepared inference; they remain necessary for separate rebuilding workflows.
 
-These records document provenance and release preparation. They are not a claim that all licensing, attribution, redistribution, or hardware-validation work has been completed. ANEMLL Forge code licensing remains separate from the Apache-2.0 model-weight license.
+## Verification and remaining gaps
+
+The complete local drafter BF16 checkpoint was rehashed and matched the pinned upstream LFS SHA256. Configuration and source license/notice bytes were checked against upstream Git blobs. Compact selector tensor values were checked for identical raw bytes after extraction.
+
+The Core AI drafter body has not been independently reconstructed from the source checkpoint and GPTQ export. Head/target and calibration linkage are currently supported by the source sidecar/export metadata. Speculative generation, acceptance, performance and ANE placement were not rerun during packaging. These records do not establish a new benchmark or complete hardware validation.
+
+## Retaining notices
+
+Retain this prominent modification notice, root [NOTICE](NOTICE), original target [LICENSE](LICENSE), and the drafter's original [LICENSE](drafter/LICENSE)/[NOTICE](drafter/NOTICE). `release.json` records per-file hashes and modification notices, including changed binary families and unchanged upstream assets.
+
+Keep model packages structurally valid: do not insert arbitrary text into binary contents. Mark modified JSON/container metadata where supported, and retain accompanying inventory notices. ANEMLL Forge source-code licensing remains separate from the Apache-2.0 model-weight license.

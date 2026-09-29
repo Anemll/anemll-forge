@@ -4,7 +4,7 @@ Prepare, quantize, convert, and run language models on Apple's Neural Engine—a
 
 **Private release preparation. Not yet a validated public release.** The initial target is **[Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B)** by the **Qwen Team**, targeting **M6 ANE**. Original model copyright: **Alibaba Cloud**, licensed under **Apache 2.0**. ANEMLL provides an independent quantization, conversion and runtime adaptation. The source uses the `qwen3_5` architecture. See [Qwen attribution and pinned source evidence](docs/ATTRIBUTION.md).
 
-The release runtime is **Core AI with the Swift bridge**. Hugging Face will hold Core AI chunk/head packages and matching config, tokenizer and embedding assets. Core ML packages are not part of the planned release upload; Core ML source and findings remain included for conversion, experiments and learning.
+The intended fast release is **Core AI with the Swift bridge and the matching DFlash2 speculative drafter**. The complete Hugging Face bundle includes target chunk/head packages, matching config/tokenizer/embedding assets, and the drafter package, metadata, configuration and selector codebooks. Plain target-only decoding is an explicit diagnostic option. See [DFlash2 integration and correctness](docs/SPECULATIVE_DECODING.md). Core ML packages are not part of the planned release upload; Core ML source and findings remain included for conversion, experiments and learning.
 
 Planned Hugging Face repository: **`anemll/anemll-forge-qwen3.8-27B`**. The model card and license/notice files are prepared under [release/huggingface/](release/huggingface/); this repository does not create or publish the Hub model automatically.
 
@@ -12,6 +12,8 @@ This first port contains working-tree research source from `ane-vector-lut`, inc
 
 ## Start here
 
+- [DFlash2 speculative decoding: required release pairing](docs/SPECULATIVE_DECODING.md)
+- [Pi coding sessions with the local speculative server](docs/PI_CODING.md)
 - [Workflow: quantization → conversion → inference](docs/WORKFLOW.md)
 - [Quantization: basic overview and detailed implementation](docs/QUANTIZATION.md)
 - [Quality benchmark plan and low-bit comparisons](docs/BENCHMARK_PLAN.md)
@@ -36,11 +38,11 @@ python forge.py --help
 
 ## Included
 
-- **Inference:** Core ML chunk runtime, chat CLI, local HTTP server, Core AI runtime and Swift bridge, optional DFlash2 research implementation.
+- **Inference:** Core ML chunk runtime, chat CLI, local HTTP server, Core AI runtime and Swift bridge, DFlash2 speculative decoding for the intended fast release.
 - **Quantization:** scalar/vector LUTs, per-channel scaling, GPTQ, online Hadamard rotations, sensitivity planning, block reconstruction, low-rank corrections, calibration generation and KL evaluation.
 - **Conversion:** Core ML MIL graphs and Core AI conversion, including lazy DeltaNet state handling and host-managed KV caches.
 - **Learning material:** successful and failed experiments, numerical debugging, memory behavior, compiler placement, and the distinction between observations and architectural hypotheses.
 
-The local HTTP server has no authentication; the port defaults to loopback. Optional speculation requires separate drafter assets and is not enabled by the launcher.
+The local HTTP server has no authentication; the port defaults to loopback. The Core AI launcher uses the matching drafter by default and fails if the required assets are missing; `--plain` selects target-only diagnostics. A plain integrity or inference result does not validate the complete release.
 
 The Qwen-derived model artifacts carry the upstream Apache 2.0 license. A license for independently authored ANEMLL source code has not been selected yet. See [licensing and release gates](docs/RELEASE.md) before distribution.

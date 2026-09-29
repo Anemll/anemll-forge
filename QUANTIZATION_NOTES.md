@@ -1,5 +1,7 @@
 > Historical research notes imported on 2026-09-29. Paths were generalized; results were not rerun. Later sections may supersede earlier findings. See the current [release workflow](docs/WORKFLOW.md).
 
+> Release context — 2026-09-29: the target-quality and repetition conclusions below describe their original experiments, not a blanket attribution of all loops. Later work found serving-policy and wrong-build confounders; see [session lessons](docs/SESSION_LESSONS.md). The intended fast release includes the matching Core AI DFlash2 drafter. Algorithmic sampling correctness and CPU tests do not establish compiled-runtime parity or task quality. Use [the current speculative-decoding guide](docs/SPECULATIVE_DECODING.md) for the release contract; historical commands and results below are preserved.
+
 # Qwen3.8-27B on the ANE: quantization approach, layout, experiments, findings, dead ends
 
 Living document. Every experiment lists the command that reproduces it. Core AI / memory topics live in

@@ -72,7 +72,7 @@ class ReleaseTests(unittest.TestCase):
     def manifest(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(hf.make_manifest(argparse.Namespace(
-                bundle=self.root, model_id="example/model", model_revision="f" * 40)), 0)
+                bundle=self.root, model_id="example/model", model_revision="f" * 40, plain=True)), 0)
         return hf.load_manifest(self.root)
 
     def test_default_repository(self):
@@ -105,7 +105,7 @@ class ReleaseTests(unittest.TestCase):
         p.write_bytes(b"X" * p.stat().st_size)
         for runtime in ("coreai", "coreml"):
             with self.subTest(runtime=runtime), self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
-                hf.verify(self.root, m, runtime)
+                hf.verify(self.root, m, runtime, plain=True)
 
     def test_documentation_symlink_rejected(self):
         p = self.root / "LICENSE"
@@ -134,7 +134,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(set(m["runtimes"]), {"coreai", "coreml"})
         self.assertEqual(json.loads((self.root / "release.json").read_text()), m)
         for runtime in m["runtimes"]:
-            result = hf.verify(self.root, m, runtime)
+            result = hf.verify(self.root, m, runtime, plain=True)
             selected = [f for f in m["files"] if f["component"] in ("documentation", "model", runtime)]
             self.assertEqual(result["verified_files"], len(selected))
             self.assertEqual(result["verified_bytes"], sum(f["bytes"] for f in selected))
@@ -143,7 +143,7 @@ class ReleaseTests(unittest.TestCase):
         m = self.manifest()
         (self.root / "coreai/head.aimodel/data.bin").write_bytes(b"bad! head")
         with self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
-            hf.verify(self.root, m, "coreai")
+            hf.verify(self.root, m, "coreai", plain=True)
 
     def test_missing_runtime_asset_rejected_before_manifest_written(self):
         shutil.rmtree(self.root / "coreai/head.aimodel")
@@ -170,13 +170,13 @@ class ReleaseTests(unittest.TestCase):
         extra.mkdir()
         (extra / "data.bin").write_bytes(b"unreviewed compiled variant")
         with self.assertRaisesRegex(ValueError, "not inventoried"):
-            hf.verify(self.root, m, "coreai")
+            hf.verify(self.root, m, "coreai", plain=True)
         # Regenerating the release binds both source and compiled variants to hashes.
         m = self.manifest()
-        hf.verify(self.root, m, "coreai")
+        hf.verify(self.root, m, "coreai", plain=True)
         (extra / "data.bin").write_bytes(b"changed compiled variant")
         with self.assertRaisesRegex(ValueError, "size mismatch"):
-            hf.verify(self.root, m, "coreai")
+            hf.verify(self.root, m, "coreai", plain=True)
 
     def test_explicit_compiled_reference_must_be_relative_and_present(self):
         p = self.root / "coreai/manifest.json"
@@ -258,7 +258,7 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(runtime=runtime):
                 hub, api, sha = self.mock_hub()
                 output = self.base / (runtime + "-download")
-                args = argparse.Namespace(repo="owner/release", revision="v1", runtime=runtime, include_export=include_export, output=output)
+                args = argparse.Namespace(repo="owner/release", revision="v1", runtime=runtime, include_export=include_export, output=output, plain=True)
                 with patch.dict(sys.modules, {"huggingface_hub": hub}), contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(hf.download(args), 0)
                 api.repo_info.assert_called_once_with(repo_id="owner/release", repo_type="model", revision="v1")
@@ -275,13 +275,13 @@ class ReleaseTests(unittest.TestCase):
         shutil.rmtree(self.root / "export")
         self.manifest()
         hub, _, _ = self.mock_hub()
-        args = argparse.Namespace(repo="owner/release", revision="main", runtime="coreai", include_export=True, output=self.base / "download")
+        args = argparse.Namespace(repo="owner/release", revision="main", runtime="coreai", include_export=True, output=self.base / "download", plain=True)
         with patch.dict(sys.modules, {"huggingface_hub": hub}), self.assertRaisesRegex(ValueError, "no optional export"):
             hf.download(args)
         hub.snapshot_download.assert_not_called()
 
     def quick_args(self, report=None):
-        return argparse.Namespace(command="quick-test", bundle=self.root, runtime="coreai", ctx=None, check_only=True, prompt="Example", tokens=4, report=report)
+        return argparse.Namespace(command="quick-test", bundle=self.root, runtime="coreai", ctx=None, check_only=True, prompt="Example", tokens=4, report=report, plain=True)
 
     def test_check_only_never_calls_inference(self):
         self.manifest()

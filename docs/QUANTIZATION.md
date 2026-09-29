@@ -40,7 +40,7 @@ The recovered [mixed-bit plan](../configs/quantization/mix25in_mixr.json) and lo
 
 ### What a user downloads
 
-For inference, download the **Core AI packages**, matching configuration/tokenizer, and prepared FP16 embeddings. Original BF16 checkpoint shards and quantized `.safetensors` exports are not required to run this prepared bundle. The original weights and export are needed for rebuilding or doing new quantization experiments. No Core ML model upload is required for this Core AI release. See [download and quick test](HUGGING_FACE.md).
+For release inference, download the **Core AI target and matching DFlash2 drafter packages**, matching configuration/tokenizer, prepared FP16 embeddings, and drafter configuration/selector codebooks. Original BF16 checkpoint shards and quantized `.safetensors` exports are not required to run this prepared bundle. The original weights and export are needed for rebuilding or doing new quantization experiments. No Core ML model upload is required for this Core AI release. See [download and quick test](HUGGING_FACE.md).
 
 ## Detailed implementation
 
@@ -164,7 +164,7 @@ The Core AI [builder](../coreai/qwen38_coreai_build.py) mirrors the graph in FP1
 
 This means the host inference loop does not unpack every LUT weight on every token. The compressed representation is part of the model package consumed by the compiler/runtime. It still does not establish the physical lookup circuitry, dequantization placement, accumulator precision, or a universal native two-bit compute path. Placement reports and same-weight tensor comparisons are needed for the graph actually deployed.
 
-The prepared manifest has **16 four-layer chunks plus a head**, with verify/decode width `T=8` and prefill width `T=64`. It advertises context entries 8K, 16K, 24K, 32K, 48K and 64K; the largest KV capacity is 65,472 rows. Entries within a Core AI package are intended to share weights. The default HF bundle does not include a speculative drafter, and `T=8` does not guarantee eight emitted tokens per call.
+The prepared manifest has **16 four-layer chunks plus a head**, with verify/decode width `T=8` and prefill width `T=64`. It advertises context entries 8K, 16K, 24K, 32K, 48K and 64K; the largest KV capacity is 65,472 rows. Entries within a Core AI package are intended to share weights. The intended release includes the matching DFlash2 drafter: seven proposed tokens plus an anchor are verified together. Acceptance determines useful output per cycle; `T=8` does not guarantee eight emitted tokens per call. Target-only decoding remains a diagnostic. See [pairing, acceptance and runtime behavior](SPECULATIVE_DECODING.md).
 
 Core ML conversion code remains an experimental/reference route. Its LUT construction uses `constexpr_lut_to_dense` and scaling operations, but Core ML packages are not part of the planned runtime upload. Core ML graph behavior must not be automatically attributed to Core AI lowering.
 
