@@ -4,12 +4,14 @@ Prepare, quantize, convert, and run language models on Apple's Neural Engine—a
 
 **Private release preparation. Not yet a validated public release.** The initial target is the research checkpoint named **Qwen3.8-27B**, targeting **M6 ANE**. The source uses the `qwen3_5` architecture. The exact upstream model identifier, revision, redistribution terms, and supported public toolchain still need to be recorded before publication.
 
+The release runtime is **Core AI with the Swift bridge**. Hugging Face will hold Core AI chunk/head packages and matching config, tokenizer and embedding assets. Core ML packages are not part of the planned release upload; Core ML source and findings remain included for conversion, experiments and learning.
+
 This first port contains working-tree research source from `ane-vector-lut`, including its previously untracked Qwen and Core AI work. It includes no model weights, compiled binaries, private calibration sessions, or generation logs. Historical performance and quality results are retained as reported measurements; they have not been reproduced by this port.
 
 ## Start here
 
 - [Workflow: quantization → conversion → inference](docs/WORKFLOW.md)
-- [Hugging Face bundle staging, download and smoke test](docs/HUGGING_FACE.md)
+- [Core AI release bundle: Hugging Face upload, download and smoke test](docs/HUGGING_FACE.md)
 - [Techniques, findings, and limitations](docs/TECHNIQUES.md)
 - [Lessons recovered from the research session](docs/SESSION_LESSONS.md)
 - [Experiment navigation and reproduction gaps](docs/EXPERIMENTS.md)

@@ -2,6 +2,8 @@
 
 Keep the GitHub repository private until the owner explicitly approves a visibility change. This source port does not publish a release or model assets.
 
+The planned M6 release uses Core AI with the Swift bridge. The HF upload contains Core AI chunk/head packages, matching config/tokenizer assets and the prepared fp16 embedding table; a reviewed quantized export may be included for reproduction. Core ML model packages are not required. Preserve the Core ML code and findings as conversion/research material.
+
 ## First port scope
 
 Imported inference, quantization, conversion, reference and experiment source, Swift bridge source, and edited historical documentation. Added an explicit-path launcher and a current Core ML workflow. Defaults now use the documented tanh MLP SiLU fix and loopback serving. The calibration session importer requires an explicit glob; no session contents were imported. The bridge build script now propagates compiler failures and uses the selected Xcode. Removed a stale sklearn module stub from the Core AI builder.
