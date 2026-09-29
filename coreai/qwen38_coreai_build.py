@@ -1,0 +1,647 @@
+"""Core AI build of the Qwen3.8-27B target (export full_mix25_mixer4_head4): one .aimodel per chunk whose entry points
+share ONE weight copy on the ANE (Core ML multifunction models wire a copy per function):
+    v8_<ctx>k   8 rows (decode / DFlash2 verify), lazy-commit DeltaNet, KV history of <ctx> positions
+    p64_<ctx>k  64 rows (prefill: all rows committed, padding masked by `valid`)
+plus head.aimodel (final norm + LUT4 lm_head, 8 rows). A torch mirror of qwen38_ane_chunk.py (v4 form) with the
+Core AI compiler fixes (COREAI_PORT_NOTES.md): forward substitution instead of the doubling inverse, scale-free
+RMSNorm, overflow-safe softplus, per-channel scales as a mul after the conv, exact exported LUT / indices injected
+before optimize(). Weights come straight from the checkpoint + export (qwen38_ane_model.Checkpoint / layer_quant).
+
+    .venv/bin/python qwen38_coreai_build.py chunk 0-3 [--ctx 2048,8192,16384] [--pctx 2048] [--name NAME]
+    .venv/bin/python qwen38_coreai_build.py head
+    .venv/bin/python qwen38_coreai_build.py all  [--plan 0-3,4-7,...] [--ctx ...] [--pctx ...]
+Env: EXPORT_DIR (default ~/Models/vq27b/export/full_mix25_mixer4_head4), OUT (default ~/Models/vq27b/coreai);
+SILU, MLP_SILU (tanh | native), GDN_SQ, GDN_SV, MLP_DS_TABLE: ANE fp16 numerics fixes (see silu()); DBG_O=1 debug outputs."""
+from __future__ import annotations
+
+import argparse
+import gc
+import hashlib
+import json
+import os
+import shutil
+import sys
+import time
+import types
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"  # ane-vector-lut/scripts
+# KMeans is imported lazily by qwen3_lut_common; no sklearn module stubs.
+sys.path.insert(0, str(SCRIPTS))
+os.environ.setdefault("EXPORT_DIR", os.path.expanduser("~/Models/vq27b/export/full_mix25_mixer4_head4"))
+import qwen38_ane_model as M  # noqa: E402
+
+OUT = Path(os.path.expanduser(os.environ.get("OUT", "~/Models/vq27b/coreai"))) / M.EXPORT_DIR.name
+CFG = M.cfg()
+P, C_SUB = 8, 8                                    # pending rows (lazy commit), prefill sub-chunk
+TPS = [int(x) for x in os.environ.get("TPS", "64").split(",")]  # prefill entry sizes (rows)
+ATT_BLOCK = int(os.environ.get("ATT_BLOCK", "16384"))  # history slice for entries above it (32K / 64K fail ANEC)
+TAPS = M.TAPS
+nk, nv = CFG["linear_num_key_heads"], CFG["linear_num_value_heads"]
+dk, dv = CFG["linear_key_head_dim"], CFG["linear_value_head_dim"]
+kd, vd = nk * dk, nv * dv
+cdim = 2 * kd + vd
+nh, nkv, hd, hid = CFG["num_attention_heads"], CFG["num_key_value_heads"], CFG["head_dim"], CFG["hidden_size"]
+grp, rot = nh // nkv, int(hd * CFG["rope_parameters"]["partial_rotary_factor"])
+EPS = CFG["rms_norm_eps"]
+SMALL = ("input_layernorm.weight", "post_attention_layernorm.weight", "linear_attn.conv1d.weight",
+         "linear_attn.A_log", "linear_attn.dt_bias", "linear_attn.in_proj_a.weight", "linear_attn.in_proj_b.weight",
+         "linear_attn.norm.weight", "self_attn.q_norm.weight", "self_attn.k_norm.weight")
+KNOWN_LUTS: dict[str, tuple[np.ndarray, np.ndarray]] = {}   # sha1(fp16 dense weight) -> (lut, idx)
+
+
+def wkey(a: np.ndarray) -> str:
+    """Content key of a weight (shape-free: the program hands conv weights over as (Cout, Cin, 1, 1))."""
+    a = np.ascontiguousarray(a, np.float16)
+    return f"{a.size}:{hashlib.sha1(a.data).hexdigest()}"
+
+
+# ---- weights -----------------------------------------------------------------------------------------------------
+def layer_arrays(ck, i: int) -> dict:
+    """The layer's weights exactly as the v4 build consumes them (checkpoint small tensors + export matrices)."""
+    w = ck.layer(i)
+    q = M.layer_quant(ck, i, w)
+    arrs = {f"{i}/{k}": w[k].float().numpy() for k in SMALL if k in w}
+    for k, v in q.items():
+        if k == "mlp.rotation":
+            arrs[f"{i}/mlp.rotation"] = np.array(v, np.int64)
+            continue
+        lr = None
+        if isinstance(v[0], str) and v[0] == "int8":
+            arrs[f"{i}/{k}/int8"], arrs[f"{i}/{k}/scale"] = v[1], np.asarray(v[2], np.float16)
+            lr = v[3] if len(v) > 3 else None
+        elif isinstance(v[0], str) and v[0] == "dense":
+            arrs[f"{i}/{k}/dense"] = np.asarray(v[1], np.float16)
+        else:
+            lut, idx, s = v[:3]
+            arrs[f"{i}/{k}/lut"], arrs[f"{i}/{k}/idx"] = np.asarray(lut, np.float16), np.asarray(idx, np.uint8)
+            if s is not None:
+                arrs[f"{i}/{k}/scale"] = np.asarray(s, np.float16).reshape(-1)
+            lr = v[4] if len(v) > 4 else None
+        if lr is not None:  # trained low-rank factors a (Cout, r), b (r, Cin), in the conv input's basis
+            arrs[f"{i}/{k}/lr_a"], arrs[f"{i}/{k}/lr_b"] = np.asarray(lr[0], np.float16), np.asarray(lr[1], np.float16)
+    return arrs
+
+
+class QConv(nn.Module):
+    """1x1 conv with an exported weight: LUT (dense lut[idx], registered for exact palettization) + per-channel scale as
+    a mul after the conv, int8 (dequantized to fp16) or dense."""
+
+    def __init__(self, W: dict, key: str) -> None:
+        super().__init__()
+        self.register_buffer("scale", None)
+        if f"{key}/lut" in W:
+            lut, idx = W[f"{key}/lut"], W[f"{key}/idx"]
+            cd = lut.shape[1]
+            w = lut[idx].transpose(0, 2, 1).reshape(idx.shape[0] * cd, idx.shape[1]).astype(np.float16)
+            KNOWN_LUTS[wkey(w)] = (lut, idx)
+            if f"{key}/scale" in W:
+                self.register_buffer("scale", torch.from_numpy(W[f"{key}/scale"].astype(np.float16)).view(1, -1, 1, 1))
+        elif f"{key}/int8" in W:
+            w = (W[f"{key}/int8"].astype(np.float32) * W[f"{key}/scale"].astype(np.float32)[:, None]).astype(np.float16)
+        else:
+            w = W[f"{key}/dense"].astype(np.float16)
+        self.conv = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
+        self.conv.weight = nn.Parameter(torch.from_numpy(w).view(w.shape[0], w.shape[1], 1, 1), requires_grad=False)
+        self.lr_b = self.lr_a = None
+        if f"{key}/lr_a" in W:  # + a @ (b @ x): fp16 low-rank error correction (two 1x1 convs, not palettized)
+            a, b = W[f"{key}/lr_a"].astype(np.float16), W[f"{key}/lr_b"].astype(np.float16)
+            self.lr_b = nn.Conv2d(b.shape[1], b.shape[0], 1, bias=False)
+            self.lr_b.weight = nn.Parameter(torch.from_numpy(b.copy()).view(b.shape[0], b.shape[1], 1, 1), requires_grad=False)
+            self.lr_a = nn.Conv2d(a.shape[1], a.shape[0], 1, bias=False)
+            self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
+
+    def forward(self, x):
+        y = self.conv(x)
+        y = y if self.scale is None else y * self.scale
+        return y if self.lr_a is None else y + self.lr_a(self.lr_b(x))
+
+
+class Hadamard(nn.Module):
+    """x (1, n, 1, T) -> x M, M = blockdiag(diag(signs) H_1024) / 32 (the export's online rotation, same seeds)."""
+
+    def __init__(self, n: int, seed: int, block: int = 1024) -> None:
+        super().__init__()
+        from scipy.linalg import hadamard
+        h = hadamard(block)
+        signs = np.random.default_rng(seed).choice([-1.0, 1.0], n)
+        wt = np.concatenate([(signs[b * block:(b + 1) * block, None] * h).T for b in range(n // block)])
+        self.conv = nn.Conv2d(n, n, 1, groups=n // block, bias=False)
+        self.conv.weight = nn.Parameter(torch.from_numpy((wt / np.sqrt(block)).astype(np.float16)).view(n, block, 1, 1),
+                                        requires_grad=False)
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+def rms_hidden(x, w_plus):
+    """Scale-free RMSNorm over channels: xs = x / max|x| keeps the squares in [0, 1] (tiny layer-0 embeddings made
+    Core AI's lowering of the /64-prescaled form mis-normalize; massive activations overflow the plain form)."""
+    m = x.abs().amax(1, keepdim=True).clamp_min(1e-3)
+    xs = x / m
+    return xs * torch.rsqrt((xs * xs).mean(1, keepdim=True) + EPS / (m * m)) * w_plus
+
+
+def rms_last(x, w, eps=EPS):
+    return x * torch.rsqrt((x * x).mean(-1, keepdim=True) + eps) * w
+
+
+def softplus(x):  # the ANE's fp16 softplus returns 0 above ~11 (exp overflow)
+    return F.relu(x) + torch.log(1 + torch.exp(-torch.abs(x)))
+
+
+# ANE fp16 DeltaNet / MLP numerics (ane-vector-lut/ANE_DELTANET_NUMERICS.md), same env switches as qwen38_ane_chunk.py.
+# SILU: the ANE's native silu has ~1e-3 ABSOLUTE error near 0 and >99% of the DeltaNet conv outputs lie in [-0.5, 0.5]
+#   (12% error on q / k / v); "tanh" (default) = 0.5 x (1 + tanh(x / 2)) for the conv and the gate silu(z), "native" =
+#   F.silu. MLP_SILU: the same for the MLP gate (default tanh here; 5-6% error on silu(gate) * up with native).
+# GDN_SQ / GDN_SV: q . S is fp16-subnormal (median 4e-5) and the ANE flushes it; q is scaled by GDN_SQ and v (hence u,
+#   the pending rows and the recurrent state) by GDN_SV, and the gated RMSNorm absorbs it exactly with
+#   eps * (GDN_SQ * GDN_SV)^2. The state is host-owned I/O starting at 0, so the host code does not change.
+# MLP_DS_TABLE=<json {"ds": {layer: scale}}> (else MLP_DS): the down projection's input is scaled by ds and its output
+#   by 1 / ds. Core ML needs it (per-channel scale folded into the weight -> fp16-subnormal products); here the scale
+#   is a mul after the conv (|LUT| ~0.9), and ds = 64 changed nothing measurable at layers 9 / 11: leave it unset.
+SILU, MLP_SILU = os.environ.get("SILU", "tanh"), os.environ.get("MLP_SILU", "tanh")
+GDN_SQ, GDN_SV = float(os.environ.get("GDN_SQ", "16")), float(os.environ.get("GDN_SV", "64"))
+MLP_DS = float(os.environ.get("MLP_DS", "1"))
+MLP_DS_TABLE = json.loads(Path(os.path.expanduser(os.environ["MLP_DS_TABLE"])).read_text())["ds"] \
+    if os.environ.get("MLP_DS_TABLE") else None
+DBG_O = os.environ.get("DBG_O") == "1"   # debug: every layer also outputs the tensor entering out_proj / o_proj (o<j>_dbg)
+_DBG: list = []
+
+
+def silu(x, mode: str = SILU):
+    if mode == "native":
+        return F.silu(x)
+    half = x * 0.5
+    return half * (1 + torch.tanh(half))
+
+
+def tri(n: int, strict: bool):
+    i, j = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    return torch.from_numpy(((i > j) if strict else (i >= j)).astype(np.float16))
+
+
+def fwd_sub(n, rhs, rows: int):
+    """Solve (I + N) X = rhs for strictly lower-triangular N over the last-but-one axis (rows), row by row (the
+    doubling-inverse chain of computed matmuls keeps MPSGraph off the ANE)."""
+    xs = [rhs[..., 0:1, :]]
+    for t in range(1, rows):
+        xs.append(rhs[..., t:t + 1, :] - (n[..., t, 0:t].unsqueeze(-1) * torch.cat(xs, -2)).sum(-2, keepdim=True))
+    return torch.cat(xs, -2)
+
+
+# ---- layers ------------------------------------------------------------------------------------------------------
+class GDNW(nn.Module):
+    def __init__(self, W: dict, i: int) -> None:
+        super().__init__()
+        p = f"{i}/linear_attn."
+        self.qkv, self.z, self.out = QConv(W, p + "in_proj_qkv.weight"), QConv(W, p + "in_proj_z.weight"), QConv(W, p + "out_proj.weight")
+        self.a = QConv({f"{p}in_proj_a.weight/dense": W[p + "in_proj_a.weight"]}, p + "in_proj_a.weight")
+        self.b = QConv({f"{p}in_proj_b.weight/dense": W[p + "in_proj_b.weight"]}, p + "in_proj_b.weight")
+        self.register_buffer("cw", torch.from_numpy(W[p + "conv1d.weight"][:, 0].T.astype(np.float16).copy()))
+        self.register_buffer("neg_a", torch.from_numpy((-np.exp(W[p + "A_log"])).reshape(nv, 1, 1).astype(np.float16)))
+        self.register_buffer("dt", torch.from_numpy(W[p + "dt_bias"].reshape(nv, 1, 1).astype(np.float16)))
+        self.register_buffer("normw", torch.from_numpy(W[p + "norm.weight"].astype(np.float16)))
+
+    def proj(self, h, T: int):
+        qkv = self.qkv(h).reshape(cdim, T)
+        z = self.z(h).reshape(nv, dv, T).permute(0, 2, 1)
+        return qkv, z, self.b(h).reshape(nv, T, 1), self.a(h).reshape(nv, T, 1)
+
+    def qkv_heads(self, rows, T: int):
+        conv = rows[0:T] * self.cw[0:1] + rows[1:T + 1] * self.cw[1:2] + rows[2:T + 2] * self.cw[2:3] + rows[3:T + 3] * self.cw[3:4]
+        conv = silu(conv).transpose(0, 1)
+        qq, kk, vv = conv[:kd], conv[kd:2 * kd], conv[2 * kd:]
+
+        def heads(t):
+            t = t.reshape(nk, dk, T).permute(0, 2, 1)
+            return t.reshape(nk, 1, T, dk).repeat(1, nv // nk, 1, 1).reshape(nv, T, dk)
+
+        def l2n(t, s):
+            return t * torch.rsqrt((t * t).sum(-1, keepdim=True) + 1e-6) * s
+        vh = vv.reshape(nv, dv, T).permute(0, 2, 1)
+        vh = vh * GDN_SV if GDN_SV != 1 else vh    # q . S out of fp16 subnormals (see GDN_SQ / GDN_SV)
+        return l2n(heads(qq), dk ** -0.5 * GDN_SQ), l2n(heads(kk), 1.0), vh
+
+    def commit_pending(self, rec, pend, commit, commit_last):
+        kp, up, wkp = pend[:, 0:P, 0:dk], pend[:, P:2 * P, 0:dv], pend[:, 2 * P:3 * P, 0:dk]
+        cum_p = pend[:, 3 * P:3 * P + 1, 0:P].reshape(nv, P, 1)
+        total = (cum_p * commit_last).sum(1, keepdim=True)
+        kd_ = kp * commit * torch.exp(torch.clamp(total - cum_p, max=0))
+        return rec * torch.exp(total) + kd_.transpose(1, 2) @ (up - wkp @ rec)
+
+    def finish(self, o, z, T: int):
+        # o = q . S carries the GDN_SQ * GDN_SV scale: eps * scale^2 makes the gated RMSNorm exactly the unscaled one
+        o = rms_last(o, self.normw, EPS * (GDN_SQ * GDN_SV) ** 2) * silu(z)
+        o = o.permute(0, 2, 1).reshape(1, vd, 1, T)
+        if DBG_O:
+            _DBG.append(o)
+        return self.out(o)
+
+    def verify(self, h, conv_rows, conv_sel, rec, pend, commit, commit_last, T: int):
+        """T = P rows, lazy commit: returns (y, conv rows (T + 3), committed state S', this call's pending rows)."""
+        qkv, z, b, a = self.proj(h, T)
+        rows = torch.cat([conv_sel @ conv_rows, qkv.transpose(0, 1)], 0)                  # (T + 3, cdim)
+        qh, kh, vh = self.qkv_heads(rows, T)
+        beta, g = torch.sigmoid(b), softplus(a + self.dt) * self.neg_a
+        s1 = self.commit_pending(rec, pend, commit, commit_last)
+        l_inc, l_str = tri(T, False), tri(T, True)
+        cum = (g.reshape(nv, 1, T) @ l_inc.T).reshape(nv, T, 1)
+        pair = torch.exp(torch.clamp(cum - cum.reshape(nv, 1, T), max=0)) * l_inc
+        kb, vb = kh * beta, vh * beta
+        n = (kb @ kh.transpose(1, 2)) * (pair * l_str)
+        x = fwd_sub(n, torch.cat([vb, kb * torch.exp(cum)], -1), T)
+        u, wk = x[..., :dv], x[..., dv:]
+        crow = torch.cat([cum.reshape(nv, 1, T), torch.zeros(nv, 1, dv - T, dtype=cum.dtype)], 2)
+        pend_out = torch.cat([kh, u, wk, crow], 1)
+        vn = u - wk @ s1
+        o = (qh * torch.exp(cum)) @ s1 + ((qh @ kh.transpose(1, 2)) * pair) @ vn
+        return self.finish(o, z, T), rows, s1, pend_out
+
+    def prefill(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T: int):
+        """T > P rows, all committed (padding rows: valid = 0 -> no state change). Returns (y, conv rows in the P-row
+        layout (the 3 rows ending at the last valid token, then zeros), state, zero pending rows)."""
+        qkv, z, b, a = self.proj(h, T)
+        rows = torch.cat([conv_sel @ conv_rows, qkv.transpose(0, 1)], 0)                  # (T + 3, cdim)
+        qh, kh, vh = self.qkv_heads(rows, T)
+        v1 = valid.reshape(1, T, 1)
+        beta, g = torch.sigmoid(b) * v1, softplus(a + self.dt) * self.neg_a * v1
+        s = self.commit_pending(rec, pend, commit, commit_last)
+        NB, C = T // C_SUB, C_SUB
+        l_inc, l_str = tri(C, False), tri(C, True)
+        q4, k4, v4 = qh.reshape(nv, NB, C, dk), kh.reshape(nv, NB, C, dk), vh.reshape(nv, NB, C, dv)
+        b4, g4 = beta.reshape(nv, NB, C, 1), g.reshape(nv, NB, C, 1)
+        cum = (g4.reshape(nv, NB, 1, C) @ l_inc.T).reshape(nv, NB, C, 1)                   # within-sub-chunk cumsum
+        pair = torch.exp(torch.clamp(cum - cum.reshape(nv, NB, 1, C), max=0)) * l_inc
+        kb, vb = k4 * b4, v4 * b4
+        n = (kb @ k4.transpose(-1, -2)) * (pair * l_str)
+        x = fwd_sub(n, torch.cat([vb, kb * torch.exp(cum)], -1), C)                         # all sub-chunks at once
+        u, wk = x[..., :dv], x[..., dv:]
+        total = cum[:, :, C - 1:C, :]                                                       # (nv, NB, 1, 1)
+        qd, kdc = q4 * torch.exp(cum), k4 * torch.exp(total - cum)
+        intra = (q4 @ k4.transpose(-1, -2)) * pair
+        outs = []
+        for bi in range(NB):
+            vn = u[:, bi] - wk[:, bi] @ s
+            outs.append(qd[:, bi] @ s + intra[:, bi] @ vn)
+            s = s * torch.exp(total[:, bi]) + kdc[:, bi].transpose(1, 2) @ vn
+        conv_out = torch.cat([conv_sel_out @ rows, torch.zeros(P, cdim, dtype=rows.dtype)], 0)  # (P + 3, cdim)
+        return self.finish(torch.cat(outs, 1), z, T), conv_out, s, pend * 0
+
+
+class AttnW(nn.Module):
+    def __init__(self, W: dict, i: int) -> None:
+        super().__init__()
+        p = f"{i}/self_attn."
+        self.q, self.k, self.v, self.o = (QConv(W, p + f"{m}_proj.weight") for m in "qkvo")
+        self.register_buffer("qn", torch.from_numpy((1 + W[p + "q_norm.weight"]).astype(np.float16)))
+        self.register_buffer("kn", torch.from_numpy((1 + W[p + "k_norm.weight"]).astype(np.float16)))
+
+    def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int):
+        def tmajor(x, c):
+            return x.reshape(c, T).transpose(0, 1)
+        qg = tmajor(self.q(h), 2 * nh * hd).reshape(T, nh, 2 * hd)
+        qh, gate = rms_last(qg[:, :, :hd], self.qn), qg[:, :, hd:].reshape(T, nh * hd)
+        kh = rms_last(tmajor(self.k(h), nkv * hd).reshape(T, nkv, hd), self.kn)
+        vh = tmajor(self.v(h), nkv * hd).reshape(T, nkv, hd)
+        c3, s3 = cos.reshape(T, 1, rot), sin.reshape(T, 1, rot)
+
+        def rope(t):
+            r, rest = t[..., :rot], t[..., rot:]
+            return torch.cat([r * c3 + torch.cat([-r[..., rot // 2:], r[..., :rot // 2]], -1) * s3, rest], -1)
+        qh = rope(qh)
+        kt, vt = rope(kh).permute(1, 0, 2), vh.permute(1, 0, 2)                              # (nkv, T, hd)
+        qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
+        causal = (1 - tri(T, False)) * -1e4
+        sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
+        if ctx <= ATT_BLOCK:
+            sc_h = ((qg4 @ k_st.transpose(1, 2)) * hd ** -0.5) + mask.reshape(1, 1, ctx)
+            pr = torch.softmax(torch.cat([sc_h, sc_b], -1), -1)
+            o = pr[:, :, :ctx] @ v_st + pr[:, :, ctx:] @ vt
+        else:
+            # history in ATT_BLOCK slices (ANEC fails on the 32K / 64K single-softmax graph): one global max over all
+            # blocks, then exp(s - m) per block - exactly softmax over [history | block], no tensor wider than a block
+            edges = list(range(0, ctx, ATT_BLOCK)) + [ctx]
+            spans = list(zip(edges[:-1], edges[1:]))
+            scs = [((qg4 @ k_st[:, a:b].transpose(1, 2)) * hd ** -0.5) + mask[:, a:b].reshape(1, 1, b - a) for a, b in spans]
+            m = sc_b.amax(-1, keepdim=True)
+            for s_ in scs:
+                m = torch.maximum(m, s_.amax(-1, keepdim=True))
+            e_b = torch.exp(sc_b - m)
+            den, num = e_b.sum(-1, keepdim=True), e_b @ vt
+            for s_, (a, b) in zip(scs, spans):
+                e_ = torch.exp(s_ - m)
+                den = den + e_.sum(-1, keepdim=True)
+                num = num + e_ @ v_st[:, a:b]
+            o = num / den
+        o = o.reshape(nkv, grp, T, hd).permute(2, 0, 1, 3).reshape(T, nh * hd) * torch.sigmoid(gate)
+        o = o.transpose(0, 1).reshape(1, nh * hd, 1, T)
+        if DBG_O:
+            _DBG.append(o)
+        return self.o(o), kt, vt
+
+
+class LayerW(nn.Module):
+    def __init__(self, W: dict, i: int) -> None:
+        super().__init__()
+        self.i, self.kind = i, CFG["layer_types"][i]
+        self.mix = GDNW(W, i) if self.kind == "linear_attention" else AttnW(W, i)
+        self.register_buffer("ln1", torch.from_numpy((1 + W[f"{i}/input_layernorm.weight"]).reshape(1, -1, 1, 1).astype(np.float16)))
+        self.register_buffer("ln2", torch.from_numpy((1 + W[f"{i}/post_attention_layernorm.weight"]).reshape(1, -1, 1, 1).astype(np.float16)))
+        self.gate, self.up, self.down = (QConv(W, f"{i}/mlp.{m}_proj.weight") for m in ("gate", "up", "down"))
+        seeds = W.get(f"{i}/mlp.rotation")
+        self.rin = Hadamard(hid, int(seeds[0])) if seeds is not None else None
+        self.rmid = Hadamard(CFG["intermediate_size"], int(seeds[1])) if seeds is not None else None
+        self.ds = float(MLP_DS_TABLE[str(i)]) if MLP_DS_TABLE is not None else MLP_DS
+
+    def mlp(self, x):
+        h = rms_hidden(x, self.ln2)
+        h = self.rin(h) if self.rin is not None else h
+        a = silu(self.gate(h), MLP_SILU) * self.up(h)
+        a = self.rmid(a) if self.rmid is not None else a
+        if self.ds != 1:  # keep the down projection's products out of fp16 subnormals (see MLP_DS_TABLE)
+            return x + self.down(a * self.ds) * (1 / self.ds)
+        return x + self.down(a)
+
+
+ANE_MAX_DIM = 65536
+
+
+def kv_len(ctx: int, T: int) -> int:
+    """KV history rows of every entry at context ctx: the attention concatenates [history | block] along one axis,
+    which the ANE caps at 65536 (64K + 8 failed ANEC for the whole package). The runtime binds the verify and prefill
+    entries of a context to the same KV buffers, so the cap uses the largest block of any entry (T is only checked)."""
+    assert T == P or T in TPS, T
+    return min(ctx, ANE_MAX_DIM - max([P] + TPS))
+
+
+class Entry(nn.Module):
+    """One entry point of a chunk: T rows, KV history kv_len(ctx, T), verify (T = P, lazy commit) or prefill (T > P)."""
+
+    def __init__(self, layers: nn.ModuleList, ctx: int, T: int) -> None:
+        super().__init__()
+        self.layers, self.T, self.prefill = layers, T, T > P
+        self.ctx = kv_len(ctx, T)
+        self.gdn_j = [j for j, l in enumerate(layers) if l.kind == "linear_attention"]
+        self.att_j = [j for j, l in enumerate(layers) if l.kind != "linear_attention"]
+        last = layers[-1].i
+        self.taps = [l.i for l in layers if l.i in TAPS and l.i != last]
+
+    def input_names(self):
+        return (["x", "cos", "sin", "mask", "conv_sel", "commit", "commit_last"]
+                + (["conv_sel_out", "valid"] if self.prefill else [])
+                + [f"{s}{j}" for j in self.gdn_j for s in ("conv", "rec", "pend")]
+                + [f"{s}{j}" for j in self.att_j for s in ("k", "v")])
+
+    def output_names(self):
+        return (["y"] + [f"tap{l}" for l in self.taps]
+                + [f"{s}{j}_out" for j in self.gdn_j for s in ("conv", "rec", "pend")]
+                + [f"{s}{j}_new" for j in self.att_j for s in ("k", "v")]
+                + ([f"o{j}_dbg" for j in range(len(self.layers))] if DBG_O else []))
+
+    def forward(self, x, cos, sin, mask, conv_sel, commit, commit_last, *rest):
+        _DBG.clear()
+        it = iter(rest)
+        if self.prefill:
+            conv_sel_out, valid = next(it), next(it)
+        gdn_in = {j: (next(it), next(it), next(it)) for j in self.gdn_j}
+        att_in = {j: (next(it), next(it)) for j in self.att_j}
+        taps, gdn_out, att_out = [], [], []
+        for j, layer in enumerate(self.layers):
+            h = rms_hidden(x, layer.ln1)
+            if j in gdn_in:
+                cr, rc, pd = gdn_in[j]
+                if self.prefill:
+                    y, rows, s1, pend_out = layer.mix.prefill(h, cr, conv_sel, conv_sel_out, rc, pd, commit, commit_last,
+                                                              valid, self.T)
+                else:
+                    y, rows, s1, pend_out = layer.mix.verify(h, cr, conv_sel, rc, pd, commit, commit_last, self.T)
+                gdn_out += [rows, s1, pend_out]
+            else:
+                ks, vs = att_in[j]
+                y, kt, vt = layer.mix(h, cos, sin, mask, ks, vs, self.ctx, self.T)
+                att_out += [kt, vt]
+            x = layer.mlp(x + y)
+            if layer.i in self.taps:
+                taps.append(x)
+        return (x, *taps, *gdn_out, *att_out, *_DBG)
+
+    def example(self):
+        T, f = self.T, torch.float16
+        ex = [torch.randn(1, hid, 1, T, dtype=f) * 0.02, torch.ones(T, rot, dtype=f), torch.zeros(T, rot, dtype=f),
+              torch.zeros(1, self.ctx, dtype=f), torch.zeros(3, P + 3, dtype=f), torch.zeros(1, P, 1, dtype=f),
+              torch.zeros(1, P, 1, dtype=f)]
+        if self.prefill:
+            ex += [torch.zeros(3, T + 3, dtype=f), torch.ones(1, T, 1, dtype=f)]
+        for _ in self.gdn_j:
+            ex += [torch.zeros(P + 3, cdim, dtype=f), torch.zeros(nv, dk, dv, dtype=f), torch.zeros(nv, 3 * P + 1, dv, dtype=f)]
+        for _ in self.att_j:
+            ex += [torch.zeros(nkv, self.ctx, hd, dtype=f), torch.zeros(nkv, self.ctx, hd, dtype=f)]
+        return tuple(ex)
+
+
+class Head(nn.Module):
+    """Final RMSNorm + LUT4 lm_head in HEAD_PARTS row parts: x (1, hid, 1, T) -> logits (T, vocab)."""
+
+    def __init__(self, ck, T: int = 8, parts: int = 8) -> None:
+        super().__init__()
+        from safetensors.torch import load_file
+        self.T = T
+        self.register_buffer("normw", (1 + ck.get("model.language_model.norm.weight").float()).to(torch.float16).view(1, -1, 1, 1))
+        t = load_file(M.EXPORT_DIR / "lm_head.safetensors")
+        q = M.as_quant(t, "lm_head")
+        lut, idx, s = np.asarray(q[0], np.float16), np.asarray(q[1], np.uint8), q[2]
+        v = CFG["vocab_size"]
+        step = -(-v // parts)
+        mods = []
+        for a in range(0, v, step):
+            b = min(a + step, v)
+            W = {"h/lut": lut, "h/idx": idx[a:b]}
+            if s is not None:
+                W["h/scale"] = np.asarray(s, np.float16).reshape(-1)[a:b]
+            mods.append(QConv(W, "h"))
+        self.parts = nn.ModuleList(mods)
+
+    def forward(self, x):
+        h = rms_hidden(x, self.normw)
+        return torch.cat([p(h).reshape(-1, self.T).transpose(0, 1) for p in self.parts], 1)
+
+
+# ---- export ------------------------------------------------------------------------------------------------------
+def patch_palettizer():
+    from coreai_opt.coreai_utils._utils.palettize_utils import LutParams
+    from coreai_opt.coreai_utils.passes import weight_palettization as wp
+    if getattr(wp, "_qwen38_patched", False):
+        return
+    orig = wp._blockwise_compress
+
+    def compress(original_data, mode, *args, **kwargs):
+        known = KNOWN_LUTS.get(wkey(original_data))
+        if known is not None:
+            lut, idx = known
+            cd = lut.shape[1]
+            extra = (1,) * (original_data.ndim - 2)
+            return LutParams(indices=idx.reshape(*idx.shape, *extra).astype(np.uint8),
+                             lut=lut.reshape(*(1,) * original_data.ndim, *lut.shape), vector_axis=0 if cd > 1 else None)
+        return orig(original_data, "UNIQUE", *args, **kwargs)   # Hadamard (+-1/32): exact unique values
+    wp._blockwise_compress = compress
+    wp._is_cluster_dim_valid = lambda op, cluster_dim, channel_axis: list(op.result.type.shape)[channel_axis] % cluster_dim == 0
+    wp._qwen38_patched = True
+
+
+def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path) -> float:
+    """entries: (entrypoint name, module, input names, output names). Returns MB on disk."""
+    import coreai_torch
+    from coreai_opt.casting import cast_to_16_bit_precision
+    from coreai_opt.coreai_utils.common import CompressionGranularity
+    from coreai_opt.coreai_utils.passes.weight_palettization import palettize_weights
+    conv = coreai_torch.TorchConverter(mode=coreai_torch.TorchConverter.Mode.RELEASE)
+    for name, mod, ins, outs in entries:
+        ep = torch.export.export(mod, mod.example() if hasattr(mod, "example") else (torch.zeros(1, hid, 1, mod.T, dtype=torch.float16),),
+                                 strict=False).run_decompositions(coreai_torch.get_decomp_table())
+        cast_to_16_bit_precision(ep)
+        conv.add_exported_program(ep, input_names=ins, output_names=outs, entrypoint_name=name)
+    prog = conv.to_coreai()
+    patch_palettizer()
+    # palettize before optimize(): optimize folds the per-channel-scale mul into the weight (no longer a per-tensor LUT)
+    prog = palettize_weights(prog, lut_dtype=None, n_bits=4, granularity=CompressionGranularity.PER_TENSOR,
+                             cluster_dim=2, weight_num_threshold=1024, enable_fast_kmeans_mode=False)
+    prog.optimize()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(out, ignore_errors=True)
+    prog.save_asset(out)
+    del prog, conv
+    gc.collect()
+    mb = sum(f.stat().st_size for f in out.rglob("*") if f.is_file()) / 1e6
+    print(f"   saved {out.name}: {mb:.0f} MB", flush=True)
+    return mb
+
+
+_ARCH = None
+
+
+def precompile(src: Path, drop_src: bool) -> Path:
+    """xcrun coreai-build compile -> <stem>.aimodelc next to src (neural-engine preferred, this Mac's architecture);
+    optionally delete the source .aimodel. The runtime loads the .aimodelc directly (no compile cache entry)."""
+    import subprocess
+    global _ARCH
+    if _ARCH is None:  # the M6 is h18g (deviceDescriptor of its Core AI / AFM packages); COREAI_ARCH overrides
+        _ARCH = os.environ.get("COREAI_ARCH", "h18g")
+    dst = src.with_suffix(".aimodelc")
+    shutil.rmtree(dst, ignore_errors=True)
+    t0 = time.time()
+    cmd = ["xcrun", "coreai-build", "compile", str(src), "--output", str(dst), "--platform", "macOS",
+           "--preferred-compute", "neural-engine", "--architecture", _ARCH]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not dst.exists():
+        noise = "\n".join(l for l in (proc.stdout + proc.stderr).splitlines() if not l.startswith("objc["))
+        raise RuntimeError(f"coreai-build compile failed rc={proc.returncode}: {noise[-2000:]}")
+    mb = sum(f.stat().st_size for f in dst.rglob("*") if f.is_file()) / 1e6
+    # the ANE programs are built / cached at first load (placement shows in call time, not in the package)
+    print(f"   compiled {dst.name}: {mb:.0f} MB in {time.time() - t0:.0f}s ({_ARCH})", flush=True)
+    if drop_src:
+        shutil.rmtree(src, ignore_errors=True)
+    return dst
+
+
+def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: str | None = None) -> dict:
+    t0 = time.time()
+    KNOWN_LUTS.clear()
+    W = {}
+    for i in layers:
+        W.update(layer_arrays(ck, i))
+    mods = nn.ModuleList(LayerW(W, i) for i in layers).eval().to(torch.float16)
+    del W
+    gc.collect()
+    entries = []
+    for ctx in ctxs:
+        e = Entry(mods, ctx, 8)
+        entries.append((f"v8_{ctx // 1024}k", e, e.input_names(), e.output_names()))
+    for ctx in pctxs:
+        for tp in TPS:  # prefill entries p<T>_<ctx>k (TPS=64,128,256: bigger blocks for long prompts)
+            e = Entry(mods, ctx, tp)
+            entries.append((f"p{tp}_{ctx // 1024}k", e, e.input_names(), e.output_names()))
+    name = name or f"chunk_L{layers[0]:02d}-{layers[-1]:02d}"
+    out = OUT / f"{name}.aimodel"
+    mb = save_program(entries, out)
+    e0 = entries[0][1]
+    info = {"file": out.name, "layers": [layers[0], layers[-1]], "entries": [x[0] for x in entries],
+            "gdn_j": e0.gdn_j, "att_j": e0.att_j, "taps": e0.taps, "mb": round(mb),
+            "numerics": {"SILU": SILU, "MLP_SILU": MLP_SILU, "GDN_SQ": GDN_SQ, "GDN_SV": GDN_SV,   # fp16 fixes built in
+                         "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS}}
+    print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)
+    return info
+
+
+def build_head(ck) -> dict:
+    t0 = time.time()
+    KNOWN_LUTS.clear()
+    h = Head(ck).eval().to(torch.float16)
+    out = OUT / "head_T8.aimodel"
+    mb = save_program([("h8", h, ["x"], ["logits"])], out)
+    print(f"head in {time.time() - t0:.0f}s", flush=True)
+    return {"file": out.name, "mb": round(mb)}
+
+
+def parse_plan(s: str) -> list[list[int]]:
+    return [list(range(int(a), int(b) + 1)) for a, b in (r.split("-") for r in s.split(","))]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("what", choices=("chunk", "head", "all"))
+    ap.add_argument("layers", nargs="?", default="0-3")
+    ap.add_argument("--ctx", default="2048,8192,16384")
+    ap.add_argument("--pctx", default="2048")
+    ap.add_argument("--plan", default=",".join(f"{i}-{i + 3}" for i in range(0, 64, 4)))
+    ap.add_argument("--name", default=None)
+    ap.add_argument("--compile", action="store_true", help="precompile each package to .aimodelc")
+    ap.add_argument("--drop-src", action="store_true", help="with --compile: delete the source .aimodel")
+    a = ap.parse_args()
+    ctxs = [int(x) for x in a.ctx.split(",") if x]
+    pctxs = [int(x) for x in a.pctx.split(",") if x]
+    ck = M.Checkpoint()
+    if a.what == "chunk":
+        print(json.dumps(build_chunk(ck, parse_plan(a.layers)[0], ctxs, pctxs, a.name)))
+    elif a.what == "head":
+        print(json.dumps(build_head(ck)))
+    else:
+        man_path = OUT / "manifest.json"
+        man = json.loads(man_path.read_text()) if man_path.exists() else {}
+        man.update({"version": "coreai1", "T": 8, "TP": 64 if pctxs else 0, "pend": P, "taps": TAPS, "ctxs": ctxs,
+                    "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
+                    "pkv_len": {str(c): kv_len(c, 64) for c in pctxs}, "export": str(M.EXPORT_DIR)})
+        chunks = {c["file"]: c for c in man.get("chunks", [])}
+        for layers in parse_plan(a.plan):
+            f = f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
+            done = (OUT / f).exists() or (OUT / f).with_suffix(".aimodelc").exists()
+            if f in chunks and done and chunks[f].get("entries_ctx") == [ctxs, pctxs]:
+                continue
+            info = build_chunk(ck, layers, ctxs, pctxs)
+            info["entries_ctx"] = [ctxs, pctxs]
+            if a.compile:
+                info["compiled"] = precompile(OUT / f, a.drop_src).name
+            chunks[f] = info
+            man["chunks"] = sorted(chunks.values(), key=lambda c: c["layers"][0])
+            man_path.write_text(json.dumps(man, indent=1))
+            free = shutil.disk_usage(OUT).free / 2**30
+            print(f"   disk free {free:.1f} GiB", flush=True)
+            if free < 15:
+                raise SystemExit(f"stopping: disk free {free:.1f} GiB < 15")
+        if not ((OUT / "head_T8.aimodel").exists() or (OUT / "head_T8.aimodelc").exists()):
+            man["head"] = build_head(ck)
+            if a.compile:
+                man["head"]["compiled"] = precompile(OUT / "head_T8.aimodel", a.drop_src).name
+        else:
+            man.setdefault("head", {"file": "head_T8.aimodel"})
+        man_path.write_text(json.dumps(man, indent=1))
+        print(f"manifest -> {man_path}", flush=True)
+
+
+if __name__ == "__main__":
+    main()
