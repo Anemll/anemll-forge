@@ -23,3 +23,22 @@ python -m unittest discover -s tests -p test_quantization.py -v
 python scripts/qwen38_server.py --help
 PYTHONPATH=scripts python -c 'import qwen38_ane_model as m; print(m.C.MLP_SILU)'
 ```
+
+## Hugging Face bundle tooling — 2026-09-29
+
+The updated suite passed **35 tests** in the existing research environment; all **111 Python files** parsed. The same coremltools dependency-version warnings remain. These tests use small fixtures and mocked Hub/runtime interfaces, not uploaded weights or full 27B inference.
+
+- Fifteen portable bundle tests cover both runtime layouts, SHA256 corruption detection, complete ordered layer coverage, context/verify-width checks, embedding headers, hostile paths, compiled-package overrides, pinned download revisions, selected components and safe reports.
+- Eight mocked inference tests use real NumPy with fake tokenizer/runtime modules: bounded greedy generation, early stop, finite logits, correct vocabulary shape, visible output, prompt capacity, token IDs, Core AI context selection and bridge path selection.
+- Two embedding-loader tests use small real NumPy arrays and the actual checkpoint class. Prepared embeddings load read-only through mmap without an original weight index or shards; wrong dtype, shape or storage order fails.
+- Nine launcher tests include selecting a published embedding table; the existing CPU quantization/export roundtrip test also passes.
+
+```sh
+# Portable tooling only:
+python -m unittest discover -s tests -p test_launcher.py -v
+python -m unittest discover -s tests -p test_hf_release.py -v
+# In the compatible ML environment, including mocked inference:
+python -m unittest discover -s tests -v
+```
+
+No real Hugging Face download, upload, full-model smoke test, or new ANE placement/performance test was run. Run the [bundle workflow](HUGGING_FACE.md) after the weights are uploaded; a real hardware PASS is still outstanding.

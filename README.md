@@ -9,6 +9,7 @@ This first port contains working-tree research source from `ane-vector-lut`, inc
 ## Start here
 
 - [Workflow: quantization → conversion → inference](docs/WORKFLOW.md)
+- [Hugging Face bundle staging, download and smoke test](docs/HUGGING_FACE.md)
 - [Techniques, findings, and limitations](docs/TECHNIQUES.md)
 - [Lessons recovered from the research session](docs/SESSION_LESSONS.md)
 - [Experiment navigation and reproduction gaps](docs/EXPERIMENTS.md)

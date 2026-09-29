@@ -59,7 +59,15 @@ def cfg():
 
 class Checkpoint:
     def __init__(self):
-        self.wmap = json.loads((MODEL / "model.safetensors.index.json").read_text())["weight_map"]
+        self._wmap = None
+
+    @property
+    def wmap(self):
+        # Prebuilt inference only needs config/tokenizer and the prepared embedding table.
+        # Original shards are required when conversion asks for checkpoint tensors.
+        if self._wmap is None:
+            self._wmap = json.loads((MODEL / "model.safetensors.index.json").read_text())["weight_map"]
+        return self._wmap
 
     def embed_table(self):
         """The (vocab, hidden) fp16 embedding table, memory-mapped: written once as a raw .npy (EMBED_NPY, default
@@ -72,7 +80,12 @@ class Checkpoint:
             tmp = path.with_suffix(".tmp.npy")
             np.save(tmp, self.get("model.language_model.embed_tokens.weight").to(torch.float16).numpy())
             tmp.rename(path)
-        return np.load(path, mmap_mode="r")
+        table = np.load(path, mmap_mode="r", allow_pickle=False)
+        c = cfg()
+        expected = (c["vocab_size"], c["hidden_size"])
+        if table.shape != expected or table.dtype != np.float16 or not table.flags.c_contiguous:
+            raise ValueError(f"Embedding table must be C-contiguous float16 {expected}; got {table.dtype} {table.shape}: {path}")
+        return table
 
     def get(self, name):
         with safe_open(MODEL / self.wmap[name], framework="pt") as f:

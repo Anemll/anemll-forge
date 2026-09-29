@@ -64,7 +64,7 @@ python forge.py chat --model "$MODEL" --build "$BUILDS/qwen38-27b-vq2" --ctx 163
 python forge.py serve --model "$MODEL" --build "$BUILDS/qwen38-27b-vq2" --ctx 16384
 ```
 
-The server binds to `127.0.0.1:8765`; stop with Ctrl-C. No personal agent configuration is changed. The checkpoint embedding table is cached under `$MODEL/.anemll-forge/`; the checkpoint directory must be writable, or invoke the underlying script with an explicit `EMBED_NPY` in a writable location.
+The server binds to `127.0.0.1:8765`; stop with Ctrl-C. No personal agent configuration is changed. A prepared `$MODEL/embed_tokens_fp16.npy` takes precedence; inference then needs no original checkpoint shards or index. Otherwise the embedding table is cached under `$MODEL/.anemll-forge/`; the checkpoint directory must be writable, or invoke the underlying script with an explicit `EMBED_NPY` in a writable location. See [the Hugging Face bundle workflow](HUGGING_FACE.md) for downloading prepared artifacts and running an integrity/inference smoke test.
 
 ## 5. Core AI research path
 

@@ -68,6 +68,15 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["environment"]["GDN_SV"], "64")
         self.assertFalse((self.root / "builds").exists())
 
+    def test_published_embedding_selected_without_original_weight_index(self):
+        build = self.root / "build"
+        build.mkdir()
+        (build / "manifest_ctx16384_v4.json").write_text('{}')
+        published = self.model / "embed_tokens_fp16.npy"
+        published.write_bytes(b"fixture")
+        _, env = forge.prepare(self.args("serve", "--build", str(build)))
+        self.assertEqual(env["EMBED_NPY"], str(published))
+
     def test_coreai_rejects_contexts_outside_manifest(self):
         build = self.root / "coreai"
         build.mkdir()

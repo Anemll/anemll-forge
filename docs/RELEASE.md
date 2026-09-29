@@ -8,6 +8,8 @@ Imported inference, quantization, conversion, reference and experiment source, S
 
 The source repository is left unchanged. Its dirty/untracked working tree is recorded by source hashes in the provenance manifest. No binaries, models, arrays, raw logs, or source Git history were imported.
 
+The [Hugging Face bundle workflow](HUGGING_FACE.md) now includes release inventory generation, revision-pinned downloads and an integrity/inference smoke-test command. Inference can use prepared config/tokenizer/embedding assets without original checkpoint shards. The tooling passed fixture tests; uploaded-artifact downloads and full-model hardware validation remain outstanding.
+
 ## Required before public release
 
 - Confirm the canonical Qwen checkpoint name, upstream URL/revision, architecture, license and weight redistribution terms. `Qwen3.8-27B` is the research name supplied by the owner and used in the source; the implementation uses `qwen3_5`.

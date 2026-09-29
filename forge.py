@@ -10,6 +10,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import hf_release
 NUMERICS = dict(SILU="tanh", MLP_SILU="tanh", GDN_SQ="16", GDN_SV="64",
                 MLP_DS="1", MLP_DS_DYN="0", V3_KV_IN="1", V3_PREFILL="0")
 
@@ -22,6 +24,7 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="report environment without loading a model")
+    hf_release.add_commands(sub)
     for name in ("quantize", "convert", "chat", "serve"):
         q = sub.add_parser(name)
         q.add_argument("--model", type=path, required=True, help="original checkpoint directory")
@@ -57,7 +60,9 @@ def prepare(a):
         raise ValueError("This initial port expects the research checkpoint: 64 layers, hidden_size 5120.")
     env = {"MODEL": str(a.model), **NUMERICS}
     # A cache belongs to its checkpoint, never to an unrelated model in ~/Models.
-    env["EMBED_NPY"] = str(a.model / ".anemll-forge" / "embed_tokens_fp16.npy")
+    published_embedding = a.model / "embed_tokens_fp16.npy"
+    env["EMBED_NPY"] = str(published_embedding if published_embedding.is_file()
+                           else a.model / ".anemll-forge" / "embed_tokens_fp16.npy")
     args = []
     if a.command == "quantize":
         if Path(a.tag).name != a.tag or a.tag in ("", ".", ".."):
@@ -116,6 +121,11 @@ def prepare(a):
 def main(argv=None):
     p = parser()
     a = p.parse_args(argv)
+    if a.command in hf_release.COMMANDS:
+        try:
+            return hf_release.run(a)
+        except (ValueError, OSError, RuntimeError) as e:
+            p.error(str(e))
     if a.command == "doctor":
         versions = {}
         for name in ("numpy", "torch", "coremltools", "transformers", "safetensors",
