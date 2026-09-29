@@ -25,7 +25,7 @@ export BUILDS=/path/to/new-coreml-build
 python forge.py quantize --model "$MODEL" --wiki "$WIKI" --output "$RUNS" --tag qwen38-27b-vq2
 ```
 
-This is a reproducible *starting configuration*, not a claim to reproduce the best historical export: MLP vector 2×16 + per-channel scale, scalar LUT4 mixers/head, INT8 K/V, GPTQ and online rotations. The historical mixed-bit plans and calibrated exports are not present in the source repository. Pass `--plan /path/to/plan.json` once you have generated and evaluated a plan.
+This is a reproducible *starting configuration*, not a claim to reproduce the best historical export: MLP vector 2×16 + per-channel scale, scalar LUT4 mixers/head, INT8 K/V projection weights, GPTQ and online rotations. The Core AI runtime's KV cache is FP16. The recovered [historical mixed-bit plan](../configs/quantization/mix25in_mixr.json) is included; calibrated export tensors and private calibration rows are not. See [the quantization guide](QUANTIZATION.md) for the exact allocation and reproduction limits. Pass `--plan /path/to/plan.json` for a generated plan.
 
 Outputs are in `$RUNS/export/qwen38-27b-vq2`. The source quantizer also evaluates WikiText perplexity. Tune `NCAL`, `NEVAL`, `SEQ`, `DEVICE`, `AW` and `CAL_MIX` through environment variables when reproducing experiments; record their values.
 
@@ -47,7 +47,7 @@ MODEL="$MODEL" TRACE=/path/to/kl EXPORT_DIR="$RUNS/export/mix25in_mixr_lr64mix" 
   TAG=mix25in_mixr_lr64mix python scripts/qwen38_kl.py eval
 ```
 
-The historical 48-row calibration used 16 WikiText rows plus 16 chat and 16 pi rows. Replacing private rows creates a new experiment, not an exact historical reproduction. The scripts and commands are now included; the original data/plan outputs and provenance still need review. Verify quality against the stored baseline before converting or pairing a drafter.
+The historical 48-row calibration used 16 WikiText rows plus 16 chat and 16 pi rows. Replacing private rows creates a new experiment, not an exact historical reproduction. The scripts, commands and [original plan with provenance](../configs/quantization/mix25in_mixr.provenance.json) are included; original calibration and evaluation data remain outside the repository. Use `--plan configs/quantization/mix25in_mixr.json` to use the recovered allocation. Verify quality against the stored baseline before converting or pairing a drafter.
 
 ## 3. Convert the Core ML baseline
 

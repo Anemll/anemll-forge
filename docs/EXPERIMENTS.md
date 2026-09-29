@@ -40,7 +40,7 @@ Original module names are retained to keep the research trail navigable. Histori
 - `qwen38_decode_ref.py` standalone validation expects extracted layer test tensors; the full builder uses its own checkpoint loader.
 - Drafter reference parity can require a separate `dflash` source checkout and checkpoint.
 - Historical `tests/*.py` cited under model artifact directories were not in this source repository. They need to be recovered or replaced before the corresponding claims are independently reproducible.
-- Quantized exports, bit plans, token traces, numeric arrays, compiled packages, and private session data were deliberately not imported as release assets.
+- Quantized exports, token traces, numeric arrays, compiled packages, and private session data were deliberately not imported as source assets. The deployed [mixr bit plan](../configs/quantization/mix25in_mixr.json), retrieval provenance and export-header inspection are now included; headers do not establish tensor-payload or compiled-package lineage.
 - The local service manager and personal pi configuration editor were excluded. Use the foreground launcher; it does not stop existing servers or edit agent settings.
 - Research probes may overwrite their own output directories or clear selected compiler caches. They are not part of the fast test suite and are not automatically run.
 

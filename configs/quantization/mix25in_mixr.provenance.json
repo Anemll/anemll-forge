@@ -1,0 +1,22 @@
+{
+  "plan": "mix25in_mixr.json",
+  "retrieved_on": "2026-09-29",
+  "source_host": "M3U",
+  "source_path": "/Volumes/SN8100/vq27b/plan_mixr.json",
+  "sha256": "95839850260991c612202c566d983cb6052cd1b547b0f0b55a09cce531f33567",
+  "method": "Read-only SSH retrieval, preserved original bytes.",
+  "key_count": 216,
+  "pipeline": "pipelines/m3u/run_mixr_final.sh",
+  "quantizer_defaults": {
+    "MIXER": "LUT4 per-tensor + pcs",
+    "KV_FMT": "INT8 per-channel",
+    "HEAD": "LUT4 per-tensor + pcs"
+  },
+  "notes": [
+    "38 MLP layers have vector 2x16 + pcs for gate/up/down; 26 have LUT4 per-tensor + pcs.",
+    "Mixer overrides select vector 2x16 + pcs for layers 0-23; later mixers inherit MIXER.",
+    "KV_FMT describes k_proj/v_proj weights, not KV cache precision.",
+    "Historical calibration data and export tensors are not bundled. Replacing private calibration creates a new experiment.",
+    "129 final-export safetensors headers independently matched the allocation; tensor payloads and compiled-package lineage were not audited by that inspection."
+  ]
+}

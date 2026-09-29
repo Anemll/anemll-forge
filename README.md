@@ -13,6 +13,8 @@ This first port contains working-tree research source from `ane-vector-lut`, inc
 ## Start here
 
 - [Workflow: quantization → conversion → inference](docs/WORKFLOW.md)
+- [Quantization: basic overview and detailed implementation](docs/QUANTIZATION.md)
+- [Quality benchmark plan and low-bit comparisons](docs/BENCHMARK_PLAN.md)
 - [Core AI release bundle: Hugging Face upload, download and smoke test](docs/HUGGING_FACE.md)
 - [Qwen attribution and redistribution requirements](docs/ATTRIBUTION.md)
 - [Techniques, findings, and limitations](docs/TECHNIQUES.md)
