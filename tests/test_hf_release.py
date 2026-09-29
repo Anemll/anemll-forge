@@ -27,6 +27,8 @@ class ReleaseTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.root = self.base / "bundle"
         self.root.mkdir()
+        for name in hf.ROOT_DOCUMENTS:
+            (self.root / name).write_text("Release attribution fixture\n")
         model = self.root / "model"
         model.mkdir()
         self.write_json(model / "config.json", {"text_config": dict(
@@ -73,6 +75,59 @@ class ReleaseTests(unittest.TestCase):
                 bundle=self.root, model_id="example/model", model_revision="f" * 40)), 0)
         return hf.load_manifest(self.root)
 
+    def test_default_repository(self):
+        parser = argparse.ArgumentParser()
+        hf.add_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["download", "--output", str(self.base / "download")])
+        self.assertEqual(args.repo, "anemll/anemll-forge-qwen3.8-27B")
+
+    def test_required_documentation_and_modification_notices(self):
+        m = self.manifest()
+        docs = [f for f in m["files"] if f["component"] == "documentation"]
+        self.assertEqual({f["path"] for f in docs}, hf.ROOT_DOCUMENTS)
+        for f in m["files"]:
+            if hf.requires_modification_notice(f["path"], f["component"]):
+                self.assertIn("ANEMLL", f["modification_notice"])
+                self.assertIn("MODIFICATIONS.md", f["modification_notice"])
+        for name in hf.ROOT_DOCUMENTS:
+            bad = copy.deepcopy(m)
+            bad["files"] = [f for f in bad["files"] if f["path"] != name]
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "documentation"):
+                hf.validate_manifest(bad)
+        bad = copy.deepcopy(m)
+        next(f for f in bad["files"] if f["path"] == "model/embed_tokens_fp16.npy").pop("modification_notice")
+        with self.assertRaisesRegex(ValueError, "modification notice"):
+            hf.validate_manifest(bad)
+
+    def test_root_documentation_corruption_is_detected(self):
+        m = self.manifest()
+        p = self.root / "NOTICE"
+        p.write_bytes(b"X" * p.stat().st_size)
+        for runtime in ("coreai", "coreml"):
+            with self.subTest(runtime=runtime), self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
+                hf.verify(self.root, m, runtime)
+
+    def test_documentation_symlink_rejected(self):
+        p = self.root / "LICENSE"
+        p.unlink()
+        outside = self.base / "license.txt"
+        outside.write_text("license fixture")
+        p.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            self.manifest()
+
+    def test_missing_root_documentation_rejected(self):
+        (self.root / "QWEN_SOURCE.json").unlink()
+        with self.assertRaisesRegex(ValueError, "documentation"):
+            self.manifest()
+
+    def test_documentation_component_rejects_arbitrary_root_file(self):
+        m = self.manifest()
+        bad = copy.deepcopy(m)
+        next(f for f in bad["files"] if f["path"] == "README.md")["path"] = "private.txt"
+        with self.assertRaisesRegex(ValueError, "documentation"):
+            hf.validate_manifest(bad)
+
     def test_manifest_roundtrip_and_both_runtime_layouts(self):
         m = self.manifest()
         self.assertEqual(m["upstream_model"]["id"], "example/model")
@@ -80,7 +135,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "release.json").read_text()), m)
         for runtime in m["runtimes"]:
             result = hf.verify(self.root, m, runtime)
-            selected = [f for f in m["files"] if f["component"] in ("model", runtime)]
+            selected = [f for f in m["files"] if f["component"] in ("documentation", "model", runtime)]
             self.assertEqual(result["verified_files"], len(selected))
             self.assertEqual(result["verified_bytes"], sum(f["bytes"] for f in selected))
 
@@ -210,7 +265,7 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(hub.hf_hub_download.call_args.kwargs["revision"], sha)
                 call = hub.snapshot_download.call_args.kwargs
                 self.assertEqual(call["revision"], sha)
-                groups = {"model", runtime} | ({"export"} if include_export else set())
+                groups = {"documentation", "model", runtime} | ({"export"} if include_export else set())
                 expected = {"release.json"} | {f["path"] for f in m["files"] if f["component"] in groups}
                 self.assertEqual(set(call["allow_patterns"]), expected)
                 self.assertFalse((output / ("coreml" if runtime == "coreai" else "coreai")).exists())

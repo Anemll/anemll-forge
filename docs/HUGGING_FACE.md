@@ -2,9 +2,11 @@
 
 The M6 release uses **Core AI inference**. Upload the Core AI chunk/head packages, matching config/tokenizer assets and prepared embedding table. **Core ML model packages are not required for this release.** The repository retains Core ML conversion and experiment code for reproduction and learning.
 
+HF destination: **`anemll/anemll-forge-qwen3.8-27B`** under [ANEMLL](https://huggingface.co/anemll). The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and ANE benchmarks to be added when measured. The download helper defaults to this repository.
+
 Stage and validate a bundle locally, upload it yourself, then test a download from the exact uploaded revision. These commands do not create a Hub repository, upload files, or change repository visibility. Keep release preparation private until publication is explicitly approved.
 
-Run commands from the ANEMLL Forge checkout. Choose the bundle path and HF model repository ID, and replace both revision placeholders with full commit hashes. The upstream checkpoint revision and uploaded bundle revision identify different repositories.
+Run commands from the ANEMLL Forge checkout. Choose the bundle path and replace the uploaded-bundle revision placeholder with its full commit hash. The pinned upstream checkpoint revision and uploaded bundle revision identify different repositories. Read [Qwen attribution and redistribution requirements](ATTRIBUTION.md).
 
 ## 1. Stage the assets
 
@@ -23,13 +25,16 @@ bundle/
     ...all referenced chunk and head packages
   export/                         # optional quantized conversion weights
     ...complete quantized export
-  README.md                       # model card and reproduction provenance
-  ...applicable licenses/notices
+  README.md                       # model card
+  LICENSE                         # exact upstream Qwen license
+  NOTICE                          # ANEMLL-added Qwen attribution
+  MODIFICATIONS.md                # prominent conversion/change notices
+  QWEN_SOURCE.json                 # pinned upstream source evidence
 ```
 
 Use config, tokenizer and embeddings from the **exact pinned checkpoint used to produce the runtime assets**. Stage the original `config.json`, including its `text_config`. The current checker expects 64 layers, hidden size 5120 and an explicit vocabulary size. `embed_tokens_fp16.npy` must be the matching embedding matrix, C-contiguous float16 with shape `(vocab_size, 5120)`. Renaming unrelated embeddings or substituting a newer tokenizer is not compatible.
 
-The `model/` directory accepts only the supported tokenizer/config files and the embedding array; do not copy original weight shards there. Optional files include generation/special-token configuration, chat templates, vocabulary and merges. Put licenses and the model card at the bundle root. Copy actual file contents, not cache symlinks.
+The `model/` directory accepts only the supported tokenizer/config files and the embedding array; do not copy original weight shards there. Optional files include generation/special-token configuration, chat templates, vocabulary and merges. Copy the five prepared files from `release/huggingface/` into the bundle root; they are required, hashed and downloaded with the model. Copy actual file contents, not cache symlinks.
 
 Preserve Core AI's `manifest.json`, its `ctxs`, and every referenced chunk/head asset with the same relative names. Include source `.aimodel` packages so the target OS can compile them; a precompiled `.aimodelc` alone may be incompatible with another OS/toolchain. Include any explicitly referenced compiled packages too. Existing sibling `.aimodelc` packages are inventoried because the runtime can prefer them. Added runtime files absent from the inventory are rejected. The helper requires T=8 and ordered chunk ranges covering all 64 layers. Do not rename files without updating their runtime manifest.
 
@@ -40,14 +45,14 @@ The optional `export/` is for rebuilding/conversion, not required to run a prepa
 ```sh
 python forge.py release-manifest \
   --bundle /path/to/bundle \
-  --model-id UPSTREAM_OWNER/EXACT_CHECKPOINT \
-  --model-revision FULL_UPSTREAM_COMMIT_HASH
+  --model-id Qwen/Qwen3.8-27B \
+  --model-revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
 
 python forge.py quick-test \
   --bundle /path/to/bundle --runtime coreai --check-only
 ```
 
-`release-manifest` writes `release.json` only after layout validation. It records upstream identity, runtime contexts, component paths, file sizes and SHA-256 hashes. It records your supplied upstream revision; it does not prove the files came from that checkpoint. Regenerate it after any asset changes. Root-level model-card/license files are outside this asset inventory and need their own review.
+`release-manifest` writes `release.json` only after layout validation. It records upstream identity, runtime contexts, component paths, file sizes and SHA-256 hashes, including the required root model-card/license/notice/source records. Derived binary entries carry a `modification_notice` referencing `MODIFICATIONS.md`. Authors must also mark actually changed text files and supported model-package metadata appropriately. The supplied upstream revision does not itself prove artifact lineage; regenerate the inventory after any asset changes.
 
 `--check-only` checks selected-component hashes, manifests and the embedding header without loading the model. It still reads all selected assets for hashing, so large bundles take time. Passing it proves consistency, not correct generation or ANE placement.
 
@@ -59,13 +64,13 @@ You then create/select the HF **model** repository and upload the prepared bundl
 python -m pip install huggingface_hub
 
 python forge.py download \
-  --repo YOUR_HF_ACCOUNT/YOUR_MODEL_REPO \
+  --repo anemll/anemll-forge-qwen3.8-27B \
   --revision FULL_BUNDLE_COMMIT_HASH \
   --runtime coreai \
   --output /path/to/downloaded-bundle
 ```
 
-Authenticate with your own HF credentials when downloading a private or gated repository. The repository ID is always a parameter; no destination is assumed. The helper resolves a branch/tag to a commit before downloading, selects `model/` plus `coreai/`, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
+Authenticate with your own HF credentials when downloading a private or gated repository. `--repo` defaults to `anemll/anemll-forge-qwen3.8-27B` and can be overridden. The helper resolves a branch/tag to a commit before downloading, selects `model/` plus `coreai/` and the required release documents, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
 
 Add `--include-export` only when conversion weights are needed and the release includes them. The download step checks export hashes too when requested. For revision pinning, filtered downloads and local-directory behavior, see the [official Hugging Face download guide](https://huggingface.co/docs/huggingface_hub/guides/download).
 

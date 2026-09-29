@@ -4,6 +4,8 @@ Keep the GitHub repository private until the owner explicitly approves a visibil
 
 The planned M6 release uses Core AI with the Swift bridge. The HF upload contains Core AI chunk/head packages, matching config/tokenizer assets and the prepared fp16 embedding table; a reviewed quantized export may be included for reproduction. Core ML model packages are not required. Preserve the Core ML code and findings as conversion/research material.
 
+HF destination: **`anemll/anemll-forge-qwen3.8-27B`**. The upstream is **Qwen/Qwen3.8-27B**, developed by the Qwen Team, with the original `Copyright 2026 Alibaba Cloud` notice and Apache 2.0 license. [ATTRIBUTION.md](ATTRIBUTION.md) records the pinned source evidence, obligations and prepared license/notice/model-card files.
+
 ## First port scope
 
 Imported inference, quantization, conversion, reference and experiment source, Swift bridge source, and edited historical documentation. Added an explicit-path launcher and a current Core ML workflow. Defaults now use the documented tanh MLP SiLU fix and loopback serving. The calibration session importer requires an explicit glob; no session contents were imported. The bridge build script now propagates compiler failures and uses the selected Xcode. Removed a stale sklearn module stub from the Core AI builder.
@@ -14,7 +16,7 @@ The [Hugging Face bundle workflow](HUGGING_FACE.md) now includes release invento
 
 ## Required before public release
 
-- Confirm the canonical Qwen checkpoint name, upstream URL/revision, architecture, license and weight redistribution terms. `Qwen3.8-27B` is the research name supplied by the owner and used in the source; the implementation uses `qwen3_5`.
+- Verify final artifact/export/embedding lineage against the recorded **Qwen/Qwen3.8-27B** revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`. Its model identity, `qwen3_5` architecture and Apache 2.0 license are now verified from the local small files and official pinned upstream. Include the exact license, applicable notices and prominent change notices with the distributed artifacts.
 - Select a source-code license and audit provenance/attribution for code adapted from transformers, DFlash, other repositories and private SDK examples. No license is invented by this port.
 - Check the upstream OptiQ sensitivity dataset's attribution and redistribution terms before public distribution; the newly imported sensitivity notes identify its source.
 - Pin the public dependency sources, including any coremltools patches and Core AI SDK constraints; produce a clean install/build test.

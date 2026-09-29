@@ -42,3 +42,11 @@ python -m unittest discover -s tests -v
 ```
 
 No real Hugging Face download, upload, full-model smoke test, or new ANE placement/performance test was run. Run the [bundle workflow](HUGGING_FACE.md) after the weights are uploaded; a real hardware PASS is still outstanding.
+
+## Attribution and private upload preparation — 2026-09-29
+
+The updated suite passed **41 tests** in the existing research environment. Six additional bundle tests verify the default HF destination, mandatory license/source documents, document hashing/download selection, symlink rejection and per-file modification notices. All five prepared release documents are included in the verified download inventory.
+
+The exact copied Qwen LICENSE matches the pinned upstream bytes and preserves `Copyright 2026 Alibaba Cloud`. Ten local checkpoint documents/config/tokenizer files match official upstream hashes at revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`; all 18 shard cache etags match upstream SHA256 metadata. The large shard bytes were not rehashed. [QWEN_SOURCE.json](../release/huggingface/QWEN_SOURCE.json) records this evidence and remaining artifact-lineage limits.
+
+A separate upload agent created and verified the private HF target `anemll/anemll-forge-qwen3.8-27B`, staged the Core AI source packages plus embeddings and tokenizer/config assets, and passed `release-manifest` and `quick-test --check-only` on **65 inventoried files / 13,184,004,271 bytes**. Upload was then started; this staging check does not confirm completed transfer or downloaded-artifact inference. The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and future ANE benchmarks left unclaimed. Full hardware inference remains outstanding.

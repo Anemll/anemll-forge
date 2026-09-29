@@ -13,10 +13,19 @@ import time
 
 COMMANDS = {"release-manifest", "download", "quick-test"}
 MANIFEST = "release.json"
+DEFAULT_REPO = "anemll/anemll-forge-qwen3.8-27B"
+ROOT_DOCUMENTS = {"README.md", "LICENSE", "NOTICE", "MODIFICATIONS.md", "QWEN_SOURCE.json"}
+MODIFICATION_NOTICE = "Converted/quantized by ANEMLL; see MODIFICATIONS.md for details."
+TEXT_SUFFIXES = {".json", ".md", ".txt", ".yaml", ".yml", ".toml", ".xml", ".plist"}
+
 MODEL_FILES = {"config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
                "generation_config.json", "chat_template.jinja", "chat_template.json", "vocab.json",
                "merges.txt", "tokenizer.model", "added_tokens.json", "embed_tokens_fp16.npy"}
 
+
+def requires_modification_notice(name, component):
+    return (name == "model/embed_tokens_fp16.npy" or
+            (component in {"coreai", "coreml", "export"} and Path(name).suffix.lower() not in TEXT_SUFFIXES))
 
 def add_commands(sub):
     p = sub.add_parser("release-manifest", help="hash a prepared HF upload directory")
@@ -24,7 +33,7 @@ def add_commands(sub):
     p.add_argument("--model-id", required=True, help="canonical upstream checkpoint ID")
     p.add_argument("--model-revision", required=True, help="upstream checkpoint revision used")
     p = sub.add_parser("download", help="download and verify one runtime from Hugging Face")
-    p.add_argument("--repo", required=True, help="HF owner/repository")
+    p.add_argument("--repo", default=DEFAULT_REPO, help="HF owner/repository (default: %(default)s)")
     p.add_argument("--revision", default="main", help="tag/commit/branch, resolved to a commit before download")
     p.add_argument("--runtime", choices=("coreai", "coreml"), default="coreai")
     p.add_argument("--output", type=Path, required=True)
@@ -95,8 +104,14 @@ def validate_manifest(m):
             raise ValueError("Invalid file entry")
         name = str(relative(entry.get("path")))
         group = entry.get("component")
-        if group not in roots or not name.startswith(roots[group] + "/"):
+        if group == "documentation":
+            if name not in ROOT_DOCUMENTS:
+                raise ValueError(f"Unexpected root documentation file: {name}")
+        elif group not in roots or not name.startswith(roots[group] + "/"):
             raise ValueError(f"File is outside its component: {name}")
+        if (name == roots["model"] + "/embed_tokens_fp16.npy" or requires_modification_notice(name, group)):
+            if not isinstance(entry.get("modification_notice"), str) or not entry["modification_notice"].strip():
+                raise ValueError(f"Missing modification notice: {name}")
         if name in seen:
             raise ValueError(f"Duplicate file entry: {name}")
         seen.add(name)
@@ -104,6 +119,9 @@ def validate_manifest(m):
             raise ValueError(f"Invalid byte count: {name}")
         if not isinstance(entry.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
             raise ValueError(f"Invalid SHA256: {name}")
+    for required in sorted(ROOT_DOCUMENTS):
+        if not any(f["path"] == required and f["component"] == "documentation" for f in files):
+            raise ValueError(f"Missing release documentation: {required}")
     for required in ("config.json", "tokenizer.json", "tokenizer_config.json", "embed_tokens_fp16.npy"):
         if roots["model"] + "/" + required not in seen:
             raise ValueError(f"Missing model file in inventory: {required}")
@@ -240,7 +258,7 @@ def check_layout(root, m, runtime):
 def verify(root, m, runtime, include_export=False):
     if runtime not in m["runtimes"]:
         raise ValueError(f"Release does not contain runtime: {runtime}")
-    groups = {"model", runtime} | ({"export"} if include_export else set())
+    groups = {"documentation", "model", runtime} | ({"export"} if include_export else set())
     files = [f for f in m["files"] if f["component"] in groups]
     for f in files:
         p = local(root, f["path"])
@@ -256,6 +274,15 @@ def make_manifest(a):
     root = a.bundle.expanduser().resolve()
     m = dict(schema_version=1, upstream_model=dict(id=a.model_id, revision=a.model_revision),
              model_path="model", runtimes={}, files=[])
+    for name in sorted(ROOT_DOCUMENTS):
+        p = root / name
+        if p.is_symlink():
+            raise ValueError(f"Release documentation must not be a symlink: {name}")
+        if not p.is_file():
+            raise ValueError(f"Missing release documentation: {name}")
+        m["files"].append(dict(path=name, component="documentation", bytes=p.stat().st_size, sha256=digest(p)))
+    # Notices describe derived binary artifacts; authors must also put accurate change
+    # notices into any modified source files or package metadata they distribute.
     groups = {"model": root / "model"}
     for runtime in ("coreai", "coreml"):
         build = root / runtime
@@ -282,7 +309,10 @@ def make_manifest(a):
             relative(name)
             if group == "model" and p.relative_to(directory).as_posix() not in MODEL_FILES:
                 raise ValueError(f"Unexpected model file; stage only tokenizer/config/embedding assets: {name}")
-            m["files"].append(dict(path=name, component=group, bytes=p.stat().st_size, sha256=digest(p)))
+            entry = dict(path=name, component=group, bytes=p.stat().st_size, sha256=digest(p))
+            if requires_modification_notice(name, group):
+                entry["modification_notice"] = MODIFICATION_NOTICE
+            m["files"].append(entry)
     validate_manifest(m)
     for runtime in m["runtimes"]:
         check_layout(root, m, runtime)
@@ -313,7 +343,7 @@ def download(a):
     old = root / MANIFEST
     if old.exists() and json.loads(old.read_text()) != m:
         raise ValueError("Output contains a different release; use a new --output directory")
-    groups = {"model", a.runtime} | ({"export"} if a.include_export else set())
+    groups = {"documentation", "model", a.runtime} | ({"export"} if a.include_export else set())
     names = [f["path"] for f in m["files"] if f["component"] in groups]
     for name in [MANIFEST, *names]:
         local(root, name)  # Reject existing symlink escapes before any download writes.
