@@ -1,4 +1,5 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # M3U helper (M6 request 18:5x 2026-09-27): mixer -> MLP byte trade, measurement phase.
 #   1. GPTQ mixer2_aw_cal: every mixer matrix vector 2x16 + pcs (k/v INT8), MLP bf16 (plan_mlpbf16.json), head bf16,
 #      same CAL_MIX / AW=1 -> runs/export/mixer2_aw_cal (its MLP files are bf16 placeholders, ~34 GB, deleted after)
@@ -6,11 +7,11 @@
 #   3. 8 band KLs, mixers of one band 2-bit + lr64 re-fitted, rest bf16  -> tags mband2lr_<lo>-<hi>
 #   4. KL, all mixers 2-bit + lr64, rest bf16 (additivity check)        -> tag mixers2lr_only
 # The plan (which mixer layers go 2-bit, which MLP matrices go LUT4, at equal bytes) comes after, from these numbers.
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-export PYTHONWARNINGS=ignore TRACE=/Volumes/SN8100/vq27b/kl MODEL=/Volumes/SN8100/Qwen3.8-27B OUT=/Volumes/SN8100/vq27b/runs
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
-E=$L/runs/export
+cd "$FORGE_ROOT/scripts" || exit 1
+export PYTHONWARNINGS=ignore TRACE=$TRACE MODEL=$MODEL OUT=$OUT
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
+E=$OUT/export
 log() { echo "$(date +%H:%M:%S) $*"; }
 busy() { pgrep -f "qwen38_kl.py|qwen38_gptq_27b.py|qwen38_lowrank" > /dev/null; }
 kl() { local T=$1; shift; while busy; do sleep 30; done

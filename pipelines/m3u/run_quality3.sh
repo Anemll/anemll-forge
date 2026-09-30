@@ -1,14 +1,15 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # size-neutral quality plan, v3 (after abl_gdn_lr64 = KL 0.024: low-rank correction of the DeltaNet error works):
 #   wait for the running abl_mlp_lr64 eval; in-domain calibration data;
 #   A  mix25_aw_cal (deployed plan, new calibration, AW) + KL, + KL with rank-64 correction on DeltaNet + attention
 #   BR full_mix25_br (block reconstruction of the deployed export, running separately) -> KL when it is done
 #   M2 mlp2_aw_cal (all MLP 2-bit, new calibration) + KL, then the 8-band in-domain MLP sweep
 while pgrep -f "[q]wen38_kl.py" >/dev/null; do sleep 20; done
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-export PYTHONWARNINGS=ignore TRACE=/Volumes/SN8100/vq27b/kl MODEL=/Volumes/SN8100/Qwen3.8-27B
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
+cd "$FORGE_ROOT/scripts" || exit 1
+export PYTHONWARNINGS=ignore TRACE=$TRACE MODEL=$MODEL
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
 echo "$(date +%H:%M:%S) KL abl_mlp_lr64: $(tail -1 $L/kl_eval_abl_mlp_lr64.log | cut -c1-230)"
 kl() {  # tag, env...
   local T=$1; shift
@@ -25,14 +26,14 @@ gptq() {  # tag, env...
   echo "$(date +%H:%M:%S) GPTQ $T"
   env "$@" TAG=$T $PY -X faulthandler -u qwen38_gptq_27b.py > $L/run_$T.log 2>&1 || { echo "FAILED $T"; tail -5 $L/run_$T.log; return 1; }
   tail -1 $L/run_$T.log
-  kl $T EXPORT_DIR=$L/runs/export/$T
+  kl $T EXPORT_DIR=$OUT/export/$T
 }
 gptq mix25_aw_cal PLAN=$L/plan_optiq_top48.json
-kl mix25_aw_cal_lr64mix EXPORT_DIR=$L/runs/export/mix25_aw_cal LR_RANK=64 LR_PARTS=gdn,attn
-if [ -f $L/runs/export/full_mix25_br/blockrecon.json ]; then kl full_mix25_br EXPORT_DIR=$L/runs/export/full_mix25_br; else echo "BR not done yet"; fi
+kl mix25_aw_cal_lr64mix EXPORT_DIR=$OUT/export/mix25_aw_cal LR_RANK=64 LR_PARTS=gdn,attn
+if [ -f $OUT/export/full_mix25_br/blockrecon.json ]; then kl full_mix25_br EXPORT_DIR=$OUT/export/full_mix25_br; else echo "BR not done yet"; fi
 gptq mlp2_aw_cal FORMAT="vector 2x16 + pcs"
 for b in 0-7 8-15 16-23 24-31 32-39 40-47 48-55 56-63; do
-  kl band2_$b EXPORT_DIR=$L/runs/export/mlp2_aw_cal PARTS=mlp QLAYERS=$b
+  kl band2_$b EXPORT_DIR=$OUT/export/mlp2_aw_cal PARTS=mlp QLAYERS=$b
 done
-[ -f $L/kl/kl_full_mix25_br.json ] || { [ -f $L/runs/export/full_mix25_br/blockrecon.json ] && kl full_mix25_br EXPORT_DIR=$L/runs/export/full_mix25_br; }
+[ -f $TRACE/kl_full_mix25_br.json ] || { [ -f $OUT/export/full_mix25_br/blockrecon.json ] && kl full_mix25_br EXPORT_DIR=$OUT/export/full_mix25_br; }
 echo "$(date +%H:%M:%S) done"

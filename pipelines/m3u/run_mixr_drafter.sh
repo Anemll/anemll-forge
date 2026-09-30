@@ -1,14 +1,15 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # DFlash2 drafter GPTQ recalibration for the served mixr target (M6 session, 2026-09-28). Logs: $W/<step>.log;
 # touch $W/.hold_mixr to stop before the next step. Resume: rerun (finished steps are skipped by their outputs).
 set -u
-W=/Volumes/SN8100/dflash2_work
-S=~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-PY=~/venvs/vq27b/bin/python
-EXP=/Volumes/SN8100/vq27b/runs/export/mix25in_mixr_lr64mix
-DEQ=~/Models/dflash2/deq_mix25in_mixr_lr64mix
-HEADX=/Volumes/SN8100/vq27b/runs/export/mix25in_mixr/lm_head.safetensors
-cd $S
+W=$WORK
+S="$FORGE_ROOT/scripts"
+PY="$FORGE_PYTHON"
+EXP=$OUT/export/mix25in_mixr_lr64mix
+DEQ=$WORK/deq_mix25in_mixr_lr64mix
+HEADX=$OUT/export/mix25in_mixr/lm_head.safetensors
+cd "$S" || exit 1
 step() { [[ -f $W/.hold_mixr ]] && { echo "$(date +%T) hold file: stopping before $1"; exit 0; }; echo "$(date +%T) START $1"; }
 if [[ ! -f $DEQ/lm_head.safetensors ]]; then
   step dequant; DEQ_OUT=$DEQ EXPORT_DIR=$EXP $PY dflash2_target_ref.py dequant_export > $W/dequant_mixr.log 2>&1 || { echo "dequant FAILED"; exit 1; }

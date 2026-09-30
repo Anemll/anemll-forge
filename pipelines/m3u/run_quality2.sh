@@ -1,4 +1,5 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # size-neutral quality plan (user constraint: quantized size = MLP speed). After the ablation:
 #   low-rank (rank 64) compensation evals of the deployed export (DeltaNet only / MLP only)
 #   in-domain calibration data (16 WikiText + 16 self-generated chat + 16 pi agentic rows), AW=1 codebooks
@@ -6,11 +7,11 @@
 #   M2 mlp2_aw_cal  : every MLP at vector 2x16, new calibration (smallest; clean 2-bit weights for the band sweep)
 #   band sweep      : KL with only one 8-layer MLP band at 2-bit (rest bf16) -> in-domain re-allocation of the 4-bit budget
 while pgrep -f "[r]un_ablation.sh" >/dev/null; do sleep 30; done
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-export PYTHONWARNINGS=ignore TRACE=/Volumes/SN8100/vq27b/kl MODEL=/Volumes/SN8100/Qwen3.8-27B
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
-E0=$L/runs/export/full_mix25_mixer4_head4
+cd "$FORGE_ROOT/scripts" || exit 1
+export PYTHONWARNINGS=ignore TRACE=$TRACE MODEL=$MODEL
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
+E0=$OUT/export/full_mix25_mixer4_head4
 kl() {  # tag, env...
   local T=$1; shift
   env "$@" TAG=$T $PY -u qwen38_kl.py eval > $L/kl_eval_$T.log 2>&1
@@ -27,11 +28,11 @@ gptq() {  # tag, env...
   echo "$(date +%H:%M:%S) GPTQ $T"
   env "$@" TAG=$T $PY -X faulthandler -u qwen38_gptq_27b.py > $L/run_$T.log 2>&1 || { echo "FAILED $T"; tail -5 $L/run_$T.log; return 1; }
   tail -1 $L/run_$T.log
-  kl $T EXPORT_DIR=$L/runs/export/$T
+  kl $T EXPORT_DIR=$OUT/export/$T
 }
 gptq mix25_aw_cal PLAN=$L/plan_optiq_top48.json
 gptq mlp2_aw_cal FORMAT="vector 2x16 + pcs"
 for b in 0-7 8-15 16-23 24-31 32-39 40-47 48-55 56-63; do
-  kl band2_$b EXPORT_DIR=$L/runs/export/mlp2_aw_cal PARTS=mlp QLAYERS=$b
+  kl band2_$b EXPORT_DIR=$OUT/export/mlp2_aw_cal PARTS=mlp QLAYERS=$b
 done
 echo "$(date +%H:%M:%S) done"

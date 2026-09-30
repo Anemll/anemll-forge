@@ -22,7 +22,7 @@ from coreai.runtime._ndarray import StorageKind
 from coreai_opt.casting import cast_to_16_bit_precision
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ane-vector-lut/coreai (builder, coreai_util)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # coreai (builder, coreai_util)
 from coreai_util import specialization_for
 
 C, D, NKV, T, CTX = 512, 256, 4, 8, 16384

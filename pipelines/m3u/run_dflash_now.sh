@@ -1,18 +1,19 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # M3U helper: DFlash2 drafter re-calibration, run NOW next to run_quality5 (M6 request 09:3x, 2026-09-27).
 #   1. mix25_aw_cal_lr64mix factors  2. dequant -> $WORK/deq_mix25_aw_cal_lr64mix  3. simulate q_cal (new target)
 #   4. drafter quant eval (lut4_rtn vs lut4_gptq)  5. lut4_gptq export if it wins
 # CPU jobs with THREADS=12 (the GPU queue keeps some CPU). A memory guard SIGSTOPs the running step when memory
 # pressure rises or swap grows by more than 6 GB, and resumes it when pressure is normal and no KL eval is running.
 # Touch $L/.hold_dflash to pause before the next step. sim q_old_cal is left to run_after_q5.sh (idle time).
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-export PYTHONWARNINGS=ignore MODEL=/Volumes/SN8100/Qwen3.8-27B WORK=/Volumes/SN8100/dflash2_work THREADS=12
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
-E=$L/runs/export
+cd "$FORGE_ROOT/scripts" || exit 1
+export PYTHONWARNINGS=ignore MODEL=$MODEL WORK=$WORK THREADS=12
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
+E=$OUT/export
 W=$WORK
 log() { echo "$(date +%H:%M:%S) $*"; }
-free_gb() { df -g /Volumes/SN8100 | awk 'NR==2{print $4}'; }
+free_gb() { df -g "$FORGE_WORK_DIR" | awk 'NR==2{print $4}'; }
 swap_mb() { sysctl -n vm.swapusage | awk '{print int($6)}'; }
 need() { local g=$(free_gb); (( g >= $1 )) || { log "STOP: ${g} GiB free on SN8100, need $1 for $2"; exit 1; }; }
 step() { local name=$1 logf=$2; shift 2

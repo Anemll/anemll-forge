@@ -122,7 +122,7 @@ Start with a small edit and check its diff/tests. The profile declares **16,384 
 
 ## Research, evaluation, and limitations
 
-The repository includes mixed-bit GPTQ, scalar/vector LUT quantization, per-channel scaling, online rotations, low-rank corrections, calibration and KL evaluation, Core ML/Core AI conversion, and the speculative runtime. It also preserves failed experiments and compiler/ANE findings from `ane-vector-lut`.
+The repository includes mixed-bit GPTQ, scalar/vector LUT quantization, per-channel scaling, online rotations, low-rank corrections, calibration and KL evaluation, Core ML/Core AI conversion, and the speculative runtime. It also preserves failed experiments and compiler/ANE findings from the original research, with source provenance recorded in [docs/provenance.json](docs/provenance.json).
 
 KL divergence is the current model-fidelity evaluation; it does not establish coding, reasoning, or long-context capability. ANE benchmarks will be added with exact artifacts, hardware, context, generation settings, and measurement methods. Historical measurements are labeled separately from downloaded-release validation. Treat this as research software and review the documented numerical, placement, compilation, and memory limitations.
 

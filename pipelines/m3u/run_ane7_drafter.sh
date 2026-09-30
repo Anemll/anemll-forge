@@ -1,19 +1,20 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # M3U helper: DFlash2 drafter re-calibration on the ane7 target (mix25in_aw_cal_lr64mix, KL 0.195). M6 decision, 12:5x
 # 2026-09-27: runs only if the ane6 quant eval shows lut4_gptq >= 1% better than lut4_rtn in tokens per call
 # (mean_emitted). Starts after run_dflash_now.sh has finished. Touch $L/.hold_dflash to pause before the next step.
 #   dequant -> sim q7_cal (32 calib prompts x 256) -> quant eval (lut4_rtn, lut4_gptq; head = mix25in lm_head)
 #   -> lut4_gptq export if it beats RTN. Output dirs: drafter_lut4_gptq_q_cal (ane6, renamed) / drafter_lut4_gptq_q7_cal.
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-export PYTHONWARNINGS=ignore MODEL=/Volumes/SN8100/Qwen3.8-27B WORK=/Volumes/SN8100/dflash2_work THREADS=16
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
-E=$L/runs/export
+cd "$FORGE_ROOT/scripts" || exit 1
+export PYTHONWARNINGS=ignore MODEL=$MODEL WORK=$WORK THREADS=16
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
+E=$OUT/export
 W=$WORK
 T7=mix25in_aw_cal_lr64mix
 HEAD7=$E/mix25in_aw_cal/lm_head.safetensors
 log() { echo "$(date +%H:%M:%S) $*"; }
-free_gb() { df -g /Volumes/SN8100 | awk 'NR==2{print $4}'; }
+free_gb() { df -g "$FORGE_WORK_DIR" | awk 'NR==2{print $4}'; }
 need() { local g=$(free_gb); (( g >= $1 )) || { log "STOP: ${g} GiB free on SN8100, need $1 for $2"; exit 1; }; }
 step() { local name=$1 logf=$2; shift 2
   while [[ -f $L/.hold_dflash ]]; do sleep 60; done
@@ -28,7 +29,7 @@ if [[ -z $gain ]] || (( gain < 0.01 )); then
   log "SKIP ane7 drafter: lut4_gptq vs lut4_rtn tokens/call gain = ${gain:-missing} (< 1%)"; exit 0
 fi
 log "ane7 drafter: lut4_gptq gain on ane6 traces = $gain (>= 1%)"
-$L/dflash_guard_ane7.sh &
+"$FORGE_PIPELINE_DIR/dflash_guard_ane7.sh" &
 
 if [[ $(ls $W/deq_$T7 2>/dev/null | grep -c '^layer_') != 64 || ! -f $W/deq_$T7/lm_head.safetensors ]]; then
   need 70 "dequant $T7 (~48 GB + 20 GB reserve)"

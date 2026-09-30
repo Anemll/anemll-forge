@@ -1,16 +1,17 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # after the ablation: in-domain calibration (16 WikiText + 16 self-generated chat + 16 pi agentic rows), AW=1
 # (imatrix-weighted codebooks), GPTQ + online Hadamard; each export followed by the KL eval.
 #   A mix25_aw_cal   deployed MLP plan (2x16, top layers LUT4)   - calibration / imatrix effect at the same speed
 #   B mlp4_aw_cal    all MLP LUT4 per-tensor + pcs                - 4-bit quality ceiling
 #   C mlp2x64_aw_cal all MLP vector 2x64 + pcs (3 bits/w)          - middle option
 while pgrep -f "[r]un_ablation.sh" >/dev/null; do sleep 30; done
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
-export PYTHONWARNINGS=ignore TRACE=/Volumes/SN8100/vq27b/kl MODEL=/Volumes/SN8100/Qwen3.8-27B
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
+cd "$FORGE_ROOT/scripts" || exit 1
+export PYTHONWARNINGS=ignore TRACE=$TRACE MODEL=$MODEL
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
 # closed-form low-rank (LoRA-style) compensation of the deployed export, DeltaNet only and MLP only (rank 64)
-E0=$L/runs/export/full_mix25_mixer4_head4
+E0=$OUT/export/full_mix25_mixer4_head4
 for spec in gdn mlp; do
   EXPORT_DIR=$E0 TAG=abl_${spec}_lr64 PARTS=$spec LR_RANK=64 $PY -u qwen38_kl.py eval > $L/kl_eval_abl_${spec}_lr64.log 2>&1
   echo "$(date +%H:%M:%S) KL abl_${spec}_lr64: $(tail -1 $L/kl_eval_abl_${spec}_lr64.log | cut -c1-200)"
@@ -25,7 +26,7 @@ run() {  # tag, then env assignments
   echo "$(date +%H:%M:%S) GPTQ $T"
   env "$@" TAG=$T $PY -X faulthandler -u qwen38_gptq_27b.py > $L/run_$T.log 2>&1 || { echo "FAILED $T"; tail -3 $L/run_$T.log; return 1; }
   tail -1 $L/run_$T.log
-  EXPORT_DIR=$L/runs/export/$T $PY -u qwen38_kl.py eval > $L/kl_eval_$T.log 2>&1
+  EXPORT_DIR=$OUT/export/$T $PY -u qwen38_kl.py eval > $L/kl_eval_$T.log 2>&1
   echo "$(date +%H:%M:%S) KL $T: $(tail -1 $L/kl_eval_$T.log)"
 }
 run mix25_aw_cal PLAN=$L/plan_optiq_top48.json

@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"  # ane-vector-lut/scripts
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"  # scripts
 E = os.environ
 COREML_DIR = Path(os.path.expanduser(E.get("COREML_DIR", "~/Models/vq27b/ane7i/mix25in_aw_cal_lr64mix")))
 COREAI_DIR = Path(os.path.expanduser(E.get("COREAI_DIR", "~/Models/vq27b/coreai_ane7i/mix25in_aw_cal_lr64mix")))

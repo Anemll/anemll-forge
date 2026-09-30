@@ -1,9 +1,10 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 while pgrep -f "run_queue.sh|run_queue2.sh" >/dev/null; do sleep 60; done
-cd ~/SourceRelease/GITHUB/ML_playground/ane-vector-lut/scripts
+cd "$FORGE_ROOT/scripts" || exit 1
 export PYTHONWARNINGS=ignore
-PY=~/venvs/vq27b/bin/python
-L=/Volumes/SN8100/vq27b
+PY="$FORGE_PYTHON"
+L=$FORGE_WORK_DIR
 # 6: everything quantized (MLP 2.5-bit OptiQ mix, mixers LUT4 + scale, K/V INT8, lm_head LUT4 + scale), smoke test first
 if PLAN=$L/plan_optiq_top48.json MIXER="LUT4 per-tensor + pcs" HEAD="LUT4 per-tensor + pcs" BASELINE=0 NLAYERS=2 NCAL=4 NEVAL=2 BATCH=2 TAG=smoke_mixer \
      $PY -X faulthandler -u qwen38_gptq_27b.py > $L/run_smoke_mixer.log 2>&1; then

@@ -6,8 +6,8 @@
 # env: FORCE=1 (skip the "server / chat running" check), WATCHDOG_MB (swap growth that kills a phase, 1024),
 #      plus validate_full_model.py's (COREML_DIR, COREAI_DIR, CTX, PROMPT, G, NV, NP, STEPS, COREAI_BRIDGE)
 cd "${0:A:h}"
-PY_COREML=${PY_COREML:-$HOME/venvs/vq27b/bin/python}
-PY_COREAI=${PY_COREAI:-$HOME/venvs/vq27b-coreai/bin/python}
+PY_COREML=${PY_COREML:-$PWD/../../.venv/bin/python}
+PY_COREAI=${PY_COREAI:-$PWD/../.venv/bin/python}
 WATCHDOG_MB=${WATCHDOG_MB:-1024}
 LOG=val_full_$(date +%m%d_%H%M).log
 PHASES=(${@:-specialize coreml coreai compare})

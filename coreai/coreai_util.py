@@ -1,4 +1,4 @@
-"""Small Core AI helpers shared by the probes (was bench_stacked.specialization_for in fp8-mlp-metal41-bench)."""
+"""Small Core AI helpers shared by the probes (localized from the original benchmark helpers)."""
 from __future__ import annotations
 
 from coreai.runtime import ComputeUnitKind, SpecializationOptions

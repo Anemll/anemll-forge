@@ -2,11 +2,11 @@
 the head, the same scripted conversation through the Python-binding class and the bridge class (separate processes),
 every logits / features array compared. The embedding table is a small random stand-in (ids < 4096), so the 2.5 GB
 checkpoint read is skipped; outputs are meaningless as text but must match between the runtimes.
-    PY=~/venvs/vq27b-coreai/bin/python
-    $PY test_qwen_port.py py        # CoreAIQwenPy  -> port_py.npz
-    $PY test_qwen_port.py bridge    # CoreAIQwenBridge -> port_bridge.npz
-    $PY test_qwen_port.py compare
-    $PY test_qwen_port.py soak      # bridge: STEPS (2000) step() calls, time + memory every 200
+    PY=coreai/.venv/bin/python
+    $PY coreai/swift_bridge/test_qwen_port.py py        # CoreAIQwenPy  -> port_py.npz
+    $PY coreai/swift_bridge/test_qwen_port.py bridge    # CoreAIQwenBridge -> port_bridge.npz
+    $PY coreai/swift_bridge/test_qwen_port.py compare
+    $PY coreai/swift_bridge/test_qwen_port.py soak      # bridge: STEPS (2000) step() calls, time + memory every 200
 env: SRC (model dir), CHUNKS (0,1), TAPS (5,7)"""
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"  # ane-vector-lut/scripts
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"  # scripts
 SRC = Path(os.path.expanduser(os.environ.get("SRC", "~/Models/vq27b/coreai_ane7i/mix25in_aw_cal_lr64mix")))
 TEST = HERE / "test_model_2chunks"
 VOCAB = 4096

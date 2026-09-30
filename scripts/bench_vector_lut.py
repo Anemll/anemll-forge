@@ -58,8 +58,7 @@ from coreai_opt.coreai_utils.passes import weight_palettization
 from coreai_opt.coreai_utils._utils.palettize_utils import LutParams
 from coreai_opt.coreai_utils.passes.weight_palettization import palettize_weights
 
-from bench_sparsity import to_numpy
-from bench_stacked import SEED, remove_path, specialization_for
+from coreai_bench_helpers import SEED, remove_path, specialization_for, to_numpy
 
 ROOT = Path(__file__).resolve().parent
 ARTIFACTS = ROOT / "artifacts_vector_lut"

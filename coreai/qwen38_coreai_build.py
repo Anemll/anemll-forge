@@ -30,7 +30,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"  # ane-vector-lut/scripts
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"  # scripts
 # KMeans is imported lazily by qwen3_lut_common; no sklearn module stubs.
 sys.path.insert(0, str(SCRIPTS))
 os.environ.setdefault("EXPORT_DIR", os.path.expanduser("~/Models/vq27b/export/full_mix25_mixer4_head4"))
@@ -155,7 +155,7 @@ def softplus(x):  # the ANE's fp16 softplus returns 0 above ~11 (exp overflow)
     return F.relu(x) + torch.log(1 + torch.exp(-torch.abs(x)))
 
 
-# ANE fp16 DeltaNet / MLP numerics (ane-vector-lut/ANE_DELTANET_NUMERICS.md), same env switches as qwen38_ane_chunk.py.
+# ANE fp16 DeltaNet / MLP numerics (ANE_DELTANET_NUMERICS.md), same env switches as qwen38_ane_chunk.py.
 # SILU: the ANE's native silu has ~1e-3 ABSOLUTE error near 0 and >99% of the DeltaNet conv outputs lie in [-0.5, 0.5]
 #   (12% error on q / k / v); "tanh" (default) = 0.5 x (1 + tanh(x / 2)) for the conv and the gate silu(z), "native" =
 #   F.silu. MLP_SILU: the same for the MLP gate (default tanh here; 5-6% error on silu(gate) * up with native).

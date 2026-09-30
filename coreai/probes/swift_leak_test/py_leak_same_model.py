@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from coreai.runtime import AIModel, NDArray
 from coreai.runtime._ndarray import StorageKind
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # ane-vector-lut/coreai
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # coreai
 from coreai_util import specialization_for
 
 PATH = "/Volumes/SSD4TB/vq27b-ane/builds/coreai_ane6/mix25_aw_cal_lr64mix/chunk_L00-03.aimodel"

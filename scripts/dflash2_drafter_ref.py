@@ -13,7 +13,7 @@ reference (dflash-07ebd93/dflash/model.py, DFlash2DraftModel + dflash_generate) 
 
     python dflash2_drafter_ref.py validate      # vs the bundle reference on identical inputs (fp32)
 Env: DRAFTER (checkpoint dir with config.json + model.safetensors), MODEL (target checkpoint, for the shared
-embedding / lm_head), REF_CODE (bundle code dir with dflash/model.py).
+embedding / lm_head), REF_CODE (optional override for the vendored reference with dflash/model.py).
 """
 import json
 import os
@@ -30,7 +30,7 @@ DRAFTER = Path(os.path.expanduser(os.environ.get(
     "DRAFTER", "/path/to/data/DFlash2-ANE-handoff-20260926/checkpoint")))
 MODEL = Path(os.path.expanduser(os.environ.get("MODEL", "/path/to/data/Qwen3.8-27B")))
 REF_CODE = Path(os.path.expanduser(os.environ.get(
-    "REF_CODE", "/path/to/data/DFlash2-ANE-handoff-20260926/code/dflash-07ebd93")))
+    "REF_CODE", str(Path(__file__).resolve().parents[1] / "vendor/dflash_reference"))))
 TAPS = (5, 19, 33, 47, 61)
 torch.set_grad_enabled(False)
 

@@ -1,11 +1,12 @@
 #!/bin/zsh
+source "${0:A:h}/../common.zsh" || exit $?
 # M3U helper: memory guard for run_ane7_drafter.sh (copy of dflash_guard.sh, 12:58 2026-09-27).
 # Pauses (SIGSTOP) the running dflash/lowrank python while a KL eval runs (52 GB model on the GPU + ~30 GB sim do not
 # fit in 96 GB: swap 4 -> 18 GB in minutes, 09:47) or on critical pressure (swap growth alone is not a trigger since 11:17:
 # with pressure normal it was compression of paused state, not thrashing); resumes it (SIGCONT)
 # when no KL eval runs and pressure has been normal (1) for 60 s (was <= warn until 12:25: critical at 12:24).
 # Exits when run_ane7_drafter.sh is gone and never leaves a process stopped.
-L=/Volumes/SN8100/vq27b
+L=$FORGE_WORK_DIR
 OUT=$L/dflash_guard.log
 log() { echo "$(date +%H:%M:%S) $*" >> $OUT; }
 swap_mb() { sysctl -n vm.swapusage | awk '{print int($6)}'; }

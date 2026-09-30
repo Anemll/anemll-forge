@@ -1,13 +1,13 @@
 # Experiment map
 
-Original module names are retained to keep the research trail navigable. Historical Markdown notes stay at the repository root except for the original vector-LUT README. Paths identifying the author's machine were generalized. Notes contain historical commands and some external references; they are not all standalone tutorials yet.
+Original module names are retained to keep the research trail navigable. Historical Markdown notes stay at the repository root except for the original vector-LUT README. Runnable source paths now resolve within Forge; the [localized research pipelines](../pipelines/m3u/README.md) configure external weights, datasets and outputs. Historical measurements have not been rerun during localization.
 
 ## Quantization and quality
 
 - `scripts/qwen3_lut_common.py`: shared LUT formats, k-means, rotations and GPTQ.
 - `scripts/qwen38_gptq_27b.py`: full checkpoint export and sensitivity sweeps.
 - `scripts/qwen38_plan.py` and `qwen38_plan_indomain.py`: bit allocation from measured sensitivity.
-- `scripts/qwen38_plan_mixr.py`: measured mixer-to-MLP byte trade behind the deployed `mix25in_mixr_lr64mix` export; [exact historical pipelines](../pipelines/m3u/README.md).
+- `scripts/qwen38_plan_mixr.py`: measured mixer-to-MLP byte trade behind the deployed `mix25in_mixr_lr64mix` export; [localized historical pipelines and original hashes](../pipelines/m3u/README.md).
 - `scripts/qwen38_calib_gen.py`: self-generated calibration; `qwen38_calib_pi.py`: explicit user-selected session importer.
 - `scripts/qwen38_blockrecon.py` and `qwen38_lowrank_export.py`: reconstruction and low-rank correction.
 - `scripts/qwen38_lowrank_aw.py`, `qwen38_lowrank_dyn.py`: activation-weighted factors and dynamic rank allocation; `qwen38_wikippl.py`: export evaluation on the quantizer's WikiText windows.
@@ -33,13 +33,13 @@ Original module names are retained to keep the research trail navigable. Histori
 - `scripts/qwen38_spec_unit_test.py`: a CPU statistical sampler test (large sample count, not a fast unit test).
 - [Core AI notebook](../COREAI_PORT_NOTES.md) and [DFlash2 notebook](../DFLASH2_ANE_PLAN.md).
 
-## Reproduction gaps retained explicitly
+## Local helpers and remaining reproduction gaps
 
-- `bench_vector_lut.py` imports external `bench_stacked` and `bench_sparsity` helpers; these were not in the source tree.
-- Some probes require `ane_mil_bench`, `time_models`, private API tools, or source from the sibling `fp8-mlp-metal41-bench` repository.
+- [bench_vector_lut.py](../scripts/bench_vector_lut.py) uses [coreai_bench_helpers.py](../scripts/coreai_bench_helpers.py) locally. Weight-sharing, output-pool, KV-slice/writer, attention-entry, overhead-slope and build-merge probes are included under [coreai/probes](../coreai/probes/coreai_entry_share.py); imported source hashes are in [LOCAL_EXPERIMENT_IMPORTS.json](../provenance/LOCAL_EXPERIMENT_IMPORTS.json).
+- The [Core ML timer](../tools/coreml/README.md) is included with its Apple license. Historical direct-ANE measurements used a separate private `ane_mil_bench` tool that is not distributed; these are historical evidence, not a runnable Forge recipe or equivalent to public Core ML timing. Private API surveys remain unavailable.
 - `qwen38_decode_ref.py` standalone validation expects extracted layer test tensors; the full builder uses its own checkpoint loader.
-- Drafter reference parity can require a separate `dflash` source checkout and checkpoint.
-- Historical `tests/*.py` cited under model artifact directories were not in this source repository. They need to be recovered or replaced before the corresponding claims are independently reproducible.
+- Drafter reference parity uses the [vendored DFlash reference](../vendor/dflash_reference/README.md) by default, with its original MIT notice. Checkpoints remain separate inputs.
+- The four historical context tests named in the Core AI notebook (`op_limit_test.py`, `decode_ctx_test.py`, `transition_test.py`, `drafter_gap_test.py`) are unavailable. They need to be recovered or replaced before the corresponding claims are independently reproducible; current bridge validation and paired smoke tests cover different checks.
 - Quantized exports, token traces, numeric arrays, compiled packages, and private session data were deliberately not imported as source assets. The deployed [mixr bit plan](../configs/quantization/mix25in_mixr.json), retrieval provenance and export-header inspection are now included; headers do not establish tensor-payload or compiled-package lineage.
 - The local service manager and personal pi configuration editor were excluded. Use the foreground launcher; it does not stop existing servers or edit agent settings.
 - Research probes may overwrite their own output directories or clear selected compiler caches. They are not part of the fast test suite and are not automatically run.

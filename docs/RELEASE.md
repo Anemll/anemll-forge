@@ -24,7 +24,7 @@ The earlier target-only staging inventory is incomplete for this release scope. 
 - Check the upstream OptiQ sensitivity dataset's attribution and redistribution terms before public distribution; the newly imported sensitivity notes identify its source.
 - Pin the public dependency sources, including any coremltools patches and Core AI SDK constraints; produce a clean install/build test.
 - Recover and review the exact best mixed-bit plan, calibration recipe, export metadata and reference trace. Publish only data with suitable rights and explicit consent; replace private sessions with reproducible public or synthetic fixtures.
-- Recover missing external benchmark helpers and validation harnesses, or replace them with standalone equivalents.
+- Local benchmark helpers, research probes, the licensed Core ML timer and DFlash reference source are included. Recover or replace the four unavailable historical context validation harnesses before claiming those exact results are independently reproducible; do not substitute different tests without stating the changed method.
 - Audit direct research entry points for machine paths, output overwrites, cache operations, SDK/private API use and unsupported modes. `forge.py` covers the documented first path; the entire notebook collection is not yet portable.
 - Rebuild a single chunk, check ANE placement and finite/norm/L2 parity, then rebuild the full target. Validate long generation, context transitions, sampling and memory stability on the claimed hardware/OS.
 - Confirm artifact formats and hashes, tokenizer/template behavior, upstream notices, test data provenance, resource requirements and documented failure messages.

@@ -7,9 +7,8 @@
 Living document. Every experiment lists the command that reproduces it. Core AI / memory topics live in
 `COREAI_PORT_NOTES.md` and `FEEDBACK_ANE_MULTIFUNCTION_MEMORY.md`.
 
-Machines: **M6** (32 GB, macOS 27, ANE target, `~/venvs/vq27b`), **M3U** (M3 Ultra, 96 GB, `ssh user@quantization-host`,
-bf16 checkpoint + calibration + KL reference on `/path/to/data`). Scripts: `ane-vector-lut/scripts/` (same tree on
-both machines; copy changed scripts to the M3U with `scp`).
+Machines: **M6** (32 GB, macOS 27, ANE target, historical research environment), **M3U** (M3 Ultra, 96 GB, `ssh user@quantization-host`,
+bf16 checkpoint + calibration + KL reference on `/path/to/data`). Scripts now live in Forge under `scripts/`. Historical bare-script commands below assume `cd scripts` from the Forge root with a compatible Python environment; [localized pipelines](pipelines/m3u/README.md) discover code paths automatically. Use the same pinned Forge revision on each machine. Measurements were not rerun during localization.
 
 ## 1. Model and weight layout
 
@@ -206,7 +205,7 @@ Draft vs plain on the M6 ANE target (16K v4 build + DFlash2 LUT4 drafter), same 
 state per run, DRY 0.8 (allowed 8), loop guard 6, then a teacher-forced check of 8-row verify blocks vs 1-row steps
 (KL, top-1, entropy per row in the block):
 ```
-cd ane-vector-lut/scripts && ANE_OUT=~/Models/vq27b/ane4 CTX=16384 SEEDS=1,2,3 python -u qwen38_spec_ab.py
+cd scripts && ANE_OUT=~/Models/vq27b/ane4 CTX=16384 SEEDS=1,2,3 python -u qwen38_spec_ab.py
 # more seeds: SEEDS=4,5,6 TF=0; non-thinking: THINK=0 TEMP=0.7 MAX=2000 PROMPT="what is apple neural engine"
 ```
 Batch 1 (2026-09-27 00:05, buggy-softplus build `~/Models/vq27b/ane4`, tetris, thinking on, temp 1.0, MAX 4000;

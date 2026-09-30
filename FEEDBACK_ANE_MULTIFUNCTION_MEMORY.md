@@ -17,12 +17,14 @@ memory is N times the weights. That rules out keeping more than one shape of a l
 Model: one decoder chunk of Qwen3.8-27B (4 layers, palettized LUT weights, 0.69 GB on disk), two functions that
 differ only in the KV-cache input length (`ctx2048`, `ctx8192`; identical weights, deduplicated).
 
-- Build: `ane-vector-lut/scripts/qwen38_mf_share_test.py` (writes `mftest/chunk_L00-03_mf_2048_8192.mlmodelc`).
-- Load test: `ane-vector-lut/scripts/mf_asset_share.swift`:
+- Build: `scripts/qwen38_mf_share_test.py` (writes `mftest/chunk_L00-03_mf_2048_8192.mlmodelc`).
+- Load test: `scripts/mf_asset_share.swift`:
   ```
-  swiftc -O -parse-as-library mf_asset_share.swift -o mf_asset_share
-  ./mf_asset_share chunk_L00-03_mf_2048_8192.mlmodelc ctx2048 ctx8192 asset      # one MLModelAsset, 2 loads
-  ./mf_asset_share chunk_L00-03_mf_2048_8192.mlmodelc ctx2048 ctx8192 separate   # MLModel(contentsOf:) x 2
+  # From the Forge root; ANE_OUT is your prepared Core ML build directory.
+  ANE_OUT="$ANE_OUT" CTXS=2048,8192 python scripts/qwen38_mf_share_test.py
+  swiftc -O -parse-as-library scripts/mf_asset_share.swift -o /tmp/forge-mf-asset-share
+  /tmp/forge-mf-asset-share "$ANE_OUT/mftest/chunk_L00-03_mf_2048_8192.mlmodelc" ctx2048 ctx8192 asset
+  /tmp/forge-mf-asset-share "$ANE_OUT/mftest/chunk_L00-03_mf_2048_8192.mlmodelc" ctx2048 ctx8192 separate
   ```
   Wired memory is read with `host_statistics64` (`wire_count`) after each load and first prediction;
   compute units `.cpuAndNeuralEngine`.
@@ -54,7 +56,7 @@ disk. Both run fully on the ANE (Core AI manifest: `mps.fullyPlacedOnANE`, `mps.
 
 Core AI keeps one resident copy of the weights for all entry points; Core ML wires another copy for every function.
 (Core ML timings include numpy input copies of the K/V inputs.)
-Scripts: `ane-vector-lut/scripts/coreml_entry_share.py`, `fp8-mlp-metal41-bench/coreai/coreai_entry_share.py ladder`.
+Scripts: `scripts/coreml_entry_share.py`, `coreai/probes/coreai_entry_share.py ladder`.
 
 Confirmed with a real layer of the target (Qwen3.8-27B layer 3: gated attention over KV-cache inputs + 4-bit LUT MLP,
 208 MB): one `.aimodel` with entry points for KV length 2K / 8K / 16K: using all three instead of one adds 0.09 GB
@@ -92,7 +94,7 @@ call for our model), the runtime's output pool keeps growing (per-chunk call tim
 - Not Python object lifetime: gc every call with a frozen heap changes nothing (`coreai_leak_probe.py`).
 - No API to supply output buffers (Core ML has `outputBackings`), so a decoder that calls 17 programs per token
   (~50 tokens here) cannot run.
-- Repro: `fp8-mlp-metal41-bench/coreai/coreai_leak_probe.py` (one chunk, loop of calls, prints wired memory and
+- Repro: `coreai/probes/coreai_leak_probe.py` (one chunk, loop of calls, prints wired memory and
   per-call time until the fatal error). Model: Qwen3.8-27B chunk (4 layers) exported with coreai-torch 0.4.2,
   coreai-core 1.0.0b2 runtime.
 
@@ -111,8 +113,8 @@ of Qwen3.8-27B, where the ANE output was ~50% wrong while the model still produc
   it back into `silu`; `0.5 x (1 + tanh(x / 2))` is accurate (0.1%).
 - fp16 subnormal values (< 6.1e-5) lose their precision on the ANE: a matmul output with 61% subnormal values was
   20% off (0.25% after scaling the inputs into the normal range).
-- Repro: one-layer chunk with extra outputs, `UNITS=CPU_ONLY` vs `CPU_AND_NE` (ane-vector-lut/scripts:
-  `qwen38_ane_capture.py`, `DBG_MIXER_IN=1 DBG_TAPS=gdn` builds); details in ane-vector-lut/ANE_DELTANET_NUMERICS.md.
+- Repro: one-layer chunk with extra outputs, `UNITS=CPU_ONLY` vs `CPU_AND_NE` (scripts:
+  `qwen38_ane_capture.py`, `DBG_MIXER_IN=1 DBG_TAPS=gdn` builds); details in ANE_DELTANET_NUMERICS.md.
 
 Questions: is the ANE silu (and other activation) accuracy near 0 documented? Are subnormals flushed to zero on the
 ANE? Could the silu fusion pass keep an accurate form when the target is the ANE?

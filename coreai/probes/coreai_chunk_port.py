@@ -1,7 +1,7 @@
 """Core AI port of the Qwen3.8-27B v4 chunk L00-03 (3 Gated DeltaNet + 1 gated attention; T-row lazy-commit DeltaNet
 with host-owned conv / rec / pend buffers; KV caches as read-only inputs with mask (1, CTX), block rows out as
 k3_new / v3_new) - a torch mirror of qwen38_ane_chunk.py (gdn_lazy_block, delta_core / delta_out, attn_prefill KV_IN,
-rms_hidden, rot_conv, lut_linear) on the exported weights (ane-vector-lut/scripts/coreai_chunk_ref.py dump).
+rms_hidden, rot_conv, lut_linear) on the exported weights (scripts/coreai_chunk_ref.py dump).
 
     cpu    : torch (fp32 / fp16 CPU) vs the Core ML v4 chunk outputs (coreai_chunk_ref.py ref) - validates the port
     export : Core AI program with entry points v8_<ctx> (T=8 at each ctx in CTXS), exact LUTs injected (vector 2x16 MLP,
@@ -372,7 +372,7 @@ def placement(since: float) -> str:
 async def mode_ane():
     from coreai.runtime import AIModel, NDArray
     from coreai.runtime._ndarray import StorageKind
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ane-vector-lut/coreai
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # coreai
     from coreai_util import specialization_for
     path = ROOT / f"{NAME}.aimodel"
     names = Chunk.input_names(type("X", (), {"gdn_j": [j for j, i in enumerate(LAYERS) if CFG["layer_types"][i] == "linear_attention"],

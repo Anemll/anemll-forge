@@ -56,7 +56,7 @@ def vocab_by_frequency():
     ends = np.cumsum(d["lengths"])
     keep = [d["ids"][e - n:e] for e, n, p in zip(ends, d["lengths"], KL_PROMPTS) if p not in PROMPTS]
     counts = np.bincount(np.concatenate(keep), minlength=248320).astype(np.float64)
-    wiki = Path("/path/to/data/vq27b/wikitext/qwen38_train_ids.npy")
+    wiki = Path(os.environ.get("WIKI", "/path/to/data/vq27b/wikitext")) / "qwen38_train_ids.npy"
     if wiki.exists():
         counts += 0.25 * np.bincount(np.load(wiki), minlength=248320)[:248320]
     # blend with the BPE id order (earlier merges are more frequent in general text); specials always first

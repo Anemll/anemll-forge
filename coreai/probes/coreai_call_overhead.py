@@ -1,4 +1,4 @@
-"""Core AI per-call overhead on the ANE, twin of ane-vector-lut/scripts/qwen38_call_overhead.py (Core ML): the same
+"""Core AI per-call overhead on the ANE, twin of scripts/qwen38_call_overhead.py (Core ML): the same
 1x1 conv + add, optionally with a large KV-like input (4, S, 256) of which only 8 values are read (per-call cost of
 passing a big buffer: mapped or copied?), timed alone and as a chain of 16 dependent calls.
     .venv/bin/python coreai_call_overhead.py"""
@@ -19,7 +19,7 @@ from coreai.runtime._ndarray import StorageKind
 from coreai_opt.casting import cast_to_16_bit_precision
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ane-vector-lut/coreai (builder, coreai_util)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # coreai (builder, coreai_util)
 from coreai_util import specialization_for
 
 ROOT = Path(__file__).resolve().parent / "artifacts_call_overhead"

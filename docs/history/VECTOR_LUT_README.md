@@ -287,9 +287,11 @@ built at 8 and 16 layers. Per-layer time = (T16 − T8) / 8, which removes the f
 Core ML median; every conv on the ANE.
 
 ```sh
-for s in 8 16; do C=4096 S=$s python lut_fp8_coreml.py dense fp8_dense fp8_s4 fp8_v2n6 fp8_v2n4 \
+# From the Forge root with a compatible research environment.
+for s in 8 16; do C=4096 S=$s python scripts/lut_fp8_coreml.py dense fp8_dense fp8_s4 fp8_v2n6 fp8_v2n4 \
     fp8_v4n6 fp8_v4n4 fp8_v8n4 fp8_v16n4; done
-time_models --units ane --iters 50 --rounds 5 lut_fp8_coreml/*_C4096_S*.mlmodelc
+swiftc -O -parse-as-library tools/coreml/time_models.swift -o /tmp/forge-time-models
+/tmp/forge-time-models --units ane --iters 50 --rounds 5 scripts/lut_fp8_coreml/*_C4096_S*.mlmodelc
 ```
 
 | Weights | bits/w | Compression vs FP16 | ms / layer | Speedup vs FP16 | Speedup vs FP8 | Rate |
@@ -387,15 +389,14 @@ def vector_palettize(w2d, cd, nb):
 
 | Script | What |
 |---|---|
-| `bench_vector_lut.py` | Core AI conv or `nn.Linear` chain, dense / scalar / vector LUTs, `--group-size`, `--lut-dtype`; placement, compiled size, cosine, timing. Imports `bench_stacked` / `bench_sparsity` from `fp8-mlp-metal41-bench/coreai`, so run it from there. |
+| `bench_vector_lut.py` | Core AI conv or `nn.Linear` chain, dense / scalar / vector LUTs, `--group-size`, `--lut-dtype`; placement, compiled size, cosine, timing. Uses the local `scripts/coreai_bench_helpers.py`; run from Forge with a compatible Core AI environment. |
 | `vector_lut_coreml.py` | Same chain in MIL: `cdXnbY` variants (e.g. `cd4nb4`), `--place-only`, `MLComputePlan` placement |
 | `lut_rules.py` | Rule checks: vector size, LUT size, axis, groups, INT8 LUT, 3×3 stride/dilation, `linear`/`matmul` |
 | `lut_stream.py` | Parallel-branch bandwidth test (native decode vs expansion), for timing with `ane_mil_bench` |
 | `lut_accuracy.py` | k-means scalar vs vector weight SNR on ResNet50 and Gaussian weights (`uv run --with scikit-learn`) |
 | `lut_fp8_coreml.py` | FP8 / INT8 / FP16 LUT values, scalar and vector, through Core ML MIL (iOS 26): placement, cosine; writes `.mlmodelc` for timing. Needs the coremltools `fp8-ane-support` branch |
 
-Direct ANE timing used `~/Models/ANE/tools/ane_mil_bench <model.mlmodelc>` (private
-`_ANEInMemoryModel`, see `ANE_FP8_PRIVATE_NOTES.md`). ANE compiler failures were read with
+Historical direct ANE timing used the separately built private `ane_mil_bench` tool (`_ANEInMemoryModel`; see `ANE_FP8_PRIVATE_NOTES.md`). That tool is not distributed, so those measurements are historical evidence, not a runnable Forge recipe. Public Core ML timing is available through the included [timer and license](../../tools/coreml/README.md); it measures a different execution path. ANE compiler failures were read with
 `/usr/bin/log stream --predicate 'process CONTAINS "ANECompiler"'`; the messages are `<private>`,
 but "Validation failure … Failed to add an input-ready layer" marks the failing conv.
 

@@ -30,7 +30,7 @@ MODEL_ID = "qwen38-27b-ane"
 # The drafter's ANE call stalls (300-700 ms, a few per 100 cycles, the next verify too) when it is submitted
 # within ~2 ms of the target verify's return: greedy leaves ~1.5 ms of host work there, sampling ~6 ms. A 3 ms
 # minimum gap removes the stalls (M6, Core AI target + drafter, 16K greedy, 4 runs each: 10 drafter + 4 verify
-# stalls vs none; tests/drafter_gap_test.py).
+# stalls vs none; historical drafter_gap_test.py harness, not distributed).
 DRAFT_GAP = float(os.environ.get("DRAFT_GAP_MS", "3")) / 1e3
 # Thinking budget: a reasoning that reaches its budget without "</think>" is closed with Qwen's budget phrase and the
 # answer follows (the quantized model can deliberate past pi's 16K maxTokens: 2026-09-28, 16384 tokens of thinking,

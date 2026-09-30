@@ -4,6 +4,8 @@
 
 # Core AI port notes (Qwen3.8-27B target on the M6 ANE)
 
+Recipe paths below are localized to Forge and commands run from its root. Set checkpoint, export and output inputs explicitly using [WORKFLOW.md](docs/WORKFLOW.md); experimental data is not bundled. Source localization does not rerun historical measurements. The four unavailable context harnesses are listed in [EXPERIMENTS.md](docs/EXPERIMENTS.md); current [bridge validation](coreai/swift_bridge/validate_full_model.py) is a separate check.
+
 Why: Core ML multifunction models wire one weight copy per loaded function on the ANE
 (`FEEDBACK_ANE_MULTIFUNCTION_MEMORY.md`), so prefill-64 + verify-8 + a context ladder cannot co-reside for a 27B
 model. Core AI entry points share one weight copy (same ODIX + MPSGraph machinery as Apple's AFM package).
@@ -13,11 +15,11 @@ model. Core AI entry points share one weight copy (same ODIX + MPSGraph machiner
 - 537 MB FP16 toy, 4 entry points (8 rows at KV 2K / 8K / 16K, 64 rows at 2K) in one `.aimodel`: wired +0.50 GB
   total (Core ML multifunction: +1.75 GB), all `mps.fullyPlacedOnANE`, 4.8-5.0 ms per call; 64 rows cost the same as
   8. Compiled cache: one `resources.bin` (537 MB) + one ANE region per entry point.
-  (`fp8-mlp-metal41-bench/coreai/coreai_entry_share.py [ladder]`, `ane-vector-lut/scripts/coreml_entry_share.py`)
+  (`coreai/probes/coreai_entry_share.py [ladder]`, `scripts/coreml_entry_share.py`)
 - Weight formats: FP16 LUT values, scalar and vector (`cluster_dim` 2-16) palettization run on the ANE through
   coreai-opt. No FP8 / INT8 LUT values. INT8 / FP8 per-channel weights (non-LUT) do export.
 
-### Real layers of the target (2026-09-27; `coreai/probes/coreai_chunk_port.py`, `fp8-mlp-metal41-bench/coreai/coreai_attn_entries.py`)
+### Real layers of the target (2026-09-27; `coreai/probes/coreai_chunk_port.py`, `coreai/probes/coreai_attn_entries.py`)
 
 Port = torch mirror of the v4 chunk (lazy-commit DeltaNet with host-owned conv / rec / pend buffers, KV as read-only
 inputs + mask (1, CTX), k/v rows out), exact exported weights: `coreai_chunk_ref.py dump` (vq27b venv) writes the
@@ -74,20 +76,20 @@ Files:
   P-row layout, zero pending rows, like the MIL `gdn_lazy_prefill_block`). Also `head_T8.aimodel` and
   `manifest.json`. Output: `~/Models/vq27b/coreai/<export>/`.
   ```
-  cd ane-vector-lut/coreai && unset USE_LOCAL_COREAI
-  .venv/bin/python qwen38_coreai_build.py chunk 0-3 --ctx 2048,8192,16384,32768,65536 --pctx 2048
-  .venv/bin/python qwen38_coreai_build.py all --ctx 2048,8192,16384,32768,65536 --pctx 2048   # 16 x 4 layers + head
+  unset USE_LOCAL_COREAI
+  coreai/.venv/bin/python coreai/qwen38_coreai_build.py chunk 0-3 --ctx 2048,8192,16384,32768,65536 --pctx 2048
+  coreai/.venv/bin/python coreai/qwen38_coreai_build.py all --ctx 2048,8192,16384,32768,65536 --pctx 2048   # 16 x 4 layers + head
   ```
-- Layout (moved from fp8-mlp-metal41-bench/coreai on 2026-09-28): `coreai/` holds the builder, `qwen38_coreai_batch.py` (parallel chunk builds, e.g. on the M3U), `qwen38_coreai_greedy.py` (size-limited chunk plan + single-chunk ANE load test: `probe <package>`), `coreai_util.py`; `coreai/swift_bridge/` the Swift runtime bridge (libcoreai_bridge.dylib, coreai_bridge.py) and its validation / timing tools; `coreai/probes/` one-off Qwen Core AI probes. Build venv: `coreai/.venv` (not in git), made with `uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements_build.txt`. The serving runtime stays in `scripts/` (`qwen38_coreai_model.py`, venv ~/venvs/vq27b-coreai).
+- Local layout: `coreai/` holds the builder, `qwen38_coreai_batch.py` (parallel chunk builds, e.g. on the M3U), `qwen38_coreai_greedy.py` (size-limited chunk plan + single-chunk ANE load test: `probe <package>`), `coreai_util.py`; `coreai/swift_bridge/` the Swift runtime bridge (libcoreai_bridge.dylib, coreai_bridge.py) and its validation / timing tools; `coreai/probes/` one-off Qwen Core AI probes. Build venv: `coreai/.venv` (not in git), using the separate compatible SDK stack described in [ENVIRONMENT.md](docs/ENVIRONMENT.md); the observed requirements snapshot is [included](docs/history/coreai-requirements-observed.txt), but a clean public build install is unverified. The serving runtime stays in `scripts/` (`qwen38_coreai_model.py`); prepared inference uses the root `.venv` and Swift bridge.
 - `qwen38_coreai_stage1.py entries|inplace|size8`: entry timing, prefill-64 vs 8 x verify-8 parity, in-place KV
   check on a real chunk.
 - `qwen38_coreai_bisect.py "<layers>:<entries>" ...`: builds small packages and reports ANE placement, then
   deletes each package and its cache entry.
-- `ane-vector-lut/scripts/qwen38_coreai_model.py`: runtime `CoreAIQwen` with the AneQwen3 API. All entry points are
+- `scripts/qwen38_coreai_model.py`: runtime `CoreAIQwen` with the AneQwen3 API. All entry points are
   loaded up front; `resize` swaps KV buffers and entry names with no reload. DeltaNet buffers are passed straight from
   one call's outputs to the next call's inputs. KV caches are host NDArrays written in place. Loads precompiled
   `.aimodelc` when present, with a purge-cache-and-retry fallback.
-- `ane-vector-lut/scripts/qwen38_coreai_verify.py dump coreml|coreai`, `compare`, `greedy <rt>`, `speed`: stage 4
+- `scripts/qwen38_coreai_verify.py dump coreml|coreai`, `compare`, `greedy <rt>`, `speed`: stage 4
   harness (teacher-forced logits vs the ane5 Core ML build, ppl, greedy, per-entry speed, switch time).
 
 Findings:
@@ -122,7 +124,7 @@ cache (~0.84 GB), so 16 chunks + head need ~25 GB (~13 GB if compiled once to `.
 deleted). The space is held by 19 leftover Core ML temp compiles of the drafter in `$TMPDIR`
 (`dflash2_lut4_rtn_*.mlmodelc`, 1.5 GB each, 28 GB, 09-26 18:34 to 09-27 00:52, none open). Loading the drafter
 `.mlpackage` compiles a new copy every time and never deletes it. Fix: compile the drafter once to `.mlmodelc`,
-load that, and delete the temp copies. Other large non-port items: `fp8-mlp-metal41-bench/coreai/artifacts_vector_lut`
+load that, and delete the temp copies. Other large non-port items: the original vector-LUT artifact directory (not distributed)
 (16 GB, 09-25), `artifacts_chunk` (3.3 GB incl. a 1.5 GB `.mlir`), and older coreai-cache entries (~20 GB, 09-22..26).
 
 ## Test plan (Core AI is a different compiler: MLIR -> MPSGraph -> ANE regions, not MIL -> E5RT)
@@ -174,13 +176,13 @@ Test in this order, each against the MIL / torch reference, before porting anyth
 
 Build: 16 chunks x 4 layers + head, entries v8_2k / v8_8k / v8_16k / p64_2k, one package per chunk (0.73-0.78 GB),
 9.9 GB total, ~3.3 min per chunk (two build processes in parallel, separate OUT dirs, merged with
-`coreai_merge_builds.py`); first load compiles every entry (402 s), cached loads ~1-7 s. All entries of every chunk
+`coreai/probes/coreai_merge_builds.py`); first load compiles every entry (402 s), cached loads ~1-7 s. All entries of every chunk
 fully on the ANE, one region each, no GPU.
 ```
-cd ane-vector-lut/coreai && unset USE_LOCAL_COREAI
-EXPORT_DIR=~/Models/vq27b/export/mix25_aw_cal_lr64mix OUT=~/Models/vq27b/coreai_ane6 .venv/bin/python qwen38_coreai_build.py all \
-    --plan 0-3,...,60-63 --ctx 2048,8192,16384 --pctx 2048
-COREAI_DIR=~/Models/vq27b/coreai_ane6/mix25_aw_cal_lr64mix .venv/bin/python ../scripts/qwen38_coreai_verify.py speed
+unset USE_LOCAL_COREAI
+EXPORT_DIR=~/Models/vq27b/export/mix25_aw_cal_lr64mix OUT=~/Models/vq27b/coreai_ane6 coreai/.venv/bin/python coreai/qwen38_coreai_build.py all \
+    --ctx 2048,8192,16384 --pctx 2048
+COREAI_DIR=~/Models/vq27b/coreai_ane6/mix25_aw_cal_lr64mix coreai/.venv/bin/python scripts/qwen38_coreai_verify.py speed
 ```
 `xcrun coreai-build compile` (--compile) produced packages this OS refuses ("MPSGraph Package Version ... up to 7.0.80"):
 don't precompile; load the .aimodel (the cache compiles once).
@@ -226,9 +228,9 @@ aned logs every program load (`log stream --info --predicate 'process == "aned"'
 
 Mode 2 outputs are bit-identical to the default (12 outputs x 3 calls, both entries). MPSGraph normally keeps a
 "bonded" and a "nonbonded" variant of every procedure (Apple's AFM binary has 44 procedure variants for 22 entries);
-mode 2 keeps the fast one. Set by qwen38_server.sh for RUNTIME=coreai. The AFM package ships its hwx precompiled
+mode 2 keeps the fast one. The historical service manager set it for RUNTIME=coreai; the current runtime defaults to mode 2 through `forge.py serve --runtime coreai`. The AFM package ships its hwx precompiled
 (`enableCompileResourcesForPackage`), and its KV caches are prewired IOSurface state inputs; neither is available through
-the public coreai-torch / coreai-build today. Private-API survey: fp8-mlp-metal41-bench/coreai/private_ane_research/.
+the public coreai-torch / coreai-build today. The historical private-API survey is not included and is not a Forge reproduction recipe.
 
 Full model with mode 2 (coreai_mixr/mix25in_mixr_lr64mix: 16 chunks x 4 entries v8/p64 at 16K and 24K + head, 9.9 GB
 of packages on disk; bridge runtime, 2026-09-28). aned loads 17 programs, one per package; all 4 entries of a chunk share
@@ -258,7 +260,7 @@ instead of aborting. The DFlash2 drafter is a single-function Core ML package (1
 
 One 4-layer chunk (L60-63, LUT4 mixers) with v8 + p64 entries at 8K, 16K, 24K, 32K, 48K and 64K (12 entries, 824 MB
 package; built on the M3U with `qwen38_coreai_batch.py --ctx 8192,16384,24576,32768,49152,65536`), loaded alone on the
-M6 in mode 2 next to the running server (`tests/op_limit_test.py`): all 12 entries run, first load (ANE compile) 56 s.
+M6 in mode 2 next to the running server (`op_limit_test.py` (historical harness, unavailable)): all 12 entries run, first load (ANE compile) 56 s.
 Compared with the deployed 4-entry chunk of the same layers (16K / 24K), measured back to back:
 
 | chunk L60-63 | package | program (modelSize) | wired | scratch (wired - program) |
@@ -295,12 +297,12 @@ load compiles 16 x ~60 s, then 1-3 s from the cache). `qwen38_coreai_verify.py s
 | 64K | 204.7 / 205.3 / 209.5 ms | 80 tok/s | 411 ms | +21.1 GB |
 
 Wired grows by the KV only (~0.55 GB per 8K); with the Core AI drafter +1.5 GB more (64K: +22.6 GB, ~25.4 GB of
-32 GB). Decode (server Engine + Core AI drafter, target pinned to each entry, `tests/decode_ctx_test.py`, 512 tokens,
+32 GB). Decode (server Engine + Core AI drafter, target pinned to each entry, `decode_ctx_test.py` (historical harness, unavailable), 512 tokens,
 coding prompt, cold): sampled 32.3 / 30.0 / 25.5 / 23.8 / 20.6 / 18.3 tok/s at 8K / 16K / 24K / 32K / 48K / 64K;
 greedy 35.2 tok/s at 8K, 20.8 at 64K (4.70 tok/cycle). Greedy text is identical on all six entries; trace ppl on 8
 sequences (5896 tokens) 2.1986 at 8K vs 2.1983 at 64K.
 
-Context transitions on real prompts (`tests/transition_test.py`: the ladder grows mid-prefill or mid-decode vs the same
+Context transitions on real prompts (`transition_test.py` (historical harness, unavailable): the ladder grows mid-prefill or mid-decode vs the same
 request pinned to the larger entry): greedy text identical in all three cases (8K -> 16K during decode and during
 prefill; a 32.6K-token prompt through 8K -> 16K -> 24K -> 32K, then 32K -> 48K during decode). KV rows moved in
 64-513 ms per switch. Growing is faster than pinning: the 32.6K prompt prefills in 207 s (158 tok/s) vs 327 s
@@ -309,7 +311,7 @@ prefill; a 32.6K-token prompt through 8K -> 16K -> 24K -> 32K, then 32K -> 48K d
 Drafter stalls (fixed in qwen38_server.py, DRAFT_GAP_MS): the drafter's ANE call stalls 300-700 ms a few times per
 100 cycles (the next verify sometimes too) when it is submitted within ~2 ms of the target verify's return. Greedy
 leaves ~1.5 ms of host work there, sampling ~6 ms, so it showed as a slow drafter in greedy runs only (20-47 ms/cycle
-vs 16). `tests/drafter_gap_test.py` at 16K, 4 interleaved runs each: no gap 10 drafter + 4 verify stalls, 26.4-29.5
+vs 16). `drafter_gap_test.py` (historical harness, unavailable) at 16K, 4 interleaved runs each: no gap 10 drafter + 4 verify stalls, 26.4-29.5
 tok/s; 3 ms gap none, 29.4-29.5 tok/s. The server now waits until 3 ms after the verify (counted in the draft phase);
 with it, 4 runs had no drafter stalls (2 isolated verify stalls of 222 / 490 ms remain). Server after restart on this
 build (CTX=64K, usable 65472): short greedy 47.8 tok/s (6.25 tok/call; the 16K/24K build: 43.5), short sampled 40.6.

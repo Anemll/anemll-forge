@@ -5,9 +5,9 @@ Decode chunks + head from qwen38_ane_model.py build; embedding lookup and sampli
 is kept in the model's Core ML states (DeltaNet recurrent / conv state, KV cache): each turn only prefills its
 new tokens. Prefill runs through the single-token decode graph (~12 tokens/s).
 
-    ~/venvs/vq27b/bin/python qwen38_chat.py                       # chat, thinking on
-    ~/venvs/vq27b/bin/python qwen38_chat.py --no-think
-    ~/venvs/vq27b/bin/python qwen38_chat.py --prompt "Explain RoPE in two sentences." --no-think
+    .venv/bin/python scripts/qwen38_chat.py                       # chat, thinking on
+    .venv/bin/python scripts/qwen38_chat.py --no-think
+    .venv/bin/python scripts/qwen38_chat.py --prompt "Explain RoPE in two sentences." --no-think
 
 Commands: /reset  /think on|off  /temp <t>  /greedy  /stats  /quit (or Ctrl-D)
 """

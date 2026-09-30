@@ -1,4 +1,4 @@
-"""Core ML counterpart of fp8-mlp-metal41-bench/coreai/coreai_entry_share.py "ladder": the same toy (16 x Conv2d(4096,
+"""Core ML counterpart of coreai/probes/coreai_entry_share.py "ladder": the same toy (16 x Conv2d(4096,
 4096) fp16 + attention over K / V inputs) as a Core ML multifunction model with entries s2k / s8k / s16k (8 rows,
 KV length 2048 / 8192 / 16384) and p64_s2k (64 rows): wired memory after loading each function and after its first
 prediction, and the call times (ANE).

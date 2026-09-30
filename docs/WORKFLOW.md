@@ -33,7 +33,7 @@ For sensitivity and quality work, use `qwen38_plan.py`, `qwen38_plan_indomain.py
 
 ### Historical deployed mixr recipe
 
-The newly recovered `qwen38_plan_mixr.py` and [M3U pipeline archive](../pipelines/m3u/README.md) document the later deployed `mix25in_mixr_lr64mix` path. Given the original KL band measurements, sensitivity sweep and starting plan, generate the plan with explicit paths:
+The recovered `qwen38_plan_mixr.py` and [localized M3U pipelines](../pipelines/m3u/README.md) document the later deployed `mix25in_mixr_lr64mix` path. All pipeline code resolves in this checkout; shared configuration selects the external checkpoints, measured inputs and output directory. Given the original KL band measurements, sensitivity sweep and starting plan, generate the plan with explicit paths:
 
 ```sh
 python scripts/qwen38_plan_mixr.py --kl-dir /path/to/kl \

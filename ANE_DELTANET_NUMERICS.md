@@ -50,7 +50,7 @@ activation accuracy.
 
 ## How it was found (reproducible)
 
-All on the M6, `~/venvs/vq27b`, run from `~` (never from the coremltools repo root).
+Historical measurements were on M6. Run the localized `scripts/...` commands below from the Forge root with its prepared `.venv` active and explicit checkpoint/data paths; see [ENVIRONMENT.md](docs/ENVIRONMENT.md). These measurements were not rerun during localization.
 
 1. fp32 CPU reference of the same quantized weights (dflash2_target_ref, matches the HF modules: DeltaNet layer vs
    `Qwen3_5GatedDeltaNet` rel 3.5e-7; `delta_chunk` vs a naive recurrence 1e-15), hidden state after every layer:

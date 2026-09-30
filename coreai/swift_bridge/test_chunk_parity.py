@@ -63,7 +63,7 @@ def ref():
     from coreai.runtime import AIModel, NDArray
     from coreai.runtime._ndarray import StorageKind
     sys.path.insert(0, str(HERE.parent))
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ane-vector-lut/coreai
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # coreai
     from coreai_util import specialization_for
 
     async def go():

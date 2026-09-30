@@ -5,7 +5,7 @@
 Machine: MacBook Pro `Mac17,6`, Apple M5 Max, ANE target `h17c`, macOS 27.2
 (`26B5091g`). Python 3.12.13 with coremltools 9.0, coreai-opt 0.2.1,
 coreai-torch 0.4.2, and PyTorch 2.11.0. The CoreAI scripts used the existing
-environment and helper modules in `../fp8-mlp-metal41-bench/coreai`.
+environment and helper modules from the original research checkout. Forge now includes the required helpers in `scripts/coreai_bench_helpers.py`; the commands below use this repository. The historical results were not rerun during localization.
 
 The tested vector format was `cluster_dim=2`, `n_bits=4`: 16 LUT entries, two
 FP16 or INT8 values per entry, two index bits per weight. All tests used
@@ -32,19 +32,18 @@ The exported CoreAI INT8 IR applies `coreai.blockwise_shift_scale` **after**
 `constexpr_lut_to_dense`. That graph difference is a plausible reason for
 the placement difference; it is not established as the sole cause.
 
-Reproduction, from this repository using the existing environment:
+Reproduction, from the Forge root with compatible Core AI and Core ML environments (see [ENVIRONMENT.md](docs/ENVIRONMENT.md)):
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../fp8-mlp-metal41-bench/coreai \
-  ../fp8-mlp-metal41-bench/coreai/.venv/bin/python scripts/bench_vector_lut.py \
+unset USE_LOCAL_COREAI
+PYTHONDONTWRITEBYTECODE=1 coreai/.venv/bin/python scripts/bench_vector_lut.py \
   v2n4 --channels=512 --hw=4 --stack=4 --compute=ane --lut-dtype=fp16
 
 PYTHONDONTWRITEBYTECODE=1 \
-  ../fp8-mlp-metal41-bench/coreai/.venv/bin/python scripts/lut_rules.py \
+  .venv/bin/python scripts/lut_rules.py \
   base_v2n4 int8lut_v2n4
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../fp8-mlp-metal41-bench/coreai \
-  ../fp8-mlp-metal41-bench/coreai/.venv/bin/python scripts/bench_vector_lut.py \
+PYTHONDONTWRITEBYTECODE=1 coreai/.venv/bin/python scripts/bench_vector_lut.py \
   v2n4 --channels=512 --hw=4 --stack=4 --compute=ane --lut-dtype=int8
 ```
 

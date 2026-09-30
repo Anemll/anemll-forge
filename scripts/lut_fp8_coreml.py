@@ -14,8 +14,8 @@ single constexpr_lut_to_dense whose `lut` cannot be FP8 (and breaks INT8 LUTs at
 
 Workload: S sequential 1x1 conv C->C on a (1, C, HW, HW) fp16 input (weight-bandwidth bound).
 Reports MLComputePlan placement, cosine vs a numpy reference built from the quantized LUT values,
-and writes <name>_C<C>_S<S>.mlmodelc for timing (examples/fp8/time_models.swift) or a direct ANE compile
-(ane_mil_bench).
+and writes <name>_C<C>_S<S>.mlmodelc for the local tools/coreml/time_models.swift timer.
+Historical direct ANE compilation used a separate ane_mil_bench tool, not distributed here.
 
     python lut_fp8_coreml.py                      # all cases, S=2 (correctness)
     S=16 python lut_fp8_coreml.py fp8_v4n4 dense   # timing-sized models

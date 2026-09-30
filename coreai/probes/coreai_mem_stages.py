@@ -6,7 +6,7 @@ Stages (Core AI, first N chunks of the manifest + head):
     v_all    v8_2k + v8_8k + v8_16k
     v_all_p  v8_2k + v8_8k + v8_16k + p64_2k
     head     head_T8 alone
-Core ML (the ~/venvs/vq27b runtime): drafter (dflash2_lut4_rtn, 1.5 GB package) and the matching Core ML v4 chunk(s)
+Core ML (PY_COREML, defaults to Forge's .venv): drafter (dflash2_lut4_rtn, 1.5 GB package) and the matching Core ML v4 chunk(s)
 of the ane6 16K build, for comparison."""
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = HERE.parents[1] / "scripts"  # ane-vector-lut/scripts
-CORE_AI_PY = str(HERE.parent / ".venv/bin/python")
-CORE_ML_PY = os.path.expanduser("~/venvs/vq27b/bin/python")
+SCRIPTS = HERE.parents[1] / "scripts"  # scripts
+CORE_AI_PY = os.path.expanduser(os.environ.get("PY_COREAI", str(HERE.parent / ".venv/bin/python")))
+CORE_ML_PY = os.path.expanduser(os.environ.get("PY_COREML", str(HERE.parents[1] / ".venv/bin/python")))
 
 WIRED = '''
 import subprocess

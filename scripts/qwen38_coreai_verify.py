@@ -1,15 +1,15 @@
 """Stage 4: the Core AI target (qwen38_coreai_model.CoreAIQwen) vs the Core ML v4 runtime (qwen38_ane_model.AneQwen3,
 the softplus-fixed ane5 build) on the same teacher-forced WikiText stream, one model resident at a time:
-    dump coreml   (~/venvs/vq27b)                 -> OUT/coreml.npz
+    dump coreml   (root .venv)                 -> OUT/coreml.npz
     dump coreai   (coreai/.venv)  -> OUT/coreai.npz
     compare       (either venv)                    per-position cos / top-1 / KL on the saved logits, perplexity
     greedy <rt>   greedy continuation of a prompt  -> OUT/greedy_<rt>.json (compare prints both)
     speed coreai  verify call time per context entry, 64-row prefill tok/s, context switch time, wired memory
 Stream: PREFILL tokens fed first (Core ML: 8-row calls; Core AI: 64-row prefill blocks), then BLOCKS teacher-forced
 8-token verify calls; per position: argmax, logsumexp, target logit, and full logits for every 8th block.
-    CTX=16384 ANE_OUT=~/Models/vq27b/ane5 ~/venvs/vq27b/bin/python qwen38_coreai_verify.py dump coreml
-    CTX=16384 <coreai venv>/bin/python qwen38_coreai_verify.py dump coreai
-    python qwen38_coreai_verify.py compare"""
+    CTX=16384 ANE_OUT=~/Models/vq27b/ane5 .venv/bin/python scripts/qwen38_coreai_verify.py dump coreml
+    CTX=16384 coreai/.venv/bin/python scripts/qwen38_coreai_verify.py dump coreai
+    python scripts/qwen38_coreai_verify.py compare"""
 import glob
 import json
 import os
