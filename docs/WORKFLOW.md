@@ -70,7 +70,7 @@ The `chat` command remains the plain Core ML research interface. The example ser
 
 ## 5. Convert and pair the Core AI release
 
-The port preserves the latest Core AI build/runtime and Swift bridge. Use a separate compatible Core AI environment. Build the bridge with `bash coreai/swift_bridge/build.sh` using the selected Xcode (`DEVELOPER_DIR` if needed). No prebuilt dylib is included.
+The port preserves the latest Core AI build/runtime and Swift bridge. Use a separate compatible Core AI environment. Build the bridge with `bash coreai/swift_bridge/build.sh` using the selected Xcode (`DEVELOPER_DIR` if needed). No prebuilt dylib is included. Rebuild after pulling the September 29 buffer-lifetime fix: it changes both Python view ownership and native IOSurface creation; an older dylib retains the native leak even with the updated Python wrapper. See [context-switch memory diagnosis](SPECULATIVE_DECODING.md#eviction-memory-pressure-and-stalled-calls).
 
 ```sh
 MODEL="$MODEL" EXPORT_DIR="$RUNS/export/qwen38-27b-vq2" OUT=/path/to/coreai-builds \

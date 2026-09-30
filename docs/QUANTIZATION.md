@@ -228,6 +228,10 @@ Mean, median and p99 show different parts of the error distribution; top-1 agree
 
 The [session summary](SESSION_LESSONS.md) reports that the mixer-to-MLP reallocation changed mean in-domain KL from **0.1952 to 0.1852**. These are historical research-session observations, not newly reproduced scores or benchmarks tied to the uploaded HF commit. Earlier WikiText and ablation results remain in the notebook for context; the release card does not currently claim them as additional validated evaluation suites.
 
+On September 29, 2026, the existing M3U result files and reference-cache headers were verified for `mix25in_mixr_lr64mix`: the same trace and **40,023 scored positions** gave mean KL **0.18519121 at top-256** and **0.18550856 at top-512**, a **0.1714%** increase. Top-1 agreement (**86.083%**) and trace perplexity (**2.4240663**) were exactly unchanged in those records. Median and p99 changed slightly at full precision, while both still round to **0.0309 / 2.254**. The BF16 control reported zero KL for both partitions. Exact values, source-result hashes, shared trace hash and cache shapes are preserved in the [top-K comparison record](results/kl_topk_comparison_2026-09-29.json).
+
+This verifies existing results; the evaluation was not rerun. It measures reconstructed export weights in the historical PyTorch/MPS evaluator, rather than the compiled Core AI graph. The trace perplexity is separate from WikiText perplexity. Moving to top-512 checks sensitivity to the tail partition; it does not match Mirai's public assistant-only protocol or published evaluation mixture. The BF16 control is a check of this evaluator/cache, not a measurement of ANE conversion error.
+
 ### Measure the complete system
 
 Keep quantization error, compiled-graph numerical error and serving policy separate. Repetition penalties, thinking budgets or a mismatched head can change generated output without changing the quantizer. Compare original reference → exported effective weights → compiled same-weight graph → complete runtime.

@@ -378,21 +378,23 @@ public func cai_function_describe(_ fn: UnsafeMutableRawPointer?, _ buf: UnsafeM
 public func cai_buffer_create(_ dtype: Int32, _ rank: Int32, _ shape: UnsafePointer<Int64>?,
                               _ strides: UnsafePointer<Int64>?, _ err: UnsafeMutablePointer<CChar>?,
                               _ errcap: Int32) -> UnsafeMutableRawPointer? {
-    do {
-        guard let t = dtypeTable.first(where: { $0.code == dtype }) else { throw BridgeError("unknown dtype code \(dtype)") }
-        guard rank > 0, let shape else { throw BridgeError("rank must be > 0") }
-        let sh = (0..<Int(rank)).map { Int(shape[$0]) }
-        let st = strides.map { s in (0..<Int(rank)).map { Int(s[$0]) } }
-        return retained(try BufferH(type: t.type, shape: sh, strides: st))
-    } catch {
-        fail(err, errcap, error)
-        return nil
+    return autoreleasepool {
+        do {
+            guard let t = dtypeTable.first(where: { $0.code == dtype }) else { throw BridgeError("unknown dtype code \(dtype)") }
+            guard rank > 0, let shape else { throw BridgeError("rank must be > 0") }
+            let sh = (0..<Int(rank)).map { Int(shape[$0]) }
+            let st = strides.map { s in (0..<Int(rank)).map { Int(s[$0]) } }
+            return retained(try BufferH(type: t.type, shape: sh, strides: st))
+        } catch {
+            fail(err, errcap, error)
+            return nil
+        }
     }
 }
 
 @_cdecl("cai_buffer_address")
 public func cai_buffer_address(_ b: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    (try? object(b, BufferH.self))?.surface.baseAddress
+    autoreleasepool { (try? object(b, BufferH.self))?.surface.baseAddress }
 }
 
 @_cdecl("cai_buffer_nbytes")

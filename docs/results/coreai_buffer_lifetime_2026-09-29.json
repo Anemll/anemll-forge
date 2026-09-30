@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "record_date": "2026-09-29",
+  "scope": "Bounded lifetime diagnosis on local deployed models, not a downloaded-release or multi-hour serving validation.",
+  "hardware": {
+    "chip": "Apple M6",
+    "ram_bytes": 34359738368,
+    "os_version": "27.0",
+    "os_build": "26A428"
+  },
+  "failed_server": {
+    "runtime_snapshot": "89db7ac31371a1d8e17e6f7168a1d01dd0188bfd",
+    "classification": "OS low-swap kill",
+    "context_transitions": 160,
+    "context_sizes": [
+      8192,
+      16384
+    ],
+    "discarded_kv_bytes": 128849018880,
+    "kernel_report_mib": 124386,
+    "screenshot_process_memory_gb": 122.27,
+    "screenshot_system_swap_gb": 95.41
+  },
+  "fixes": [
+    {
+      "source": "coreai/swift_bridge/coreai_bridge.py",
+      "change": "Return .np views on access instead of retaining a self-owning ndarray."
+    },
+    {
+      "source": "coreai/swift_bridge/CoreAIBridge.swift",
+      "change": "Scoped autorelease pools around cai_buffer_create and cai_buffer_address."
+    }
+  ],
+  "checks": {
+    "mock_native_lifetime_tests": {
+      "passed": 4,
+      "real_models_loaded": false
+    },
+    "python_fix_only_live": {
+      "status": "SAFETY_STOP",
+      "exit_code": 90,
+      "planned_roundtrips": 16,
+      "completed_transitions": 5,
+      "completed_roundtrips": 2,
+      "baseline_phys_footprint": 3663793848,
+      "last_phys_footprint": 8502565944,
+      "growth_bytes": 4838772096,
+      "stop_reason": "footprint growth limit",
+      "target_parity_all_exact": true,
+      "target_and_drafter_finite": true,
+      "kv_rows_preserved_each": 72,
+      "old_buffers_surviving_each": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "release_count_each": [
+        33,
+        33,
+        33,
+        33,
+        33
+      ],
+      "swap_bytes_at_stop": 1803225661,
+      "interpretation": "Python ownership cycle is fixed, but physical footprint still accumulates by KV allocation size. Native lifetime/retention requires further diagnosis; do not resume benchmark.",
+      "limits": "Five transitions completed and a sixth resize ran before guard. No long-context workload, no16roundtrip completion. Footprint is process libproc ri_phys_footprint, not complete ANE/system memory."
+    },
+    "native_isolation": [
+      {
+        "record": "native-buffers-none.json",
+        "baseline_bytes": 21004840,
+        "final_bytes": 290571056,
+        "growth_bytes": 269566216,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "native-buffers-cycle.json",
+        "baseline_bytes": 20890152,
+        "final_bytes": 21971544,
+        "growth_bytes": 1081392,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "native-buffers-create.json",
+        "baseline_bytes": 21119528,
+        "final_bytes": 22102616,
+        "growth_bytes": 983088,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "native-buffers-release.json",
+        "baseline_bytes": 21152296,
+        "final_bytes": 290734896,
+        "growth_bytes": 269582600,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "patched-native-buffers-none.json",
+        "baseline_bytes": 20988456,
+        "final_bytes": 290538288,
+        "growth_bytes": 269549832,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "addresspool-native-buffers-none.json",
+        "baseline_bytes": 20988456,
+        "final_bytes": 21922392,
+        "growth_bytes": 933936,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "nbytespool-native-buffers-none.json",
+        "baseline_bytes": 20988456,
+        "final_bytes": 290685744,
+        "growth_bytes": 269697288,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "bothgetters-native-buffers-none.json",
+        "baseline_bytes": 21168680,
+        "final_bytes": 22151768,
+        "growth_bytes": 983088,
+        "external_view_across_pool_valid": true
+      },
+      {
+        "record": "original-addresspool-native-buffers-none.json",
+        "baseline_bytes": 21234216,
+        "final_bytes": 290800432,
+        "growth_bytes": 269566216,
+        "external_view_across_pool_valid": true
+      }
+    ],
+    "both_fixes_live": {
+      "status": "PASS",
+      "roundtrips": 16,
+      "transitions": 32,
+      "baseline_phys_footprint": 3127332248,
+      "final": {
+        "phys_footprint": 3131608496,
+        "resident": 2354774016,
+        "wired": 0
+      },
+      "max_transition_phys_footprint": 3131624904,
+      "max_relative_l2": 0.0,
+      "all_old_buffers_released": true,
+      "buffer_releases": 1122,
+      "released_native_bytes": 27381252096,
+      "duration_seconds": 38.6687228679657,
+      "peak_sampled_phys_footprint": 4205875328,
+      "max_swap_used_bytes": 1786448445,
+      "measurement": "libproc.proc_pid_rusage(RUSAGE_INFO_V0).ri_phys_footprint; excludes other processes/ANE system allocations",
+      "limits": "72-token identical prefix,16up/down roundtrips; not full benchmark or multi-hour serving. No benchmark resumed."
+    }
+  },
+  "native_build": {
+    "original_source_sha256": "8bc7439bf13926736fc2fff0600d444cfab952858cd2c16730cc64a810ac159a",
+    "patched_source_sha256": "e7350c21d932ae4f16b537efaa886deadd68b12794e8685f175a1837bf942c90",
+    "compiler": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.0.0",
+    "patched_dylib_sha256": "078cb304df2b617d7ea1aa6727207ec27cdbb423df0a7de1bfac68c59e0390ea",
+    "original_dylib_sha256": "ced32774789b3229b986d01357aea1f4157bf1836ea46fdfa4262ba702b3eab0",
+    "autoreleasepool_scopes": [
+      "cai_buffer_create",
+      "cai_buffer_address"
+    ]
+  },
+  "python_source_sha256": "d4137cd50ca81515b3c57881a6e677968556ac5f9c54e197b9a49db522ab75c2",
+  "deployment": "Rebuild coreai/swift_bridge/libcoreai_bridge.dylib after pulling both source fixes. The benchmark original snapshot and failed attempts remain preserved.",
+  "limitations": [
+    "Process ri_phys_footprint excludes other processes and ANE system allocations.",
+    "32 context transitions on the same72-token prefix do not establish multi-hour serving stability.",
+    "Model packages, greedy nonthinking policy, tested GPTQ DFlash2 and bonded compile mode2 were held constant.",
+    "No benchmark resumed; the owner requested a temporary M5 pause."
+  ]
+}

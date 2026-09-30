@@ -62,3 +62,15 @@ The applied release launcher, inventory/downloader and speculative smoke helpers
 The real staged paired bundle passed manifest generation and the default speculative integrity-only check: **74 inventoried files / 15,074,603,597 bytes** before `release.json` itself. This checks file hashes, shapes and pairing; `inference_run` remains false for that check. Main-model artifacts were unchanged from the earlier private upload. The separate Terminal-Bench pilot uses a recorded runtime snapshot and live deployed artifacts, not a full downloaded-bundle validation; its results and environment limitations must be reported separately.
 
 The Pi 0.87.1 integration validator passed configuration schema checks, off/low/medium/high request payload checks, reasoning/tool replay and context clamping against the installed Pi modules. All requests used mocked fetch; no live model call or coding-task success is claimed by that check.
+
+## Context-switch lifetime repair — 2026-09-29
+
+Four mocked-native buffer ownership tests passed after removing the Python buffer's self-retaining NumPy view. A guarded live test then showed that this fix alone was insufficient; native IOSurface autorelease retention remained. Tiny no-model probes isolated the required pool scopes to `cai_buffer_create` and `cai_buffer_address`. The Swift bridge with both scopes compiled using Apple Swift 6.4 targeting macOS 27, and the native allocation/release probe passed without a Python-side pool.
+
+The corrected bridge and historical runtime snapshot then passed a bounded full-target-plus-GPTQ-DFlash2 probe on M6: **32 transitions between 8K and 16K**, exact preservation of 72 KV rows, identical target logits, finite drafter outputs and no surviving old buffer owners. Process physical footprint grew about **4.3 MB** across the completed roundtrips; the transient sampled peak was about **4.21 GB**. This is process accounting, not whole-system ANE/model memory. [Exact results and build provenance](results/coreai_buffer_lifetime_2026-09-29.json) retain the earlier failed diagnostic as well. No multi-hour serving validation, downloaded-bundle validation or new capability score is claimed. The benchmark remains paused at the owner's request.
+
+```sh
+python -m unittest discover -s tests -p test_bridge_ownership.py -v
+# Required after pulling the Python and native source fixes:
+bash coreai/swift_bridge/build.sh
+```

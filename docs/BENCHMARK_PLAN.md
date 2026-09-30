@@ -16,6 +16,8 @@ Perplexity is a useful additional language-model diagnostic, particularly for co
 
 Our historical [`qwen38_kl.py`](../scripts/qwen38_kl.py) uses teacher top-256 plus an aggregate tail bucket, scores prompt and answer positions, and averages over tokens in nats. That coarsening loses distinctions within the tail and is a lower bound on full-vocabulary KL for the same distributions. Its MPS evaluation of reconstructed export weights is also distinct from evaluating the compiled Core AI graph. Preserve the historical metric for continuity; add explicitly named public, assistant-only and full-vocabulary checks as new evaluations. See [the quantization guide](QUANTIZATION.md#interpret-kl-carefully).
 
+The [September 29 top-512 check](results/kl_topk_comparison_2026-09-29.json) raises mean KL by only 0.1714% on the same historical trace. It changes the probability partition, while retaining the historical corpus and prompt-plus-answer scoring; it therefore does not make these results directly comparable to Mirai's public evaluator.
+
 ## The original model is the primary baseline
 
 The [upstream Qwen3.8-27B card](https://huggingface.co/Qwen/Qwen3.8-27B) reports **Terminal-Bench 2.1 (Terminus) 73.0**, **IFBench 79.5**, **GPQA Diamond 89.2** and **LiveCodeBench v6 90.3**. These are upstream-reported results, not measurements of Forge. Some listed agent evaluations use 256K context. The card does not provide the complete Terminal-Bench protocol or all general-task grading/sampling details, so the table alone is insufficient for exact reproduction.

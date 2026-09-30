@@ -188,7 +188,13 @@ class Buffer(_Handle):
         self.strides = tuple(int(s) for s in strides)
         self.address = lib().cai_buffer_address(self._h)
         self.nbytes = lib().cai_buffer_nbytes(self._h)
-        self.np = np.asarray(self)
+
+    @property
+    def np(self):
+        # The ndarray retains this Buffer as its base. Caching the view on self
+        # would form an uncollectable cycle through the untracked ndarray and
+        # keep discarded IOSurfaces alive after context changes.
+        return np.asarray(self)
 
     @property
     def __array_interface__(self):
