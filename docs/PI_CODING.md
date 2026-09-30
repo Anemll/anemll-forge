@@ -64,6 +64,10 @@ The server renders the original Qwen tool-aware chat template, converts its XML-
 
 Use **one Pi session at a time** against this single-request server. Do not run Terminal-Bench, smoke tests or another coding client concurrently: their requests contend for the ANE and can disturb cache reuse and timing. Pi tool execution and compaction calls are part of coding-session wall time; standalone decode throughput is not an estimate of whole-task time.
 
+## Optional: a live decode-TPS/TTFT status footer
+
+[`examples/pi/extensions/live-throughput-status.ts`](../examples/pi/extensions/live-throughput-status.ts) is a model-neutral Pi extension that adds a status-line footer showing live decode tok/s, TTFT, final token counts and (with a Prometheus-exposing backend) server-side prefill throughput. It works against this server's OpenAI-completions API like any other provider; this server does not expose a Prometheus `/metrics` endpoint, so leave `metricsUrls` empty for `ane-qwen38` — the footer still shows client-observed decode TPS, TTFT and prompt size. See [`TPS_PI_EXTENSION.md`](../examples/pi/extensions/TPS_PI_EXTENSION.md) for install, configuration and its own test suite. It is independent of the model/provider profile above; copy it into `~/.pi/agent/extensions/` and run `/reload` whenever you want it, in an isolated or a main profile.
+
 ## Checks performed and remaining limits
 
 The installed Pi parser accepted the example schema. An isolated offline `--list-models` run resolved the expected provider, context, output cap and capabilities. A mocked transport exercised off/low/medium/high request payloads, bounded thinking, explicit sampling, streamed reasoning/tool-call parsing, replayed reasoning/tool results and the context clamp. It made no model-server calls. See [the portable mock validator](../examples/pi/validate_pi.mjs); set `PI_MODULES` to your installed Pi `node_modules` directory and run it with Node.
