@@ -1,8 +1,8 @@
-# Private release preparation
+# Research release checklist
 
-Keep the GitHub repository private until the owner explicitly approves a visibility change. This source port does not publish a release or model assets.
+ANEMLL Forge is a research project for M6 inference of large dense models, with M5-family support. The [README](../README.md) provides the user quickstart; this checklist records release validation and reproduction work. Independently authored ANEMLL code uses the [MIT license](../LICENSE), while model artifacts preserve their upstream licenses and notices.
 
-The planned M6 release uses Core AI with the Swift bridge **and the matching DFlash2 drafter**. The HF upload must contain target chunk/head packages, matching config/tokenizer assets, the prepared fp16 embedding table, and the drafter package/metadata/configuration/selector codebooks; a reviewed quantized export may be included for reproduction. Core ML model packages are not required. Preserve the Core ML code and findings as conversion/research material.
+The M6 release uses Core AI with the Swift bridge **and the matching DFlash2 drafter**. The HF upload must contain target chunk/head packages, matching config/tokenizer assets, the prepared fp16 embedding table, and the drafter package/metadata/configuration/selector codebooks; a reviewed quantized export may be included for reproduction. Core ML model packages are not required. Preserve the Core ML code and findings as conversion/research material.
 
 HF destination: **`anemll/anemll-forge-qwen3.8-27B`**. The upstream is **Qwen/Qwen3.8-27B**, developed by the Qwen Team, with the original `Copyright 2026 Alibaba Cloud` notice and Apache 2.0 license. [ATTRIBUTION.md](ATTRIBUTION.md) records the pinned source evidence, obligations and prepared license/notice/model-card files.
 
@@ -12,7 +12,7 @@ Imported inference, quantization, conversion, reference and experiment source, S
 
 The source repository is left unchanged. Its dirty/untracked working tree is recorded by source hashes in the provenance manifest. No binaries, models, arrays, raw logs, or source Git history were imported.
 
-The [Hugging Face bundle workflow](HUGGING_FACE.md) now includes release inventory generation, revision-pinned downloads and an integrity/inference smoke-test command. Inference can use prepared config/tokenizer/embedding assets without original checkpoint shards. The tooling passed fixture tests; uploaded-artifact downloads and full-model hardware validation remain outstanding.
+The [Hugging Face bundle workflow](HUGGING_FACE.md) now includes release inventory generation, revision-pinned downloads and an integrity/inference smoke-test command. Inference can use prepared config/tokenizer/embedding assets without original checkpoint shards. The tooling passed fixture tests; the recorded fixture results do not establish full downloaded-release or clean-environment validation. See [VALIDATION.md](VALIDATION.md) for subsequent checks.
 
 The earlier target-only staging inventory is incomplete for this release scope. Require a fresh inventory and downloaded-artifact test covering both target and drafter. [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) defines the pairing and diagnostic distinction.
 
@@ -20,7 +20,7 @@ The earlier target-only staging inventory is incomplete for this release scope. 
 
 - Verify final artifact/export/embedding lineage against the recorded **Qwen/Qwen3.8-27B** revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`. Its model identity, `qwen3_5` architecture and Apache 2.0 license are now verified from the local small files and official pinned upstream. Include the exact license, applicable notices and prominent change notices with the distributed artifacts.
 - Preserve the separately verified DFlash2 source license/NOTICE and pinned source evidence. Record compiled drafter, selector, target embedding/head identities and tap order. Validate speculative acceptance, EOS/stop/cap handling, cache restoration and context transitions on the release pair. Source checkpoint verification alone does not prove compiled-package lineage.
-- Select a source-code license and audit provenance/attribution for code adapted from transformers, DFlash, other repositories and private SDK examples. No license is invented by this port.
+- Preserve the MIT license for independently authored ANEMLL code and complete the provenance/attribution review for code adapted from transformers, DFlash, other repositories and SDK examples. Their upstream terms still apply; the root MIT license does not replace third-party licenses.
 - Check the upstream OptiQ sensitivity dataset's attribution and redistribution terms before public distribution; the newly imported sensitivity notes identify its source.
 - Pin the public dependency sources, including any coremltools patches and Core AI SDK constraints; produce a clean install/build test.
 - Recover and review the exact best mixed-bit plan, calibration recipe, export metadata and reference trace. Publish only data with suitable rights and explicit consent; replace private sessions with reproducible public or synthetic fixtures.

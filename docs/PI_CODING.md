@@ -18,6 +18,20 @@ The matching sibling `drafter/` is required by default. Do not pass `--plain` fo
 
 This server's defaults are presence penalty **0**, DRY **0**, loop guard **6** and the documented reasoning-closure policy. The Pi example explicitly sends temperature **0.6**, top-p **0.95**, top-k **20**, presence penalty **0** and DRY **0**. These are a declared practical starting policy, not measured optimal coding settings. The loop guard is server-wide, not a supported Pi request override. It can terminate legitimate repeated output; inspect the server log when a response stops unexpectedly. To disable it for a declared policy comparison, use the underlying server's `--loop-guard 0` option when starting that server. Do not silently mix those results with the default policy.
 
+## Install Pi and apply the configuration patches
+
+The Forge Pi changes are the supplied provider/model and context-management configuration. Pi **0.87.1** already supports the checked request/replay behavior; no Pi source-code patch is required for this version. The four runtime modules used by the mock validator were byte-identical to the published npm packages. Use Node.js **22.19 or newer** and install into a dedicated directory:
+
+```sh
+export FORGE_PI_ROOT="$HOME/.local/share/anemll-forge/pi"
+npm install --prefix "$FORGE_PI_ROOT" @earendil-works/pi-coding-agent@0.87.1
+export PATH="$FORGE_PI_ROOT/node_modules/.bin:$PATH"
+export PI_MODULES="$FORGE_PI_ROOT/node_modules"
+node examples/pi/validate_pi.mjs
+```
+
+The validator uses mocked transport, not the model server. Upgrade older Pi versions to this checked version rather than applying undocumented patches to their installed JavaScript. Then apply the configuration to an isolated profile below.
+
 ## Use an isolated Pi profile first
 
 Run the following from the Forge checkout. Choose a new empty profile directory; this avoids overwriting your normal Pi providers, settings or sessions:
@@ -26,6 +40,7 @@ Run the following from the Forge checkout. Choose a new empty profile directory;
 mkdir -p /path/to/new-forge-pi-profile
 cp examples/pi/models.json examples/pi/settings.json /path/to/new-forge-pi-profile/
 export PI_CODING_AGENT_DIR=/path/to/new-forge-pi-profile
+export PI_LIVE_THROUGHPUT_DIR="$PI_CODING_AGENT_DIR"
 pi --offline --list-models qwen38
 ```
 
@@ -66,10 +81,10 @@ Use **one Pi session at a time** against this single-request server. Do not run 
 
 ## Optional: a live decode-TPS/TTFT status footer
 
-[`examples/pi/extensions/live-throughput-status.ts`](../examples/pi/extensions/live-throughput-status.ts) is a model-neutral Pi extension that adds a status-line footer showing live decode tok/s, TTFT, final token counts and (with a Prometheus-exposing backend) server-side prefill throughput. It works against this server's OpenAI-completions API like any other provider; this server does not expose a Prometheus `/metrics` endpoint, so leave `metricsUrls` empty for `ane-qwen38` — the footer still shows client-observed decode TPS, TTFT and prompt size. See [`TPS_PI_EXTENSION.md`](../examples/pi/extensions/TPS_PI_EXTENSION.md) for install, configuration and its own test suite. It is independent of the model/provider profile above; copy it into `~/.pi/agent/extensions/` and run `/reload` whenever you want it, in an isolated or a main profile.
+[`examples/pi/extensions/live-throughput-status.ts`](../examples/pi/extensions/live-throughput-status.ts) adds a status-line footer showing live decode tok/s, TTFT, final token counts and (with a Prometheus-exposing backend) server-side prefill throughput. This server has no Prometheus `/metrics` endpoint, so leave `metricsUrls` empty for `ane-qwen38`; the footer still shows client-observed decode TPS, TTFT and prompt size. For the isolated profile, copy the extension into `$PI_CODING_AGENT_DIR/extensions/` and keep `PI_LIVE_THROUGHPUT_DIR` set to that profile so its calibration metadata stays there. Run `/reload` after installation. See [`TPS_PI_EXTENSION.md`](../examples/pi/extensions/TPS_PI_EXTENSION.md) for configuration and tests.
 
 ## Checks performed and remaining limits
 
 The installed Pi parser accepted the example schema. An isolated offline `--list-models` run resolved the expected provider, context, output cap and capabilities. A mocked transport exercised off/low/medium/high request payloads, bounded thinking, explicit sampling, streamed reasoning/tool-call parsing, replayed reasoning/tool results and the context clamp. It made no model-server calls. See [the portable mock validator](../examples/pi/validate_pi.mjs); set `PI_MODULES` to your installed Pi `node_modules` directory and run it with Node.
 
-No personal Pi configuration was changed, no coding session or inference was started, and no live coding-quality or throughput result is claimed. The local personal profile inspected during preparation still advertised a larger 64K server; this example intentionally uses an isolated 16K profile. Recheck compatibility on other Pi versions and perform a real paired-server tool round trip before relying on a long session.
+The configuration checks do not establish live coding quality or throughput. Recheck compatibility on other Pi versions and perform a real paired-server tool round trip before relying on a long session.

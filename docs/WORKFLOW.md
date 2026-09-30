@@ -1,6 +1,6 @@
 # First port workflow
 
-For the planned **Core AI M6 release with matching DFlash2 speculative decoding**, start with [the Core AI Hugging Face bundle guide](HUGGING_FACE.md). The Core ML build/inference steps below preserve the research baseline for conversion and experiments; they do not require uploading Core ML model packages.
+For the **Core AI M6 release with matching DFlash2 speculative decoding**, start with [the Core AI Hugging Face bundle guide](HUGGING_FACE.md). The Core ML build/inference steps below preserve the research baseline for conversion and experiments; they do not require uploading Core ML model packages.
 
 Run commands from the repository root. Paths below are examples to replace, not bundled assets. `--dry-run` validates basic inputs and prints the command without loading models. Full builds can use substantial memory and disk space; this port has not rerun them.
 

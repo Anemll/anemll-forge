@@ -43,13 +43,13 @@ python -m unittest discover -s tests -v
 
 No real Hugging Face download, upload, full-model smoke test, or new ANE placement/performance test was run. Run the [bundle workflow](HUGGING_FACE.md) after the weights are uploaded; a real hardware PASS is still outstanding.
 
-## Attribution and private upload preparation — 2026-09-29
+## Attribution and upload preparation — 2026-09-29
 
 The updated suite passed **41 tests** in the existing research environment. Six additional bundle tests verify the default HF destination, mandatory license/source documents, document hashing/download selection, symlink rejection and per-file modification notices. All five prepared release documents are included in the verified download inventory.
 
 The exact copied Qwen LICENSE matches the pinned upstream bytes and preserves `Copyright 2026 Alibaba Cloud`. Ten local checkpoint documents/config/tokenizer files match official upstream hashes at revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`; all 18 shard cache etags match upstream SHA256 metadata. The large shard bytes were not rehashed. [QWEN_SOURCE.json](../release/huggingface/QWEN_SOURCE.json) records this evidence and remaining artifact-lineage limits.
 
-A separate upload agent created and verified the private HF target `anemll/anemll-forge-qwen3.8-27B`, staged the Core AI source packages plus embeddings and tokenizer/config assets, and passed `release-manifest` and `quick-test --check-only` on **65 inventoried files / 13,184,004,271 bytes**. Upload was then started; this staging check does not confirm completed transfer or downloaded-artifact inference. The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and future ANE benchmarks left unclaimed. Full hardware inference remains outstanding.
+A separate upload agent created and verified the HF target `anemll/anemll-forge-qwen3.8-27B`, staged the Core AI source packages plus embeddings and tokenizer/config assets, and passed `release-manifest` and `quick-test --check-only` on **65 inventoried files / 13,184,004,271 bytes**. Upload was then started; this staging check does not confirm completed transfer or downloaded-artifact inference. The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and future ANE benchmarks left unclaimed. Full hardware inference remains outstanding.
 
 ## Expanded release scope: DFlash2 required
 
@@ -59,7 +59,7 @@ The intended release and performance benchmark include the matching Core AI DFla
 
 The applied release launcher, inventory/downloader and speculative smoke helpers passed **56 focused standard-library tests** in the existing research environment. All **112 Python sources** parsed, local current-guide links resolved, and `git diff --check` passed. Coverage includes default Core AI pairing, explicit plain diagnostics, selector extraction/header checks, target/head/tap associations, finite tensor contracts, proposed-prefix rejection and commit/cap/stop boundaries. Mocked inference tests do not establish actual ANE placement or performance.
 
-The real staged paired bundle passed manifest generation and the default speculative integrity-only check: **74 inventoried files / 15,074,603,597 bytes** before `release.json` itself. This checks file hashes, shapes and pairing; `inference_run` remains false for that check. Main-model artifacts were unchanged from the earlier private upload. The separate Terminal-Bench pilot uses a recorded runtime snapshot and live deployed artifacts, not a full downloaded-bundle validation; its results and environment limitations must be reported separately.
+The real staged paired bundle passed manifest generation and the default speculative integrity-only check: **74 inventoried files / 15,074,603,597 bytes** before `release.json` itself. This checks file hashes, shapes and pairing; `inference_run` remains false for that check. Main-model artifacts were unchanged from the earlier target-only upload. The separate Terminal-Bench pilot uses a recorded runtime snapshot and live deployed artifacts, not a full downloaded-bundle validation; its results and environment limitations must be reported separately.
 
 The Pi 0.87.1 integration validator passed configuration schema checks, off/low/medium/high request payload checks, reasoning/tool replay and context clamping against the installed Pi modules. All requests used mocked fetch; no live model call or coding-task success is claimed by that check.
 
@@ -74,3 +74,13 @@ python -m unittest discover -s tests -p test_bridge_ownership.py -v
 # Required after pulling the Python and native source fixes:
 bash coreai/swift_bridge/build.sh
 ```
+
+## Public research guide and inference setup — 2026-09-29
+
+The README now documents environment setup, the paired model download, bridge build, speculative smoke test, server/API checks, and Pi configuration. Current release guides and the local model-card template no longer describe a private beta. Independently authored ANEMLL code uses MIT; the Qwen and drafter licenses/notices remain separate.
+
+Documentation validation checked **80 local links**, including fragments, **28 shell blocks** with `bash -n`, and **five README Forge commands** against the actual argument parser. The example chat-completion JSON parsed successfully and uses the server's documented model ID. All nine starting dependency pins are published on PyPI and accept Python 3.11 where `requires_python` metadata is specified. `git diff --check` passed.
+
+The Pi 0.87.1 mock validator passed off/low/medium/high request mapping, reasoning/tool replay and the context clamp. The installed model-config, OpenAI-completions, simple-options and transcript modules were byte-identical to the published npm packages. This integration therefore needs the supplied configuration changes, not a Pi source-code patch.
+
+The prepared-bundle host modules (`qwen38_ane_model`, `qwen38_coreai_model`, and `dflash2_coreai_drafter`) imported with the public coremltools 9.0 wheel substituted into the existing research environment. Converter warnings about newer PyTorch/scikit-learn remain. This was an import-only check: no new model, server, upload or hardware benchmark was run. A fresh-environment install and full-model test with the new inference pins remain outstanding.

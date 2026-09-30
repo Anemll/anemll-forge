@@ -4,7 +4,7 @@ The intended fast M6 release uses **Core AI inference with the matching DFlash2 
 
 HF destination: **`anemll/anemll-forge-qwen3.8-27B`** under [ANEMLL](https://huggingface.co/anemll). The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and ANE benchmarks to be added when measured. The download helper defaults to this repository.
 
-Stage and validate a bundle locally, upload it yourself, then test a download from the exact uploaded revision. These commands do not create a Hub repository, upload files, or change repository visibility. Keep release preparation private until publication is explicitly approved.
+For inference, start with the download and smoke-test steps below or the [README quickstart](../README.md). The staging sections are for maintainers preparing a new bundle; test a download from the exact uploaded revision.
 
 Run commands from the ANEMLL Forge checkout. Choose the bundle path and replace the uploaded-bundle revision placeholder with its full commit hash. The pinned upstream checkpoint revision and uploaded bundle revision identify different repositories. Read [Qwen attribution and redistribution requirements](ATTRIBUTION.md).
 
@@ -70,6 +70,8 @@ You then create/select the HF **model** repository and upload the prepared bundl
 
 ## 3. Download the uploaded revision
 
+Browse the [complete model files](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main), [Core AI target](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/coreai), [DFlash2 drafter](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/drafter), and [tokenizer/config/embeddings](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/model). Download the matching pair with the helper rather than selecting target files alone.
+
 ```sh
 python -m pip install huggingface_hub
 
@@ -80,7 +82,7 @@ python forge.py download \
   --output /path/to/downloaded-bundle
 ```
 
-Authenticate with your own HF credentials when downloading a private or gated repository. `--repo` defaults to `anemll/anemll-forge-qwen3.8-27B` and can be overridden. The helper resolves a branch/tag to a commit before downloading, selects `model/`, `coreai/`, `drafter/` and the required release documents, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
+If repository access requires authentication, use `hf auth login` with your own account. `--repo` defaults to `anemll/anemll-forge-qwen3.8-27B` and can be overridden. The helper resolves a branch/tag to a commit before downloading, selects `model/`, `coreai/`, `drafter/` and the required release documents, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
 
 Add `--include-export` only when conversion weights are needed and the release includes them. The download step checks export hashes too when requested. For revision pinning, filtered downloads and local-directory behavior, see the [official Hugging Face download guide](https://huggingface.co/docs/huggingface_hub/guides/download).
 
@@ -93,7 +95,7 @@ python forge.py quick-test \
   --bundle /path/to/downloaded-bundle --runtime coreai --check-only
 ```
 
-For actual inference, activate the existing compatible research environment described in [ENVIRONMENT.md](ENVIRONMENT.md), then build the bridge with the matching Xcode/SDK for Core AI:
+For actual inference, activate the inference environment from the [README setup](../README.md#1-set-up-the-inference-environment) and [ENVIRONMENT.md](ENVIRONMENT.md), then build the bridge with the matching Xcode/SDK for Core AI:
 
 ```sh
 bash coreai/swift_bridge/build.sh
@@ -106,7 +108,7 @@ python forge.py quick-test \
 
 The smallest advertised context is selected by default; `--ctx` accepts a context listed for Core AI. Keep `--report` outside the bundle directory. The default smoke path runs actual greedy speculative generation with the matching drafter, target verification and acceptance. It checks finite vocabulary-shaped logits and visible generated text and records runtime details. A `--plain` smoke is an explicitly labeled target-only diagnostic; it does not validate the release pair. It does not assert an expected answer, benchmark performance, certify placement or establish long-context quality.
 
-Actual inference requires macOS and compatible model hardware/toolchain. It loads the full target and drafter even for 16 tokens, and first-load compilation can take minutes. Run it when adequate memory and the ANE are available. Current Python imports still include PyTorch, safetensors, coremltools and research helpers; tokenizers is also required. Core AI additionally needs the native Swift bridge and compatible system framework. The current coremltools dependency does not require distributing Core ML model packages. Installing `huggingface_hub` only enables download, and a clean public dependency recipe remains a release gate.
+Actual inference requires macOS and compatible model hardware/toolchain. It loads the full target and drafter even for 16 tokens, and first-load compilation can take minutes. Run it when adequate memory and the ANE are available. Current Python imports still include PyTorch, safetensors, coremltools and research helpers; tokenizers is also required. Core AI additionally needs the native Swift bridge and compatible system framework. The current coremltools dependency does not require distributing Core ML model packages. Installing `huggingface_hub` only enables download. The starting inference pins are in [requirements-inference.txt](../requirements-inference.txt); full clean-environment validation remains outstanding.
 
 ## 5. Serve the complete release
 

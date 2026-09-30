@@ -97,7 +97,7 @@ For quality retention, allow enough wall time that a slower ANE server is not si
 
 As a planning illustration, **10 trials consuming 20K generated tokens each at 20 tokens/s** take **2.78 hours of decoding per model**, or **5.56 hours for the BF16/ANE pair if both run at that rate**. This is not an enforced Harbor budget or measured duration. Repeated multi-turn prefill, summaries, environment setup, command execution and verification add time; BF16 may have a different rate. Use pilot observations for scheduling.
 
-The current [submission documentation](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/README.md) specifies at least five trials per task and currently closes community submissions. With 89 tasks, five trials would mean 445 agent runs per model, or 890 for the pair, before any competitor models. Local research can remain private and needs no public upload. Do not use the documentation's public-upload flags during private release preparation.
+The current [submission documentation](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/README.md) specifies at least five trials per task and currently closes community submissions. With 89 tasks, five trials would mean 445 agent runs per model, or 890 for the pair, before any competitor models. Local research needs no public upload. Review transcripts, task outputs, and data rights before sharing benchmark artifacts; use public-upload flags only when intentionally publishing reviewed results.
 
 ## Fair comparison and implementation details
 
