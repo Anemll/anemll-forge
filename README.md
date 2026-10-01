@@ -87,6 +87,25 @@ The API supports chat completions, streaming, and tool calls. It has no authenti
 
 `--ctx` limits the available fixed-shape context ladder. The runtime selects larger prepared ANE entries as needed, resizes and copies the cached KV prefix, and preserves recurrent state. See [speculative decoding and context expansion](docs/SPECULATIVE_DECODING.md#how-ane-context-expansion-is-implemented) for capacity, memory, and compilation costs.
 
+### Optional wrapper and larger contexts
+
+`scripts/qwen38_server.sh` wraps the same `forge.py serve` command with `start`, `stop`, `restart`, `status`, `check`, and `log` subcommands. Before loading models or stopping a server for restart, it validates the checkpoint, context, and target/drafter pairing and checks that the Swift bridge library exists, can load, and has the expected ABI. If the bridge check fails, run `bash coreai/swift_bridge/build.sh` from this checkout. The release server requires the Swift bridge for the target and drafter.
+
+The wrapper reads `FORGE_BUNDLE` (default `~/Models/anemll-forge-qwen3.8-27B`), `MODEL`/`BUILD`, `CTX` (a number or `16K`/`64K`), `PORT`, `BIND_HOST`, `DRAFT`, `PY`, `LOG`/`PIDFILE`, and `PI_SYNC`/`PI_DIR` from the environment:
+
+```sh
+scripts/qwen38_server.sh start              # CTX defaults to 16384
+CTX=64K scripts/qwen38_server.sh restart    # grow the ladder up to the 64K entry
+scripts/qwen38_server.sh status             # pid + /health
+scripts/qwen38_server.sh log                # follow the server log
+```
+
+Startup reports completed target chunks, their percentage, and elapsed time after each chunk or every ten seconds. Head/drafter loading and initialization follow; the chunk percentage does not represent total startup completion. If loading exceeds ten minutes, it continues in the background; use `status` and `log` to check readiness, then sync the Pi profile with the command below if needed.
+
+The wrapper manages only verified processes recorded in its PID file and their matching server children. Separate instances need distinct ports and `ANEMLL_FORGE_STATE` directories (or `PIDFILE`/`LOG` paths). Stop a foreground `forge.py serve` session with Ctrl-C. `restart` keeps the previous log as `<log>.prev`.
+
+The prepared manifest advertises 8K–64K entries; the largest usable capacity is 65,472 rows. A 64K session used roughly 25 GB for the target plus drafter in the recorded M6 experiments; validate memory on your setup and run the smoke test before starting a persistent server.
+
 ## 5. Apply the Pi configuration patches
 
 The supplied Pi changes configure the local provider, Qwen thinking/tool replay, sampling, and 16K context compaction. **Pi 0.87.1 already supports these settings; no Pi source-code patch is required for this version.** Install that version into a dedicated directory:
@@ -110,6 +129,14 @@ export PI_LIVE_THROUGHPUT_DIR="$PI_CODING_AGENT_DIR"
 
 pi --offline --list-models qwen38
 ```
+
+If the server runs with a larger `--ctx`, update the declared window and compaction point so Pi sends at most what fits. `scripts/qwen38_pi_config.py` edits only the `ane-qwen38/qwen38-27b-ane` entry of a profile (backing up the previous files as `*.prev-qwen38`):
+
+```sh
+python scripts/qwen38_pi_config.py --ctx 65536 --pi-dir "$PI_CODING_AGENT_DIR" --build coreai
+```
+
+`--pi-dir` defaults to `~/.pi/agent`. The helper accepts the prepared 8K/16K/24K/32K/48K/64K windows, validates both profile files before writing, preserves unrelated settings, and uses atomic file replacements with backups and rollback on write failure. It sets `contextWindow`, `maxTokens` (`clamp(ctx/4, 2048, 16384)`) and the per-model compaction override (`reserveTokens`, `keepRecentTokens`). Reopen `/model` in Pi to reload models.json, and restart Pi after changing compaction settings. `scripts/qwen38_server.sh` runs this sync after startup reaches the serving message unless `PI_SYNC=0`.
 
 With the server running, enter the project you want Pi to edit and start a fresh session:
 

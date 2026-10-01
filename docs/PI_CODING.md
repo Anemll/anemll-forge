@@ -55,6 +55,20 @@ pi --offline --provider ane-qwen38 --model qwen38-27b-ane --thinking off
 
 For an existing profile, merge the single provider and exact per-model compaction override into your files; do not replace whole files containing other providers or credentials. Pi's `/model` reloads model configuration; restart after changing compaction settings. A resumed session can restore its earlier model/thinking selection, so check those settings or start fresh. [Official Pi model configuration](https://pi.dev/docs/latest/models)
 
+## Larger server contexts (32K / 64K)
+
+The server's `--ctx` can be raised to the prepared 32K/48K/64K entries; the runtime still starts small and grows the ladder. The supplied profile is deliberately 16K. To match a larger server context, sync the profile budget:
+
+```sh
+python scripts/qwen38_pi_config.py --ctx 65536 --pi-dir "$PI_CODING_AGENT_DIR" --build coreai
+```
+
+This updates `contextWindow`, `maxTokens = clamp(ctx/4, 2048, 16384)` and the per-model compaction override (`reserveTokens = maxTokens + 4096`, `keepRecentTokens = min(ctx/8, 8192)`). Reopen `/model` to reload models.json; restart Pi for compaction. `scripts/qwen38_server.sh` runs the same sync automatically after a successful start unless `PI_SYNC=0`; set `PI_DIR` to target a profile other than `~/.pi/agent`.
+
+The helper accepts only the prepared 8K/16K/24K/32K/48K/64K windows. Both profile files must contain valid JSON objects; missing or invalid settings are rejected before either file changes. Updates preserve other providers and settings, retain original/previous backups, and replace each file atomically with rollback on write failure. If the wrapper returns while cold loading continues in the background, run this helper after the server becomes ready.
+
+A client/server window mismatch adds no capability: a 16K Pi profile against a 64K server still compacts at 16K. At 64K the usable capacity is 65,472 rows and the paired target + drafter wire roughly 25 GB, so validate the server first and run one client at a time. These budgets mirror Pi's client-side clamp; they do not change the server's eight reserved verifier positions.
+
 ## Thinking without consuming the whole response
 
 The example keeps `reasoning: true` so Pi offers both `off` and thinking modes. It maps Pi's thinking selection into `chat_template_kwargs.enable_thinking` and `reasoning_effort`, with `preserve_thinking: true`. It deliberately uses `thinkingFormat: "chat-template"`; the top-level Qwen thinking format is not the server's interface.

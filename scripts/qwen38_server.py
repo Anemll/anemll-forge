@@ -134,6 +134,12 @@ class Engine:
             dcfg, _ = check_drafter_pair(dpath, ddir, target, target_cfg)
             os.environ.update(DRAFTER=str(ddir), COREAI_DRAFTER_COMPUTE="ane")
             a.draft = str(dpath)
+        if self.runtime == "coreai":
+            from hf_release import coreai_bridge_environment
+            os.environ.update(coreai_bridge_environment())
+            sys.path.insert(0, os.environ["COREAI_BRIDGE_DIR"])
+            import coreai_bridge
+            coreai_bridge.lib()  # Check native loadability and ABI before loading target or drafter.
         os.environ.update(ANE_OUT=str(mdir.parent), EXPORT_DIR=mdir.name, CTX=str(a.ctx), MODEL=str(hf))
         prepared_embedding = hf / "embed_tokens_fp16.npy"
         if prepared_embedding.is_file():

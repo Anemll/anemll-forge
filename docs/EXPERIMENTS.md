@@ -22,6 +22,7 @@ Original module names are retained to keep the research trail navigable. Histori
 - `scripts/qwen38_decode_ref.py`, `dflash2_target_ref.py`: reference implementations.
 - `scripts/qwen38_divergence.py` and `qwen38_ane_capture.py`: error localization.
 - `scripts/qwen38_server.py` and `qwen38_chat.py`: serving and chat.
+- `scripts/qwen38_server.sh` and `qwen38_pi_config.py`: start/stop/status wrapper and Pi context/compaction sync.
 - [DeltaNet numerical notebook](../ANE_DELTANET_NUMERICS.md): read through the final recipe; earlier MLP scaling was superseded.
 
 ## Core AI and speculative decoding

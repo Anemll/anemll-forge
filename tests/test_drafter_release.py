@@ -251,6 +251,41 @@ class DrafterReleaseTests(unittest.TestCase):
         self.assertTrue(result["speculative"])
         self.assertEqual(result["draft_calls"], 1)
 
+    @unittest.skipIf(np is None, "server CLI tests require numpy")
+    def test_server_missing_bridge_fails_before_target_import(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("release_server_missing_bridge", Path(__file__).resolve().parents[1] / "scripts/qwen38_server.py")
+        server = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(server)
+        args = server.parse(["--hf", str(self.root / "model"), "--model-dir", str(self.build), "--ctx", "8192"])
+        target = types.ModuleType("qwen38_coreai_model")
+        target.CoreAIQwen = Mock()
+        with patch.dict(sys.modules, {"qwen38_coreai_model": target}), \
+                patch.dict(hf.os.environ, {"COREAI_BRIDGE_LIB": str(self.fixture.base / "missing.dylib")}):
+            with self.assertRaisesRegex(ValueError, "Build the Swift bridge first"):
+                server.Engine(args)
+        target.CoreAIQwen.assert_not_called()
+
+    @unittest.skipIf(np is None, "server CLI tests require numpy")
+    def test_server_unloadable_bridge_fails_before_target_import(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("release_server_bad_bridge", Path(__file__).resolve().parents[1] / "scripts/qwen38_server.py")
+        server = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(server)
+        args = server.parse(["--hf", str(self.root / "model"), "--model-dir", str(self.build), "--ctx", "8192"])
+        library = self.fixture.base / "invalid.dylib"
+        library.write_bytes(b"invalid native library")
+        bridge = types.ModuleType("coreai_bridge")
+        bridge.lib = Mock(side_effect=OSError("incompatible native library"))
+        target = types.ModuleType("qwen38_coreai_model")
+        target.CoreAIQwen = Mock()
+        with patch.dict(sys.modules, {"coreai_bridge": bridge, "qwen38_coreai_model": target}), \
+                patch.dict(hf.os.environ, {"COREAI_BRIDGE_LIB": str(library)}):
+            with self.assertRaisesRegex(OSError, "incompatible native library"):
+                server.Engine(args)
+        bridge.lib.assert_called_once_with()
+        target.CoreAIQwen.assert_not_called()
+
 
 @unittest.skipIf(np is None, "speculative orchestration tests require numpy")
 class SpeculativeTests(unittest.TestCase):

@@ -572,6 +572,18 @@ def speculative_greedy(model, drafter, ids, vocab, tokens, stops, gap=0.003):
     return output, dict(draft_calls=cycles, verify_calls=cycles, accepted_draft_tokens=accepted)
 
 
+def coreai_bridge_environment():
+    """Resolve the release Swift bridge without importing or allocating a model."""
+    bridge_dir = Path(os.path.expanduser(os.environ.get("COREAI_BRIDGE_DIR", str(
+        Path(__file__).resolve().parents[1] / "coreai/swift_bridge")))).resolve()
+    bridge = Path(os.path.expanduser(os.environ.get("COREAI_BRIDGE_LIB", str(
+        bridge_dir / "libcoreai_bridge.dylib")))).resolve()
+    if not bridge.is_file():
+        raise ValueError(f"Missing Swift bridge: {bridge}. "
+                         "Build the Swift bridge first: bash coreai/swift_bridge/build.sh")
+    return dict(COREAI_BRIDGE="1", COREAI_BRIDGE_DIR=str(bridge_dir), COREAI_BRIDGE_LIB=str(bridge))
+
+
 def smoke(root, m, runtime, ctx, prompt, tokens, plain=False):
     if sys.platform != "darwin":
         raise ValueError("Inference smoke test requires macOS; --check-only is portable")
@@ -609,15 +621,7 @@ def smoke(root, m, runtime, ctx, prompt, tokens, plain=False):
     start = time.perf_counter()
     if runtime == "coreai":
         os.environ["COREAI_DIR"] = str(build)
-        bridge_dir = Path(os.path.expanduser(os.environ.get("COREAI_BRIDGE_DIR", str(
-            Path(__file__).resolve().parents[1] / "coreai/swift_bridge")))).resolve()
-        bridge = Path(os.path.expanduser(os.environ.get("COREAI_BRIDGE_LIB", str(
-            bridge_dir / "libcoreai_bridge.dylib")))).resolve()
-        if not bridge.is_file():
-            raise ValueError("Build the Swift bridge first: bash coreai/swift_bridge/build.sh")
-        os.environ["COREAI_BRIDGE"] = "1"
-        os.environ["COREAI_BRIDGE_DIR"] = str(bridge_dir)
-        os.environ["COREAI_BRIDGE_LIB"] = str(bridge)
+        os.environ.update(coreai_bridge_environment())
         from qwen38_coreai_model import CoreAIQwen
         model = CoreAIQwen(ctx=ctx, ladder=[ctx])
     else:
