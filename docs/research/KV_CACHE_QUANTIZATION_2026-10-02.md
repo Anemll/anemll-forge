@@ -1,9 +1,9 @@
 # KV-cache quantization research trace: V8 on Apple M6
 
-**Model:** Qwen3.8-27B, mixed-bit quantized text-inference target  
-**Experiment dates:** 1–2 October 2026  
-**Report date:** 2 October 2026  
-**Status:** Experimental research results; full-server measurements and bounded numerical validation complete.
+- **Model:** Qwen3.8-27B, mixed-bit quantized text-inference target
+- **Experiment dates:** 1–2 October 2026
+- **Report date:** 2 October 2026
+- **Status:** Experimental research results; full-server measurements and bounded numerical validation complete.
 
 ## Research record and implementation
 
