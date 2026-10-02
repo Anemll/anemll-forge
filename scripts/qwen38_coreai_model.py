@@ -35,6 +35,7 @@ import types
 from pathlib import Path
 
 import numpy as np
+from qwen38_kv_cache import append_rows, cache_format, cache_formats, cache_entries
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -189,9 +190,13 @@ def _purge(path: Path) -> int:
 class CoreAIQwen:
     """Qwen3.8-27B on the ANE through Core AI; the AneQwen3 interface (T = 8 rows per call, TP = 64-row prefill)."""
 
-    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print):
+    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto"):
         self.root, self.log = root, log
         man = json.loads((root / "manifest.json").read_text())
+        self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
+        self.kv_cache_formats = cache_formats(man)
+        if self.kv_cache_dtype == "v8" or len(self.kv_cache_formats) > 1:
+            raise ValueError("V8/selectable KV cache requires the Swift bridge; set COREAI_BRIDGE=1")
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
         self.TP = man.get("TP", 0)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
@@ -492,12 +497,15 @@ class CoreAIQwenBridge(CoreAIQwen):
     views the current set), per-chunk per-entry outputs (y, k/v_new, taps; chunk k's y is chunk k+1's x), head logits.
     Bindings are built once per (entry, parity) and rebuilt after a KV resize."""
 
-    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print):
+    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto"):
         sys.path.insert(0, str(BRIDGE_DIR))
         import coreai_bridge as B
         self.B = B
         self.root, self.log = root, log
         man = json.loads((root / "manifest.json").read_text())
+        self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
+        self.kv_cache_formats = cache_formats(man)
+        self.log(f"KV cache: FP16 K / {'INT8 V + FP16 token/head scales' if self.kv_cache_dtype == 'v8' else 'FP16 V'}")
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
         self.TP = man.get("TP", 0)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
@@ -514,7 +522,9 @@ class CoreAIQwenBridge(CoreAIQwen):
         t_all = time.time()
         for ch in man["chunks"]:
             t0 = time.time()
-            model, fns = self._load(ch["file"], ch["entries"], ch.get("compiled"))
+            aliases = cache_entries(man, ch, self.kv_cache_dtype)
+            model, physical = self._load(ch["file"], list(aliases.values()), ch.get("compiled"))
+            fns = {canonical: physical[name] for canonical, name in aliases.items()}
             self.chunks.append({"model": model, "fns": fns, "layers": ch["layers"], "gdn_j": ch["gdn_j"],
                                 "att_j": ch["att_j"], "taps": ch["taps"], "last": ch["layers"][1]})
             self.log(f"loaded {ch['file']} ({len(fns)} entries, {time.time() - t0:.0f}s, bridge)")
@@ -580,9 +590,15 @@ class CoreAIQwenBridge(CoreAIQwen):
             f = ch["fns"][entry]
             d = {}
             for j in ch["att_j"]:
-                for s in ("k", "v"):
+                for s in (("k", "v", "vs") if self.kv_cache_dtype == "v8" else ("k", "v")):
                     b = f.buffer("input", f"{s}{j}")
-                    assert b.shape == (self.nkv, L, self.hd), (b.shape, L)
+                    expected = (self.nkv, L) if s == "vs" else (self.nkv, L, self.hd)
+                    dtype = np.int8 if s == "v" and self.kv_cache_dtype == "v8" else f16
+                    if b.shape != expected or b.dtype != np.dtype(dtype):
+                        raise ValueError(f"KV metadata/layout mismatch for {s}{j}: {b.shape}/{b.dtype}; "
+                                         f"expected {expected}/{np.dtype(dtype)}")
+                    if s == "vs":
+                        b.np[:] = 1
                     if old is not None and keep:
                         b.np[:, :keep] = old[i][f"{s}{j}"][1][:, :keep]
                     d[f"{s}{j}"] = (b, b.np)
@@ -649,8 +665,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         if k:
             for i, ch in enumerate(self.chunks):
                 ow = ch["ow"][self._last]
-                for n_, (_, w) in self.kv[i].items():
-                    w[:, self.pos:self.pos + k] = ow[f"{n_}_new"][:, :k]
+                append_rows(self.kv[i], ow, ch["att_j"], self.pos, k, self.kv_cache_dtype)
         self.pending, self.pos = k, self.pos + k
         self.hi = max(self.hi, self.pos)
 
@@ -681,8 +696,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         head.run()
         for i, ch in enumerate(self.chunks):
             ow = ch["ow"][entry]
-            for n_, (_, w) in self.kv[i].items():
-                w[:, p0:p0 + n] = ow[f"{n_}_new"][:, :n]
+            append_rows(self.kv[i], ow, ch["att_j"], p0, n, self.kv_cache_dtype)
         self._last = entry
         self.pending, self.pos, self._nP = 0, p0 + n, n
         self.hi = max(self.hi, self.pos)

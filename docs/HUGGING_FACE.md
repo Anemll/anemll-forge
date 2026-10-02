@@ -2,7 +2,7 @@
 
 The intended fast M6 release uses **Core AI inference with the matching DFlash2 speculative drafter**. Upload target chunk/head packages, matching config/tokenizer/embedding assets, and the drafter package, metadata, configuration, compact selector codebooks and provenance/license files. **Core ML model packages are not required for this release.** The repository retains Core ML conversion and experiment code for reproduction and learning.
 
-HF destination: **`anemll/anemll-forge-qwen3.8-27B`** under [ANEMLL](https://huggingface.co/anemll). The model card describes a research project for the M6 Apple Neural Engine, with KL as the current evaluation and ANE benchmarks to be added when measured. The download helper defaults to this repository.
+HF destination: **`anemll/anemll-forge-qwen3.8-27B`** under [ANEMLL](https://huggingface.co/anemll). The model card describes a research project for the M6 Apple Neural Engine. Quality evaluation is currently KL; measured V8 prefill/decode results and their limits are preserved in the [KV-cache quantization research trace](research/KV_CACHE_QUANTIZATION_2026-10-02.md). The download helper defaults to this repository.
 
 For inference, start with the download and smoke-test steps below or the [README quickstart](../README.md). The staging sections are for maintainers preparing a new bundle; test a download from the exact uploaded revision.
 
@@ -45,6 +45,8 @@ Use config, tokenizer and embeddings from the **exact pinned checkpoint used to 
 The `model/` directory accepts only the supported tokenizer/config files and the embedding array; do not copy original weight shards there. Optional files include generation/special-token configuration, chat templates, vocabulary and merges. Copy the five prepared files from `release/huggingface/` into the bundle root; they are required, hashed and downloaded with the model. Copy actual file contents, not cache symlinks.
 
 Preserve Core AI's `manifest.json`, its `ctxs`, and every referenced chunk/head asset with the same relative names. Include source `.aimodel` packages so the target OS can compile them; a precompiled `.aimodelc` alone may be incompatible with another OS/toolchain. Include any explicitly referenced compiled packages too. Existing sibling `.aimodelc` packages are inventoried because the runtime can prefer them. Added runtime files absent from the inventory are rejected. The helper requires T=8 and ordered chunk ranges covering all 64 layers. Do not rename files without updating their runtime manifest.
+
+The selectable KV-cache update replaces the 16 target chunks and manifest, declares both FP16/V8 layouts with V8 as default, and retains the existing head, model assets and tested drafter. Preserve the complete `entries` and `entries_by_kv` maps for both formats; selected-function audits choose a format without deleting the other aliases. Its context ladder is 8K/16K/32K/48K/64K. Update the Forge runtime together with these packages and regenerate `release.json`; older FP16-only revisions remain supported. The manifest must not carry a maintainer's private absolute export path. See [V8 model compatibility and conversion](KV_CACHE_V8.md).
 
 The required `drafter/` contains the matching Core AI DFlash2 artifact and sidecar, checkpoint config and compact predecessor/successor codebooks. Preserve the separate upstream LICENSE/NOTICE and pinned source evidence. See [the exact compatibility contract](SPECULATIVE_DECODING.md); neither original BF16 drafter weights nor a Core ML drafter package is required for serving.
 

@@ -41,6 +41,8 @@ CFG = M.cfg()
 P, C_SUB = 8, 8                                    # pending rows (lazy commit), prefill sub-chunk
 TPS = [int(x) for x in os.environ.get("TPS", "64").split(",")]  # prefill entry sizes (rows)
 ATT_BLOCK = int(os.environ.get("ATT_BLOCK", "16384"))  # history slice for entries above it (32K / 64K fail ANEC)
+KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "fp16")
+STABLE_ATTN = os.environ.get("ATT_STABLE", "0") == "1"
 TAPS = M.TAPS
 nk, nv = CFG["linear_num_key_heads"], CFG["linear_num_value_heads"]
 dk, dv = CFG["linear_key_head_dim"], CFG["linear_value_head_dim"]
@@ -301,8 +303,14 @@ class AttnW(nn.Module):
         self.q, self.k, self.v, self.o = (QConv(W, p + f"{m}_proj.weight") for m in "qkvo")
         self.register_buffer("qn", torch.from_numpy((1 + W[p + "q_norm.weight"]).astype(np.float16)))
         self.register_buffer("kn", torch.from_numpy((1 + W[p + "k_norm.weight"]).astype(np.float16)))
+        self.cache_v8 = KV_CACHE_DTYPE == "v8"
+        if KV_CACHE_DTYPE in ("v8", "both"):
+            import coreai_torch._compression.custom_layers  # registers native quantize/dequantize
+            self.register_buffer("v8_unit", torch.tensor(1 / 128, dtype=torch.float16))
+            self.register_buffer("v8_zero", torch.tensor(0, dtype=torch.int8))
 
-    def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int):
+    def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None):
+        cache_v8 = self.cache_v8 if cache_v8 is None else cache_v8
         def tmajor(x, c):
             return x.reshape(c, T).transpose(0, 1)
         qg = tmajor(self.q(h), 2 * nh * hd).reshape(T, nh, 2 * hd)
@@ -319,7 +327,10 @@ class AttnW(nn.Module):
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
         sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
-        if ctx <= ATT_BLOCK:
+        if cache_v8:
+            v_st = torch.ops.coreai.dequantize(v_st, self.v8_unit, zero_point=self.v8_zero,
+                                              output_dtype=torch.float16)
+        if ctx <= ATT_BLOCK and not cache_v8 and not STABLE_ATTN:
             sc_h = ((qg4 @ k_st.transpose(1, 2)) * hd ** -0.5) + mask.reshape(1, 1, ctx)
             pr = torch.softmax(torch.cat([sc_h, sc_b], -1), -1)
             o = pr[:, :, :ctx] @ v_st + pr[:, :, ctx:] @ vt
@@ -337,6 +348,9 @@ class AttnW(nn.Module):
             for s_, (a, b) in zip(scs, spans):
                 e_ = torch.exp(s_ - m)
                 den = den + e_.sum(-1, keepdim=True)
+                if cache_v8:
+                    # Move dynamic V scales onto exp scores, leaving the global denominator unchanged.
+                    e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
                 num = num + e_ @ v_st[:, a:b]
             o = num / den
         o = o.reshape(nkv, grp, T, hd).permute(2, 0, 1, 3).reshape(T, nh * hd) * torch.sigmoid(gate)
@@ -383,9 +397,13 @@ def kv_len(ctx: int, T: int) -> int:
 class Entry(nn.Module):
     """One entry point of a chunk: T rows, KV history kv_len(ctx, T), verify (T = P, lazy commit) or prefill (T > P)."""
 
-    def __init__(self, layers: nn.ModuleList, ctx: int, T: int) -> None:
+    def __init__(self, layers: nn.ModuleList, ctx: int, T: int, kv_cache_dtype=None) -> None:
         super().__init__()
         self.layers, self.T, self.prefill = layers, T, T > P
+        mode = kv_cache_dtype or ("fp16" if KV_CACHE_DTYPE == "both" else KV_CACHE_DTYPE)
+        if mode not in ("fp16", "v8"):
+            raise ValueError("Entry KV format must be fp16 or v8")
+        self.cache_v8 = mode == "v8"
         self.ctx = kv_len(ctx, T)
         self.gdn_j = [j for j, l in enumerate(layers) if l.kind == "linear_attention"]
         self.att_j = [j for j, l in enumerate(layers) if l.kind != "linear_attention"]
@@ -396,7 +414,7 @@ class Entry(nn.Module):
         return (["x", "cos", "sin", "mask", "conv_sel", "commit", "commit_last"]
                 + (["conv_sel_out", "valid"] if self.prefill else [])
                 + [f"{s}{j}" for j in self.gdn_j for s in ("conv", "rec", "pend")]
-                + [f"{s}{j}" for j in self.att_j for s in ("k", "v")])
+                + [f"{s}{j}" for j in self.att_j for s in (("k", "v", "vs") if self.cache_v8 else ("k", "v"))])
 
     def output_names(self):
         return (["y"] + [f"tap{l}" for l in self.taps]
@@ -410,7 +428,7 @@ class Entry(nn.Module):
         if self.prefill:
             conv_sel_out, valid = next(it), next(it)
         gdn_in = {j: (next(it), next(it), next(it)) for j in self.gdn_j}
-        att_in = {j: (next(it), next(it)) for j in self.att_j}
+        att_in = {j: tuple(next(it) for _ in range(3 if self.cache_v8 else 2)) for j in self.att_j}
         taps, gdn_out, att_out = [], [], []
         for j, layer in enumerate(self.layers):
             h = rms_hidden(x, layer.ln1)
@@ -423,8 +441,9 @@ class Entry(nn.Module):
                     y, rows, s1, pend_out = layer.mix.verify(h, cr, conv_sel, rc, pd, commit, commit_last, self.T)
                 gdn_out += [rows, s1, pend_out]
             else:
-                ks, vs = att_in[j]
-                y, kt, vt = layer.mix(h, cos, sin, mask, ks, vs, self.ctx, self.T)
+                values = att_in[j]
+                y, kt, vt = layer.mix(h, cos, sin, mask, values[0], values[1], self.ctx, self.T,
+                                     values[2] if self.cache_v8 else None, self.cache_v8)
                 att_out += [kt, vt]
             x = layer.mlp(x + y)
             if layer.i in self.taps:
@@ -441,7 +460,10 @@ class Entry(nn.Module):
         for _ in self.gdn_j:
             ex += [torch.zeros(P + 3, cdim, dtype=f), torch.zeros(nv, dk, dv, dtype=f), torch.zeros(nv, 3 * P + 1, dv, dtype=f)]
         for _ in self.att_j:
-            ex += [torch.zeros(nkv, self.ctx, hd, dtype=f), torch.zeros(nkv, self.ctx, hd, dtype=f)]
+            ex += [torch.zeros(nkv, self.ctx, hd, dtype=f),
+                   torch.zeros(nkv, self.ctx, hd, dtype=torch.int8 if self.cache_v8 else f)]
+            if self.cache_v8:
+                ex += [torch.ones(nkv, self.ctx, dtype=f) / 128]
         return tuple(ex)
 
 
@@ -509,8 +531,21 @@ def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path) ->
     prog = conv.to_coreai()
     patch_palettizer()
     # palettize before optimize(): optimize folds the per-channel-scale mul into the weight (no longer a per-tensor LUT)
-    prog = palettize_weights(prog, lut_dtype=None, n_bits=4, granularity=CompressionGranularity.PER_TENSOR,
-                             cluster_dim=2, weight_num_threshold=1024, enable_fast_kmeans_mode=False)
+    from coreai_opt.coreai_utils.passes import weight_palettization as wp
+    exact, memo = wp._blockwise_compress, {}
+    def cached(data, mode, *args, **kwargs):
+        # Identical weights recur across contexts and cache formats. Preserve the
+        # exact compressor result, including None; never refit the exported LUT.
+        key = (wkey(data), data.shape, mode, repr(args), repr(sorted(kwargs.items())))
+        if key not in memo:
+            memo[key] = exact(data, mode, *args, **kwargs)
+        return memo[key]
+    wp._blockwise_compress = cached
+    try:
+        prog = palettize_weights(prog, lut_dtype=None, n_bits=4, granularity=CompressionGranularity.PER_TENSOR,
+                                 cluster_dim=2, weight_num_threshold=1024, enable_fast_kmeans_mode=False)
+    finally:
+        wp._blockwise_compress = exact
     prog.optimize()
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(out, ignore_errors=True)
@@ -558,14 +593,17 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
     mods = nn.ModuleList(LayerW(W, i) for i in layers).eval().to(torch.float16)
     del W
     gc.collect()
-    entries = []
-    for ctx in ctxs:
-        e = Entry(mods, ctx, 8)
-        entries.append((f"v8_{ctx // 1024}k", e, e.input_names(), e.output_names()))
-    for ctx in pctxs:
-        for tp in TPS:  # prefill entries p<T>_<ctx>k (TPS=64,128,256: bigger blocks for long prompts)
-            e = Entry(mods, ctx, tp)
-            entries.append((f"p{tp}_{ctx // 1024}k", e, e.input_names(), e.output_names()))
+    entries, aliases = [], {}
+    modes = ("fp16", "v8") if KV_CACHE_DTYPE == "both" else (KV_CACHE_DTYPE,)
+    for mode in modes:
+        aliases[mode] = {}
+        shapes = [(f"v8_{ctx // 1024}k", ctx, 8) for ctx in ctxs]
+        shapes += [(f"p{tp}_{ctx // 1024}k", ctx, tp) for ctx in pctxs for tp in TPS]
+        for canonical, ctx, rows in shapes:
+            physical = canonical + ("_kvv8" if len(modes) > 1 and mode == "v8" else "")
+            e = Entry(mods, ctx, rows, kv_cache_dtype=mode)
+            entries.append((physical, e, e.input_names(), e.output_names()))
+            aliases[mode][canonical] = physical
     name = name or f"chunk_L{layers[0]:02d}-{layers[-1]:02d}"
     out = OUT / f"{name}.aimodel"
     mb = save_program(entries, out)
@@ -574,6 +612,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
             "gdn_j": e0.gdn_j, "att_j": e0.att_j, "taps": e0.taps, "mb": round(mb),
             "numerics": {"SILU": SILU, "MLP_SILU": MLP_SILU, "GDN_SQ": GDN_SQ, "GDN_SV": GDN_SV,   # fp16 fixes built in
                          "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS}}
+    if len(modes) > 1:
+        info["entries_by_kv"] = aliases
     print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)
     return info
 
@@ -593,6 +633,7 @@ def parse_plan(s: str) -> list[list[int]]:
 
 
 def main():
+    global KV_CACHE_DTYPE, STABLE_ATTN, OUT
     ap = argparse.ArgumentParser()
     ap.add_argument("what", choices=("chunk", "head", "all"))
     ap.add_argument("layers", nargs="?", default="0-3")
@@ -600,9 +641,23 @@ def main():
     ap.add_argument("--pctx", default="2048")
     ap.add_argument("--plan", default=",".join(f"{i}-{i + 3}" for i in range(0, 64, 4)))
     ap.add_argument("--name", default=None)
+    ap.add_argument("--kv-cache-dtype", choices=("fp16", "v8", "both"), default=KV_CACHE_DTYPE)
+    ap.add_argument("--kv-cache-default", choices=("fp16", "v8"), default="v8",
+                    help="startup default for a shared-weight --kv-cache-dtype both export (default: v8)")
+    ap.add_argument("--stable-attention", action="store_true", default=STABLE_ATTN,
+                    help="global exp/sum at every context (always used with V8); matched FP16 research control")
     ap.add_argument("--compile", action="store_true", help="precompile each package to .aimodelc")
     ap.add_argument("--drop-src", action="store_true", help="with --compile: delete the source .aimodel")
     a = ap.parse_args()
+    if a.kv_cache_dtype not in ("fp16", "v8", "both"):
+        ap.error("KV_CACHE_DTYPE for conversion must be fp16, v8 or both (auto is a serving option)")
+    KV_CACHE_DTYPE, STABLE_ATTN = a.kv_cache_dtype, a.stable_attention or a.kv_cache_dtype == "v8"
+    if KV_CACHE_DTYPE == "v8":
+        OUT = OUT.with_name(OUT.name + "_kvv8")
+    elif KV_CACHE_DTYPE == "both":
+        OUT = OUT.with_name(OUT.name + "_kvselect" + ("_stable" if STABLE_ATTN else ""))
+    elif STABLE_ATTN:
+        OUT = OUT.with_name(OUT.name + "_stable")
     ctxs = [int(x) for x in a.ctx.split(",") if x]
     pctxs = [int(x) for x in a.pctx.split(",") if x]
     ck = M.Checkpoint()
@@ -613,9 +668,21 @@ def main():
     else:
         man_path = OUT / "manifest.json"
         man = json.loads(man_path.read_text()) if man_path.exists() else {}
+        prior_format = man.get("kv_cache", {}).get("format", "fp16")
+        wanted_format = "selectable" if KV_CACHE_DTYPE == "both" else KV_CACHE_DTYPE
+        if man_path.exists() and prior_format != wanted_format:
+            raise ValueError("Existing build has a different KV format; choose a new OUT directory")
         man.update({"version": "coreai1", "T": 8, "TP": 64 if pctxs else 0, "pend": P, "taps": TAPS, "ctxs": ctxs,
                     "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
                     "pkv_len": {str(c): kv_len(c, 64) for c in pctxs}, "export": str(M.EXPORT_DIR)})
+        def layout(mode):
+            return {"format": mode, "keys": "float16", "values": "int8" if mode == "v8" else "float16",
+                    "scales": "float16" if mode == "v8" else None,
+                    "scale_granularity": "token_head" if mode == "v8" else None,
+                    "stable_attention": STABLE_ATTN or mode == "v8"}
+        man["kv_cache"] = ({"format": "selectable", "default": a.kv_cache_default,
+                            "formats": {mode: layout(mode) for mode in ("fp16", "v8")}}
+                           if KV_CACHE_DTYPE == "both" else layout(KV_CACHE_DTYPE))
         chunks = {c["file"]: c for c in man.get("chunks", [])}
         for layers in parse_plan(a.plan):
             f = f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"

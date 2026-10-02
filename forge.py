@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import hf_release
+from qwen38_kv_cache import cache_format
 NUMERICS = dict(SILU="tanh", MLP_SILU="tanh", GDN_SQ="16", GDN_SV="64",
                 MLP_DS="1", MLP_DS_DYN="0", V3_KV_IN="1", V3_PREFILL="0")
 
@@ -43,6 +44,8 @@ def parser():
             q.add_argument("--ctx", type=int, default=16384)
             if name == "serve":
                 q.add_argument("--runtime", choices=("coreml", "coreai"), default="coreai")
+                q.add_argument("--kv-cache-dtype", choices=("auto", "fp16", "v8"), default="auto",
+                               help="require a matching cache export; auto reads its manifest")
                 modes = q.add_mutually_exclusive_group()
                 modes.add_argument("--draft", type=path, help="Core AI DFlash2 package; default: bundle/drafter/dflash2_lut4_gptq.aimodel")
                 modes.add_argument("--plain", action="store_true", help="diagnostic target-only generation")
@@ -103,17 +106,22 @@ def prepare(a):
         if not manifest.is_file():
             raise ValueError(f"Missing build manifest: {manifest}")
         if runtime == "coreai":
-            contexts = json.loads(manifest.read_text()).get("ctxs", [])
+            model_manifest = json.loads(manifest.read_text())
+            contexts = model_manifest.get("ctxs", [])
+            cache_format(model_manifest, getattr(a, "kv_cache_dtype", "auto"))
             if a.ctx not in contexts:
                 raise ValueError(f"Unsupported Core AI --ctx {a.ctx}; manifest contexts: {contexts}")
         elif (a.build / f"manifest_ctx{a.ctx}_v5.json").exists():
             raise ValueError("This launcher validates v4 builds; a competing v5 manifest would take precedence. "
                              "Use a dedicated v4 build directory or the research runtime directly.")
         env["RUNTIME"] = runtime
+        if runtime != "coreai" and getattr(a, "kv_cache_dtype", "auto") == "v8":
+            raise ValueError("V8 KV cache requires the Core AI Swift bridge runtime")
         script = "qwen38_server.py" if a.command == "serve" else "qwen38_chat.py"
         args = ["--hf", str(a.model), "--model-dir", str(a.build), "--ctx", str(a.ctx)]
         if a.command == "serve":
-            args += ["--host", a.host, "--port", str(a.port), "--runtime", runtime]
+            args += ["--host", a.host, "--port", str(a.port), "--runtime", runtime,
+                     "--kv-cache-dtype", a.kv_cache_dtype]
             if a.plain:
                 if a.drafter:
                     raise ValueError("--drafter cannot be combined with diagnostic --plain")

@@ -25,7 +25,7 @@ export BUILDS=/path/to/new-coreml-build
 python forge.py quantize --model "$MODEL" --wiki "$WIKI" --output "$RUNS" --tag qwen38-27b-vq2
 ```
 
-This is a reproducible *starting configuration*, not a claim to reproduce the best historical export: MLP vector 2×16 + per-channel scale, scalar LUT4 mixers/head, INT8 K/V projection weights, GPTQ and online rotations. The Core AI runtime's KV cache is FP16. The recovered [historical mixed-bit plan](../configs/quantization/mix25in_mixr.json) is included; calibrated export tensors and private calibration rows are not. See [the quantization guide](QUANTIZATION.md) for the exact allocation and reproduction limits. Pass `--plan /path/to/plan.json` for a generated plan.
+This is a reproducible *starting configuration*, not a claim to reproduce the best historical export: MLP vector 2×16 + per-channel scale, scalar LUT4 mixers/head, INT8 K/V projection weights, GPTQ and online rotations. KV-cache precision is separate from projection-weight quantization: legacy Core AI builds use FP16 K/V, while matching selectable builds can retain FP16 K and compress V to INT8. See [V8 cache conversion and runtime selection](KV_CACHE_V8.md). The recovered [historical mixed-bit plan](../configs/quantization/mix25in_mixr.json) is included; calibrated export tensors and private calibration rows are not. See [the quantization guide](QUANTIZATION.md) for the exact allocation and reproduction limits. Pass `--plan /path/to/plan.json` for a generated plan.
 
 Outputs are in `$RUNS/export/qwen38-27b-vq2`. The source quantizer also evaluates WikiText perplexity. Tune `NCAL`, `NEVAL`, `SEQ`, `DEVICE`, `AW` and `CAL_MIX` through environment variables when reproducing experiments; record their values.
 
@@ -80,6 +80,8 @@ python forge.py serve --runtime coreai --model "$MODEL" --build /path/to/coreai-
 ```
 
 A freshly quantized target needs its own matched and validated drafter/head pairing; the prepared `mix25in_mixr_lr64mix` drafter is not automatically compatible with the example export above. For the ready-made pair, use the downloaded bundle workflow instead. The drafter conversion source is `coreai/dflash2_coreai_build.py`; pin `DRAFT_EXPORT`, `HEAD_EXPORT`, `DRAFTER`, numerical settings and metadata. Read [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) before building or changing that pair.
+
+The example above retains FP16 cache inputs. To produce shared-weight FP16/V8 packages, add `--kv-cache-dtype both` to the converter and use the resulting `_kvselect` build path; its manifest defaults to V8. `--kv-cache-default fp16` can retain an FP16 default. This conversion changes cache entry interfaces and attention arithmetic, not the quantized target weights. Follow the [full V8 recipe and research report](KV_CACHE_V8.md) before comparing results or updating a released bundle.
 
 These Core AI commands remain unverified in a clean environment. Start with a single `chunk 0-3` build. The current runtime defaults to compile mode 2 and removes incompatible cache specializations for the selected package before loading; inspect this behavior before changing modes on an existing installation. The Python binding has documented long-run allocation problems; the Swift bridge was the later research solution.
 

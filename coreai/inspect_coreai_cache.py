@@ -8,15 +8,18 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+from qwen38_kv_cache import cache_format, cache_entries
 
 
-def package_entries(model_dir, drafter=None):
+def package_entries(model_dir, drafter=None, kv_cache_dtype='auto'):
     manifest = json.loads((model_dir / 'manifest.json').read_text())
-    def target_record(record):
+    selected = cache_format(manifest, kv_cache_dtype)
+    def target_record(record, entries=None):
         package = model_dir / record['file']
         compiled = model_dir / record['compiled'] if record.get('compiled') else package.with_suffix('.aimodelc')
-        return package, record.get('entries', ['h8']), compiled
-    result = [target_record(c) for c in manifest['chunks']]
+        return package, entries if entries is not None else record.get('entries', ['h8']), compiled
+    result = [target_record(c, list(cache_entries(manifest, c, selected).values())) for c in manifest['chunks']]
     head = manifest['head']
     result.append(target_record(head))
     if drafter:
@@ -111,6 +114,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model-dir', required=True, type=Path)
     parser.add_argument('--drafter', type=Path)
+    parser.add_argument('--kv-cache-dtype', choices=('auto', 'fp16', 'v8'), default='auto',
+                        help='inspect selected functions in a shared-weight selectable export')
     parser.add_argument('--cache-root', type=Path, default=Path.home() / 'Library/Caches/coreai-cache')
     parser.add_argument('--os-build', help='defaults to sw_vers -buildVersion')
     parser.add_argument('--executable', default=sys.executable, help='cache executable identity; basename with underscores replaced by hyphens')
@@ -120,7 +125,8 @@ def main(argv=None):
         build = args.os_build or subprocess.run(['sw_vers', '-buildVersion'], check=True, capture_output=True, text=True).stdout.strip()
         if not build or '/' in build or build in ('.', '..'):
             raise ValueError('invalid OS build')
-        packages = package_entries(args.model_dir.expanduser(), args.drafter.expanduser() if args.drafter else None)
+        packages = package_entries(args.model_dir.expanduser(), args.drafter.expanduser() if args.drafter else None,
+                                   args.kv_cache_dtype)
         results = [inspect_package(p, e, args.cache_root.expanduser(), build, args.executable, compiled)
                    for p, e, compiled in packages]
         report = {'os_build': build, 'executable_identity': Path(args.executable).name.replace('_', '-'),

@@ -27,7 +27,7 @@ class ServerWrapperTests(unittest.TestCase):
         scripts.mkdir()
         source = Path(__file__).resolve().parents[1]
         shutil.copy2(source / "forge.py", self.root / "forge.py")
-        for name in ("qwen38_server.sh", "qwen38_server_process.py", "hf_release.py"):
+        for name in ("qwen38_server.sh", "qwen38_server_process.py", "hf_release.py", "qwen38_kv_cache.py"):
             shutil.copy2(source / "scripts" / name, scripts / name)
         bridge = self.root / "coreai/swift_bridge"
         bridge.mkdir(parents=True)
@@ -52,7 +52,7 @@ class ServerWrapperTests(unittest.TestCase):
                         ANEMLL_FORGE_STATE=str(self.root), LOG=str(self.root / "server.log"),
                         PIDFILE=str(self.pidfile), COREAI_BRIDGE_DIR=str(bridge),
                         COREAI_BRIDGE_LIB=str(bridge / "libcoreai_bridge.dylib"))
-        for key in ("DRAFTER", "EXTRA_ARGS"):
+        for key in ("DRAFTER", "EXTRA_ARGS", "KV_CACHE_DTYPE"):
             self.env.pop(key, None)
 
     def run_wrapper(self, action, **overrides):
@@ -78,6 +78,15 @@ class ServerWrapperTests(unittest.TestCase):
         result = self.run_wrapper("restart", DRAFT=str(self.root / "missing.aimodel"))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing Core AI DFlash2 drafter", result.stderr)
+        self.assertIsNone(server.poll())
+        self.assertEqual(self.pidfile.read_text(), f"{server.pid}\n")
+
+    def test_v8_mismatch_restart_preserves_running_server(self):
+        server = self.synthetic_server()
+        self.pidfile.write_text(f"{server.pid}\n")
+        result = self.run_wrapper("restart", KV_CACHE_DTYPE="v8")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("matching --build", result.stderr)
         self.assertIsNone(server.poll())
         self.assertEqual(self.pidfile.read_text(), f"{server.pid}\n")
 

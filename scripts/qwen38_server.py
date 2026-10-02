@@ -47,6 +47,8 @@ def parse(argv=None):
     p.add_argument("--model-dir", required=True, help="Core AI target package directory")
     p.add_argument("--hf", required=True, help="checkpoint/bundle dir: tokenizer, chat template, embedding")
     p.add_argument("--runtime", choices=("coreai", "coreml"), default="coreai")
+    p.add_argument("--kv-cache-dtype", choices=("auto", "fp16", "v8"), default="auto",
+                   help="require matching model cache inputs; auto reads manifest.json")
     p.add_argument("--ctx", type=int, default=8192, help="context length the chunks were built for")
     p.add_argument("--think", action="store_true", help="enable thinking by default (clients can override)")
     p.add_argument("--max-tokens", type=int, default=4096, help="default completion limit")
@@ -70,6 +72,8 @@ def parse(argv=None):
         p.error("--drafter cannot be combined with --plain")
     if args.runtime != "coreai" and not args.plain:
         p.error("Core ML is a plain diagnostic path; supply --plain")
+    if args.runtime != "coreai" and args.kv_cache_dtype == "v8":
+        p.error("V8 KV cache requires the Core AI Swift bridge runtime")
     return args
 
 
@@ -125,6 +129,9 @@ class Engine:
         hf = Path(os.path.expanduser(a.hf))
         # Fail on a wrong/missing head or tap pairing before allocating either large model.
         self.runtime = a.runtime
+        from qwen38_kv_cache import cache_format
+        if self.runtime == "coreai":
+            cache_format(json.loads((mdir / "manifest.json").read_text()), a.kv_cache_dtype)
         dpath, ddir, dcfg = None, None, None
         if not a.plain:
             from hf_release import drafter_paths, check_drafter_pair
@@ -152,7 +159,8 @@ class Engine:
             os.environ["COREAI_DIR"] = str(mdir)  # chunk share one weight copy; the context grows through the ladder
             import qwen38_coreai_model as A
             man = json.loads((mdir / "manifest.json").read_text())
-            self.model = A.CoreAIQwen(ladder=[c for c in man["ctxs"] if c <= a.ctx], log=log)  # [ctx] switches, timestamped
+            self.model = A.CoreAIQwen(ladder=[c for c in man["ctxs"] if c <= a.ctx], log=log,
+                                     kv_cache_dtype=a.kv_cache_dtype)  # [ctx] switches, timestamped
         else:
             self.model = M.load_model()
         self.v2 = hasattr(self.model, "snapshot")   # v2 / v3: batched prefill + zero-copy DeltaNet states
@@ -292,7 +300,7 @@ class Engine:
                 self.drafter.reset()
             self.fed, reused, how = [], 0, "cold (no reusable state)"
         log(f"request: prompt {len(ids)} tok | cache: {how}, reused {reused} | prefilling {len(ids) - reused} tok ...")
-        t_pre = time.time()
+        t_pre = time.perf_counter()
         turn_cut = max((i for i, t in enumerate(ids) if t == self.im_start), default=0)
         h = self.user_hdr
         sys_cut = next((i for i in range(len(ids) - len(h) + 1) if ids[i:i + len(h)] == h), 0)
@@ -309,7 +317,11 @@ class Engine:
                 i = cut
             if key:
                 self._snapshot(key, ids[:cut])
-        dt = time.time() - t_pre
+        dt = time.perf_counter() - t_pre
+        self.prefill_stats = {"tokens": len(ids) - reused, "seconds": dt,
+                              "tokens_per_second": (len(ids) - reused) / max(dt, 1e-9),
+                              "cached_tokens": reused,
+                              "logits_finite": bool(np.isfinite(logits).all()) if logits is not None else None}
         log(f"prefill: {len(ids) - reused} tok in {dt:.1f}s ({(len(ids) - reused) / max(dt, 1e-9):.0f} tok/s) | decoding ...")
         return logits, reused
 
@@ -424,6 +436,7 @@ class Engine:
                  think_budget=0):
         logits, reused = self.prefill(ids)
         self.think_forced = 0
+        decode_started = time.perf_counter()
         t_gen, out, text, finish = time.time(), [], "", "length"
         rng = np.random.default_rng(seed)
         presence = self.a.presence if presence is None else float(presence)
@@ -496,7 +509,19 @@ class Engine:
                 logits = self.model.step(anchor)
                 self.fed.append(anchor)
                 new = [self.sample(logits, temp, top_p, top_k, rng, seen, presence, out, dry)]
-        return text, finish, len(out), reused, time.time() - t_gen
+        decode_seconds = time.perf_counter() - decode_started
+        last_logits = getattr(self.model, "logits", None)
+        if not isinstance(last_logits, np.ndarray):
+            last_logits = logits
+        self.decode_stats = {"tokens": len(out), "seconds": decode_seconds,
+                             "tokens_per_second": len(out) / max(decode_seconds, 1e-9),
+                             "cycles": self.cycles,
+                             "tokens_per_call": len(out) / self.cycles if self.cycles else None,
+                             "draft_accept_percent": self.accept_rate() if self.drafter is not None else None,
+                             "draft_accept_histogram": list(self.acc_hist),
+                             "phase_seconds": dict(self.tm), "finish_reason": finish,
+                             "last_logits_finite": bool(np.isfinite(last_logits).all())}
+        return text, finish, len(out), reused, decode_seconds
 
 
 def split_output(text, thinking):
@@ -662,7 +687,13 @@ def make_handler(engine):
                 self._json(200, {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "anemll",
                                                              "max_model_len": engine.ctx}]})
             elif self.path.rstrip("/") in ("/health", "/v1/health"):
-                self._json(200, {"status": "ok", "model": MODEL_ID, "context": engine.ctx, "position": engine.model.pos})
+                self._json(200, {"status": "ok", "model": MODEL_ID, "context": engine.ctx,
+                                 "position": engine.model.pos,
+                                 "kv_cache_dtype": getattr(engine.model, "kv_cache_dtype", "fp16"),
+                                 "kv_cache_formats": list(getattr(engine.model, "kv_cache_formats", ("fp16",))),
+                                 "active_context_entry": getattr(engine.model, "ctx", engine.ctx),
+                                 "prefill": getattr(engine, "prefill_stats", None),
+                                 "decode": getattr(engine, "decode_stats", None)})
             else:
                 self._json(404, {"error": {"message": "not found"}})
 
@@ -788,10 +819,10 @@ def make_handler(engine):
 
 def startup_banner(a):
     mdir = Path(os.path.expanduser(a.model_dir))
-    if os.environ.get("RUNTIME") == "coreai" and (mdir / "manifest.json").exists():
+    if a.runtime == "coreai" and (mdir / "manifest.json").exists():
         man = json.loads((mdir / "manifest.json").read_text())
         build = (f"Core AI: verify-8 contexts {[c for c in man['ctxs'] if c <= a.ctx]}, prefill-{man.get('TP', 0)} "
-                 f"contexts {man.get('pctxs', [])}, one weight copy")
+                 f"contexts {man.get('pctxs', [])}, KV {man.get('kv_cache', {}).get('format', 'fp16')}, one weight copy")
     else:
         build = "build manifests " + (", ".join(sorted(f.name for f in mdir.glob(f"manifest_ctx{a.ctx}_v*.json")))
                                       or "v1 (none)")

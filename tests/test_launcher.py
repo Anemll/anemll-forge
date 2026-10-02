@@ -95,6 +95,22 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "competing v5"):
             forge.prepare(self.args("serve", "--runtime", "coreml", "--plain", "--build", str(build)))
 
+    def test_v8_request_requires_matching_coreai_export(self):
+        build = self.root / "coreai"
+        build.mkdir()
+        manifest = build / "manifest.json"
+        manifest.write_text('{"ctxs": [16384]}')
+        args = self.args("serve", "--plain", "--build", str(build), "--kv-cache-dtype", "v8")
+        with self.assertRaisesRegex(ValueError, "matching --build"):
+            forge.prepare(args)
+        manifest.write_text(json.dumps({"ctxs": [16384], "kv_cache": {
+            "format": "v8", "keys": "float16", "values": "int8", "scales": "float16",
+            "scale_granularity": "token_head"}}))
+        command, _ = forge.prepare(args)
+        self.assertEqual(command[command.index("--kv-cache-dtype") + 1], "v8")
+        with self.assertRaisesRegex(ValueError, "matching --build"):
+            forge.prepare(self.args("serve", "--plain", "--build", str(build), "--kv-cache-dtype", "fp16"))
+
     def test_quantizer_requires_dataset_and_safe_tag(self):
         wiki = self.root / "wiki"
         wiki.mkdir()

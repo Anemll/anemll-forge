@@ -9,7 +9,7 @@ The drafter source is [ProCreations/Ternary-Bonsai-2-27B-DFlash2 at `4cfb6ad0326
 ## Target conversion and packaging
 
 - **`coreai/*.aimodel`:** model graph conversion, partitioning and packaging with quantized weights and selected numerical implementations. The target recipe uses mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections. Per-artifact inventory and export metadata identify the applicable transforms.
-- **`coreai/manifest.json`:** copied from the deployed research build. The historical local export path was replaced by `mix25in_mixr_lr64mix`, with an ANEMLL modification notice. Package names and context entries were preserved.
+- **`coreai/manifest.json`:** prepared from the selectable V8/FP16 build. The local export path was replaced by the portable target identifier `mix25in_mixr_lr64mix`, preserving the unchanged drafter/head pairing. V8 is the declared default. Physical function maps and 8K/16K/32K/48K/64K context entries were preserved; this update has no 24K entry.
 - **`model/embed_tokens_fp16.npy`:** the original target embedding tensor converted to FP16 and packaged as a NumPy array for host lookup.
 - **Target configuration/tokenizer assets:** copies of the pinned upstream files, retained without content changes.
 - **Optional quantized exports:** transformed weight representations, codebooks, indices, scales, rotations and residual factors, where included. These are separate reproduction artifacts rather than required runtime assets.
@@ -28,7 +28,13 @@ The default release includes both Core AI target and speculative drafter. Vision
 
 The complete local drafter BF16 checkpoint was rehashed and matched the pinned upstream LFS SHA256. Configuration and source license/notice bytes were checked against upstream Git blobs. Compact selector tensor values were checked for identical raw bytes after extraction.
 
-The Core AI drafter body has not been independently reconstructed from the source checkpoint and GPTQ export. Head/target and calibration linkage are currently supported by the source sidecar/export metadata. Speculative generation, acceptance, performance and ANE placement were not rerun during packaging. These records do not establish a new benchmark or complete hardware validation.
+The Core AI drafter body has not been independently reconstructed from the source checkpoint and GPTQ export. Head/target and calibration linkage are currently supported by the source sidecar/export metadata. The paired target/drafter has separate M6 prefill, decode and short KL experiments summarized with limitations in the model card. Packaging integrity checks do not run inference again or establish complete hardware or quality validation.
+
+## Selectable historical value-cache update
+
+The target packages now contain both FP16-cache and V8-cache entry families for 8K, 16K, 32K, 48K and 64K contexts, using the same quantized weights and unchanged output head. V8 preserves FP16 keys and stores historical values as INT8 with FP16 scales per token/head. The host quantizes accepted rows and ANE attention reconstructs historical values; newly returned activations remain FP16. V8 uses stable attention arithmetic, which differs from the stock short-context FP16 arithmetic. The manifest selects V8 by default; explicit FP16 fallback remains.
+
+The 16 target source packages are new graph derivatives. Their binary program bytes were copied unchanged from the completed selectable export; only the external runtime manifest was sanitized. Tokenizer, embedding and tested Core AI DFlash2 assets remain unchanged from the previous paired release. Updated source code is required for physical entry selection, cache growth and speculative commit handling. A manifest flag alone does not retrofit older FP16-only packages.
 
 ## Retaining notices
 
