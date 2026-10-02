@@ -161,6 +161,7 @@ KL divergence is the current model-fidelity evaluation; it does not establish co
 - [Quality benchmark plan](docs/BENCHMARK_PLAN.md)
 - [Serving-session performance analysis](docs/PERFORMANCE_SESSION.md)
 - [Experiment guide](docs/EXPERIMENTS.md) and [M3U pipeline archive](pipelines/m3u/README.md)
+- [Late-Layer KV Approximation (LLKVApprox) prototype](pipelines/kva/README.md) and its [measured results](RESULTS_KVA.md)
 - [Release checklist](docs/RELEASE.md) and [validation records](docs/VALIDATION.md)
 
 ## Contributing
