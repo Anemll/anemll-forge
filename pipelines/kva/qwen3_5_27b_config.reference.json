@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Reference architecture dimensions for Qwen3.8-27B (qwen3_5 / Gated-DeltaNet hybrid),",
+    "reconstructed from anemll-forge source so the KVA prototype and its shape tests can run",
+    "without the real checkpoint present. These are a convenience fixture, NOT an authoritative",
+    "copy of the upstream config.json. At runtime, kva_qwen38.py reads the real text_config from",
+    "a checkpoint directory when --model is given and prefers those values.",
+    "",
+    "Provenance (files in this repo):",
+    "  hidden_size 5120, num_hidden_layers 64, MLP 17408, 24 q / 4 kv heads, head_dim 256,",
+    "  vocab 248320            -> QUANTIZATION_NOTES.md line 16-17, forge.py:63",
+    "  attention layers 3,7,..,63 (interval 4, 16 layers; other 48 are linear_attention)",
+    "                          -> QUANTIZATION_NOTES.md line 16 ('layer, 3, 7, ..., 63')",
+    "  recurrent state (48,128,128) -> nv=48, linear_key/value_head_dim=128",
+    "                          -> scripts/qwen38_ane_chunk.py:4, DFLASH2_ANE_PLAN.md:134",
+    "  conv_dim 10240 = 2*nk*dk + nv*dv = 2*16*128 + 48*128 -> nk=16",
+    "                          -> ANE_DELTANET_NUMERICS.md:27, QUANTIZATION_NOTES.md:17 (in_proj_qkv 10240x5120)",
+    "  conv kernel 4 (conv ring buffer (4,10240))  -> scripts/qwen38_ane_chunk.py:4",
+    "  in_proj_z 6144 = nv*dv ; in_proj_a/b 48 = nv  -> scripts/qwen38_ane_chunk.py:216-219",
+    "  rope partial_rotary_factor / rope_theta below are typical qwen3_5 values used only for the",
+    "  reference RoPE table; the real values come from the checkpoint when --model is provided."
+  ],
+  "text_config": {
+    "model_type": "qwen3_5",
+    "hidden_size": 5120,
+    "intermediate_size": 17408,
+    "num_hidden_layers": 64,
+    "vocab_size": 248320,
+    "rms_norm_eps": 1e-06,
+    "num_attention_heads": 24,
+    "num_key_value_heads": 4,
+    "head_dim": 256,
+    "linear_num_key_heads": 16,
+    "linear_num_value_heads": 48,
+    "linear_key_head_dim": 128,
+    "linear_value_head_dim": 128,
+    "linear_conv_kernel_dim": 4,
+    "full_attention_interval": 4,
+    "rope_parameters": {
+      "rope_theta": 10000000.0,
+      "partial_rotary_factor": 0.25
+    },
+    "layer_types_rule": "full_attention when (layer_index % full_attention_interval) == (full_attention_interval - 1), else linear_attention"
+  }
+}
