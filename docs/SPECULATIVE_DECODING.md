@@ -66,14 +66,16 @@ The server restricts the growth ladder to advertised entries at or below `--ctx`
 
 On each prefill or verifier call, `fit(pos + n)` checks whether the committed position plus the incoming rows fit the active entry. If they do not, it selects the smallest allowed entry whose usable capacity fits. `resize` then:
 
-1. Allocates new FP16 K/V IOSurface buffers for the full-attention layers and a mask with the new history length.
-2. Copies the cached prefix into the new buffers. It retains rows up to `min(hi, new_capacity)`, where `hi` tracks cached rows needed by snapshots as well as the current committed position.
+1. Allocates new K/V IOSurface buffers for the full-attention layers and a mask with the new history length. The default export uses FP16 K/V; the experimental V8 export uses FP16 K, INT8 V and FP16 token/head scales.
+2. Copies the cached prefix into the new buffers, including V codes and their scales for V8. It retains rows up to `min(hi, new_capacity)`, where `hi` tracks cached rows needed by snapshots as well as the current committed position.
 3. Preserves the current position, pending commit count and DeltaNet recurrent/convolution state; resizing does not replay the prompt or reset these states.
 4. Clears cached Swift binding plans because they reference the old KV buffers. The next call binds the chosen `v8_*` or `p64_*` functions to the new buffers and runs the chunks/head through the bridge.
 
 Visibility is controlled by the current position and mask; retained rows beyond that position do not automatically become visible history. Verification commits only the accepted prefix through `accept(k)`. The KV allocation/copy can temporarily hold old and new buffers together, and the first use of a new entry can incur additional runtime specialization. The runtime records `[ctx]` transitions with position, copied-row count and elapsed milliseconds. These costs belong in latency and peak-memory measurements.
 
 Ignoring padding and runtime scratch space, full-attention KV storage scales as `2 × attention_layers × KV_heads × history_rows × head_dim × 2 bytes` for FP16 K/V. Weight storage and DeltaNet state do not scale by that same context factor. Total loaded memory also includes programs, per-entry buffers, the drafter and host assets; KV arithmetic alone is not a full-memory estimate.
+
+The [experimental V8 option](KV_CACHE_V8.md) lowers the logical K/V/scale payload from 64 KiB to 48.125 KiB per history position for this target. It requires a matching Core AI export and preserves the same DFlash2, valid-row prefill writes and speculative accepted-prefix commits. The stock download remains FP16; changing a runtime flag does not convert its model inputs.
 
 The largest prepared entry is labeled 64K but has **65,472 usable history rows**. The builder reserves the largest block width (64) so `[history | block]` stays within its observed 65,536-element compilation boundary. This is a constraint of the recorded graph/compiler path, not proof of a permanent universal ANE architecture limit. Speculative HTTP requests additionally reserve eight verifier-write positions before granting an output budget. If no allowed entry fits, direct runtime calls fail and the server rejects an oversized prompt or limits generation; it does not silently expand beyond the configured ladder.
 

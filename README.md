@@ -37,6 +37,8 @@ The requirements file provides starting version pins for inference from prepared
 
 Model files: **[anemll/anemll-forge-qwen3.8-27B](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main)** — [Core AI target](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/coreai), [DFlash2 drafter](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/drafter), and [tokenizer/config/embeddings](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/model).
 
+**V8 model update:** This branch adds selectable FP16/V8 cache support and requires a matching update to the Core AI target packages and release inventory. Update the Forge runtime together with the model bundle. The updated [target manifest](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/blob/main/coreai/manifest.json) declares `kv_cache.format: selectable` and `kv_cache.default: v8`; `auto` then starts with FP16 keys and INT8 values. The target weights, output head, tokenizer/embeddings and tested Core AI DFlash2 drafter retain their existing pairing. Older model revisions without this metadata remain FP16-only. The update's prepared context entries are **8K, 16K, 32K, 48K and 64K**.
+
 Use the helper to download the complete matching pair and verify its file inventory:
 
 ```sh
@@ -51,6 +53,8 @@ python forge.py quick-test \
 ```
 
 The helper resolves `main` to a Hub commit, downloads the target, drafter, tokenizer/config, embeddings, and license/provenance documents, and verifies hashes. Use a full Hub commit instead of `main` for reproducible runs. If access requires authentication, use `hf auth login` with your own account. Keep the bundle layout intact; original BF16 weights and Core ML model packages are unnecessary for this inference path. See the [download and bundle guide](docs/HUGGING_FACE.md).
+
+When upgrading an existing download, choose a **new output directory**, for example `export FORGE_BUNDLE="$HOME/Models/anemll-forge-qwen3.8-27B-v8"`, before running the download and quick-test commands. The helper rejects an output directory containing a different release inventory. A runtime flag cannot add V8 inputs to an older FP16-only model package.
 
 ## 3. Run a quick inference test
 
@@ -106,6 +110,25 @@ The wrapper manages only verified processes recorded in its PID file and their m
 
 The prepared manifest advertises 8K–64K entries; the largest usable capacity is 65,472 rows. A 64K session used roughly 25 GB for the target plus drafter in the recorded M6 experiments; validate memory on your setup and run the smoke test before starting a persistent server.
 
+### INT8 V cache and FP16 fallback
+
+The Core AI server supports **FP16 K with INT8 V** through `--kv-cache-dtype v8`, or `KV_CACHE_DTYPE=v8` in the wrapper. This requires target packages exported with V8 inputs and token/head scales; older FP16-only bundles cannot be switched by a runtime flag. `auto` (default) reads the selected build's manifest, while explicit `fp16` or `v8` rejects a mismatched build before loading or stopping a server. `/health` reports the active cache format. V8 remains a research option with bounded quality validation.
+
+A new `--kv-cache-dtype both` conversion contains both formats in shared-weight packages and defaults to V8. The server's `auto` mode follows the manifest's declared default, so no precision override is needed for a new V8-default build. Select `fp16` or `v8` explicitly at startup using the same `BUILD` path; conversion can retain an FP16 default with `--kv-cache-default fp16`. Existing FP16-only bundles remain compatible. Changing formats requires a restart with an empty cache; existing prompt values are never reinterpreted in a different format.
+
+```sh
+# With the updated selectable bundle, auto uses its V8 default.
+CTX=64K scripts/qwen38_server.sh restart
+curl --fail http://127.0.0.1:8765/health  # kv_cache_dtype should be "v8"
+
+# Select the FP16-cache baseline from the same bundle.
+KV_CACHE_DTYPE=fp16 CTX=64K scripts/qwen38_server.sh restart
+```
+
+For a separately converted target, set `BUILD="$V8_BUILD"` and `DRAFT="$FORGE_BUNDLE/drafter/dflash2_lut4_gptq.aimodel"`. The matching tokenizer/model assets and drafter are still required.
+
+Prefill, decode and DFlash2 verification emit FP16 new rows. The host compresses only committed V rows; keys stay FP16. Growth copies V codes and their scales together, and restore uses the same position masks and recurrent-state snapshots. Paired full-server prefill and three-repeat decode measurements completed at 8K, 16K, 32K, 48K and 64K on M6. On one synthetic workload, observed decode throughput changes ranged from −3.1% at 8K to +23.9% at 64K, including speculative acceptance differences. Compiled-model KL-512 was nearly unchanged on a short 64-sequence trace; long-context quality remains unmeasured. See [V8 conversion, measured throughput and validation](docs/KV_CACHE_V8.md).
+
 ## 5. Apply the Pi configuration patches
 
 The supplied Pi changes configure the local provider, Qwen thinking/tool replay, sampling, and 16K context compaction. **Pi 0.87.1 already supports these settings; no Pi source-code patch is required for this version.** Install that version into a dedicated directory:
@@ -151,11 +174,12 @@ Start with a small edit and check its diff/tests. The profile declares **16,384 
 
 The repository includes mixed-bit GPTQ, scalar/vector LUT quantization, per-channel scaling, online rotations, low-rank corrections, calibration and KL evaluation, Core ML/Core AI conversion, and the speculative runtime. It also preserves failed experiments and compiler/ANE findings from the original research, with source provenance recorded in [docs/provenance.json](docs/provenance.json).
 
-KL divergence is the current model-fidelity evaluation; it does not establish coding, reasoning, or long-context capability. ANE benchmarks will be added with exact artifacts, hardware, context, generation settings, and measurement methods. Historical measurements are labeled separately from downloaded-release validation. Treat this as research software and review the documented numerical, placement, compilation, and memory limitations.
+KL divergence is the current model-fidelity evaluation; it does not establish coding, reasoning, or long-context capability. M6 full-server prefill and decode measurements for the V8 option are recorded in the [KV-cache quantization research report](docs/research/KV_CACHE_QUANTIZATION_2026-10-02.md), including context sizes, sampling, acceptance, timing boundaries and validation limits. Historical measurements are labeled separately from downloaded-release validation. Treat this as research software and review the documented numerical, placement, compilation, and memory limitations.
 
 - [Quantization overview and implementation](docs/QUANTIZATION.md)
 - [Quantization → conversion → inference workflows](docs/WORKFLOW.md)
 - [DFlash2 integration and correctness](docs/SPECULATIVE_DECODING.md)
+- [V8 cache setup and conversion](docs/KV_CACHE_V8.md) and [KV-cache quantization research trace](docs/research/KV_CACHE_QUANTIZATION_2026-10-02.md)
 - [Techniques and limitations](docs/TECHNIQUES.md)
 - [Session lessons and troubleshooting](docs/SESSION_LESSONS.md)
 - [Quality benchmark plan](docs/BENCHMARK_PLAN.md)

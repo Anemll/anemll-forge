@@ -14,6 +14,21 @@ spec.loader.exec_module(audit)
 
 
 class CacheAuditTests(unittest.TestCase):
+    def test_selectable_audit_uses_only_selected_physical_functions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            man = {'ctxs': [8192], 'chunks': [{'file': 'chunk.aimodel',
+                    'entries': ['v8_8k', 'v8_8k_kvv8'],
+                    'entries_by_kv': {'fp16': {'v8_8k': 'v8_8k'}, 'v8': {'v8_8k': 'v8_8k_kvv8'}}}],
+                   'head': {'file': 'head.aimodel'},
+                   'kv_cache': {'format': 'selectable', 'default': 'fp16', 'formats': {
+                       'fp16': {'format': 'fp16', 'keys': 'float16', 'values': 'float16'},
+                       'v8': {'format': 'v8', 'keys': 'float16', 'values': 'int8',
+                              'scales': 'float16', 'scale_granularity': 'token_head'}}}}
+            (root / 'manifest.json').write_text(json.dumps(man))
+            self.assertEqual(audit.package_entries(root)[0][1], ['v8_8k'])
+            self.assertEqual(audit.package_entries(root, kv_cache_dtype='v8')[0][1], ['v8_8k_kvv8'])
+
     def fixture(self, root, attrs, graph=b'', entry='v8_8k_hash_0'):
         package = root / 'chunk.aimodel'
         package.mkdir()

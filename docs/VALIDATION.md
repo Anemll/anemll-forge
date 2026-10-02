@@ -84,3 +84,20 @@ Documentation validation checked **80 local links**, including fragments, **28 s
 The Pi 0.87.1 mock validator passed off/low/medium/high request mapping, reasoning/tool replay and the context clamp. The installed model-config, OpenAI-completions, simple-options and transcript modules were byte-identical to the published npm packages. This integration therefore needs the supplied configuration changes, not a Pi source-code patch.
 
 The prepared-bundle host modules (`qwen38_ane_model`, `qwen38_coreai_model`, and `dflash2_coreai_drafter`) imported with the public coremltools 9.0 wheel substituted into the existing research environment. Converter warnings about newer PyTorch/scikit-learn remain. This was an import-only check: no new model, server, upload or hardware benchmark was run. A fresh-environment install and full-model test with the new inference pins remain outstanding.
+
+## V-only INT8 KV cache and selectable packages — 2026-10-02
+
+The portable suite ran 115 tests in the existing inference environment: **114 passed**, and the GPTQ vector-codebook roundtrip required scikit-learn, which is deliberately absent there. That remaining test passed separately in the quantization environment for its vector, scalar-LUT and INT8 fixtures. No dependency was added to inference for this check.
+
+V8 coverage includes accepted counts 0/1/7/8, valid prefill rows, exact key copies, untouched rejected tails, stored FP16 scales, manifest/physical-function selection, dtype rejection, code/scale growth and snapshot restore. Launcher/wrapper tests verify that a cache-format mismatch fails before a restart stops a running server. Placement-audit tests select only the requested format from an intact selectable manifest. These fixture checks do not load native models.
+
+Separate recorded native M6 checks completed before PR preparation: all five 8K/16K/32K/48K/64K FP16/V8 pairs, three cached decode repeats per mode/context, finite logits, within-mode reply equality, strict selected-function cached-placement audits, and owned server exits. The completed prototype prefill sweep and 64-sequence KL-512 pass remain distinct from the final selectable export. Both final selectors were bit-exact against their prototype on the first three teacher-forced sequences (2,299 positions); this is not a complete rerun of the 64-sequence KL trace.
+
+The [dated research trace](research/KV_CACHE_QUANTIZATION_2026-10-02.md) preserves aggregate measurements, timing boundaries, numerical caveats and remaining work. The V8 manifest default was changed after evaluation without changing model packages or the explicitly selected benchmark modes. Logical cache-buffer saving is not measured resident-memory saving. Physical bonded-cluster allocation, broader capability/long-context quality and clean-environment validation remain outstanding. Heavy model files and raw prompts/traces remain outside the source repository.
+
+```sh
+# Inference environment:
+python -m unittest discover -s tests -v
+# Quantization environment, with scikit-learn:
+python -m unittest discover -s tests -p test_quantization.py -v
+```
