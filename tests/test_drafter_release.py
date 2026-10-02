@@ -74,7 +74,7 @@ class DrafterReleaseTests(unittest.TestCase):
         self.assertEqual(m["drafter"]["codebooks"], "selector.safetensors")
         self.assertEqual(m["drafter"]["head_export"], "mix25in_mixr_lr64mix")
         result = hf.verify(self.root, m, "coreai")
-        files = [f for f in m["files"] if f["component"] in {"model", "documentation", "coreai", "drafter"}]
+        files = [f for f in m["files"] if f["component"] in {"model", "documentation", "coreai", "drafter"}] + [m["hub_config"]]
         self.assertEqual(result["verified_files"], len(files))
         license_entry = next(f for f in files if f["path"] == "drafter/LICENSE")
         self.assertNotIn("modification_notice", license_entry)

@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 import struct
 import sys
+import tempfile
 import time
 
 COMMANDS = {"release-manifest", "download", "quick-test"}
@@ -150,6 +151,13 @@ def validate_manifest(m):
     for required in ("config.json", "tokenizer.json", "tokenizer_config.json", "embed_tokens_fp16.npy"):
         if roots["model"] + "/" + required not in seen:
             raise ValueError(f"Missing model file in inventory: {required}")
+    if "hub_config" in m:
+        hub = m["hub_config"]
+        source = next(f for f in files if f["path"] == roots["model"] + "/config.json")
+        if (not isinstance(hub, dict) or hub.get("path") != "config.json"
+                or type(hub.get("bytes")) is not int
+                or hub.get("bytes") != source["bytes"] or hub.get("sha256") != source["sha256"]):
+            raise ValueError("Hub config must be an exact root copy of the inventoried model config")
     for runtime in runtimes:
         if not any(f["component"] == runtime for f in files):
             raise ValueError(f"No runtime files: {runtime}")
@@ -392,6 +400,10 @@ def verify(root, m, runtime, include_export=False, plain=False):
     require_drafter(m, runtime, plain)
     groups = {"documentation", "model", runtime} | ({"export"} if include_export else set()) | ({"drafter"} if not plain else set())
     files = [f for f in m["files"] if f["component"] in groups]
+    if m.get("hub_config"):
+        if local(root, m["hub_config"]["path"]).is_symlink():
+            raise ValueError("Hub config must not be a symlink")
+        files.append(m["hub_config"])
     for f in files:
         p = local(root, f["path"])
         if not p.is_file() or p.stat().st_size != f["bytes"]:
@@ -467,12 +479,34 @@ def make_manifest(a):
         check_layout(root, m, runtime)
     if m.get("drafter"):
         check_drafter(root, m)
+    # A real config at the Hub root enables its default download-count query.
+    # Separate optional metadata keeps existing release clients compatible.
+    source = next(f for f in m["files"] if f["path"] == m["model_path"] + "/config.json")
+    alias = local(root, "config.json")
+    if alias.is_symlink():
+        raise ValueError("Hub config must not be a symlink")
+    content = local(root, source["path"]).read_bytes()
+    if len(content) != source["bytes"] or hashlib.sha256(content).hexdigest() != source["sha256"]:
+        raise ValueError("Model config changed while building its release inventory")
+    if alias.exists():
+        if not alias.is_file() or alias.read_bytes() != content:
+            raise ValueError("Hub config must be an exact root copy of the inventoried model config")
+    else:
+        fd, staged = tempfile.mkstemp(prefix=".hub-config-", dir=root)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(content)
+            Path(staged).replace(alias)
+        finally:
+            Path(staged).unlink(missing_ok=True)
+    m["hub_config"] = dict(path="config.json", bytes=source["bytes"], sha256=source["sha256"])
+    validate_manifest(m)
     # Publish the inventory only after all components have passed layout checks.
     tmp = root / "release.json.tmp"
     tmp.write_text(json.dumps(m, indent=2) + "\n")
     tmp.replace(root / MANIFEST)
-    print(json.dumps(dict(manifest=str(root / MANIFEST), files=len(m["files"]),
-                          bytes=sum(f["bytes"] for f in m["files"])), indent=2))
+    print(json.dumps(dict(manifest=str(root / MANIFEST), files=len(m["files"]) + 1,
+                          bytes=sum(f["bytes"] for f in m["files"]) + m["hub_config"]["bytes"]), indent=2))
     return 0
 
 
@@ -498,6 +532,8 @@ def download(a):
         raise ValueError("Output contains a different release; use a new --output directory")
     groups = {"documentation", "model", a.runtime} | ({"export"} if a.include_export else set()) | ({"drafter"} if not plain else set())
     names = [f["path"] for f in m["files"] if f["component"] in groups]
+    if m.get("hub_config"):
+        names.append(m["hub_config"]["path"])
     for name in [MANIFEST, *names]:
         local(root, name)  # Reject existing symlink escapes before any download writes.
     root.mkdir(parents=True, exist_ok=True)

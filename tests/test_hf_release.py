@@ -81,6 +81,67 @@ class ReleaseTests(unittest.TestCase):
         args = parser.parse_args(["download", "--output", str(self.base / "download")])
         self.assertEqual(args.repo, "anemll/anemll-forge-qwen3.8-27B")
 
+    def test_hub_config_is_exact_root_copy(self):
+        m = self.manifest()
+        self.assertEqual((self.root / "config.json").read_bytes(), (self.root / "model/config.json").read_bytes())
+        source = next(f for f in m["files"] if f["path"] == "model/config.json")
+        self.assertEqual(m["hub_config"], dict(path="config.json", bytes=source["bytes"], sha256=source["sha256"]))
+
+    def test_hub_config_metadata_must_match_model_inventory(self):
+        m = self.manifest()
+        for key, value in (("path", "other.json"), ("bytes", True), ("bytes", 1), ("sha256", "0" * 64)):
+            bad = copy.deepcopy(m)
+            bad["hub_config"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, "Hub config"):
+                hf.validate_manifest(bad)
+        bad = copy.deepcopy(m)
+        bad["hub_config"] = None
+        with self.assertRaisesRegex(ValueError, "Hub config"):
+            hf.validate_manifest(bad)
+
+    def test_hub_config_same_size_corruption_detected(self):
+        m = self.manifest()
+        alias = self.root / "config.json"
+        alias.write_bytes(b"X" * alias.stat().st_size)
+        with self.assertRaisesRegex(ValueError, "SHA256 mismatch: config.json"):
+            hf.verify(self.root, m, "coreai", plain=True)
+
+    def test_existing_mismatched_hub_config_is_preserved(self):
+        alias = self.root / "config.json"
+        alias.write_text('{"different":true}')
+        before = alias.read_bytes()
+        with self.assertRaisesRegex(ValueError, "Hub config"):
+            self.manifest()
+        self.assertEqual(alias.read_bytes(), before)
+        self.assertFalse((self.root / "release.json").exists())
+
+    def test_hub_config_symlink_rejected(self):
+        outside = self.base / "outside.json"
+        outside.write_bytes((self.root / "model/config.json").read_bytes())
+        (self.root / "config.json").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink|escapes"):
+            self.manifest()
+
+    def test_hub_config_internal_symlink_rejected_during_verification(self):
+        m = self.manifest()
+        alias = self.root / "config.json"
+        alias.unlink()
+        alias.symlink_to(self.root / "model/config.json")
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            hf.verify(self.root, m, "coreai", plain=True)
+
+    def test_legacy_release_without_hub_config_downloads(self):
+        m = self.manifest()
+        m.pop("hub_config")
+        (self.root / "config.json").unlink()
+        self.write_json(self.root / "release.json", m)
+        hub, _, _ = self.mock_hub()
+        args = argparse.Namespace(repo="owner/release", revision="old", runtime="coreai", include_export=False,
+                                  output=self.base / "old-download", plain=True)
+        with patch.dict(sys.modules, {"huggingface_hub": hub}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(hf.download(args), 0)
+        self.assertNotIn("config.json", hub.snapshot_download.call_args.kwargs["allow_patterns"])
+
     def test_required_documentation_and_modification_notices(self):
         m = self.manifest()
         docs = [f for f in m["files"] if f["component"] == "documentation"]
@@ -135,7 +196,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "release.json").read_text()), m)
         for runtime in m["runtimes"]:
             result = hf.verify(self.root, m, runtime, plain=True)
-            selected = [f for f in m["files"] if f["component"] in ("documentation", "model", runtime)]
+            selected = [f for f in m["files"] if f["component"] in ("documentation", "model", runtime)] + [m["hub_config"]]
             self.assertEqual(result["verified_files"], len(selected))
             self.assertEqual(result["verified_bytes"], sum(f["bytes"] for f in selected))
 
@@ -266,7 +327,7 @@ class ReleaseTests(unittest.TestCase):
                 call = hub.snapshot_download.call_args.kwargs
                 self.assertEqual(call["revision"], sha)
                 groups = {"documentation", "model", runtime} | ({"export"} if include_export else set())
-                expected = {"release.json"} | {f["path"] for f in m["files"] if f["component"] in groups}
+                expected = {"release.json", "config.json"} | {f["path"] for f in m["files"] if f["component"] in groups}
                 self.assertEqual(set(call["allow_patterns"]), expected)
                 self.assertFalse((output / ("coreml" if runtime == "coreai" else "coreai")).exists())
                 self.assertEqual((output / "export").exists(), include_export)

@@ -5,6 +5,7 @@ base_model:
 base_model_relation: quantized
 license: apache-2.0
 pipeline_tag: text-generation
+library_name: anemll-forge
 tags:
   - coreai
   - ane
@@ -28,12 +29,13 @@ ANEMLL independently converts and quantizes [Qwen/Qwen3.8-27B](https://huggingfa
 - [model/](model): matching tokenizer/configuration files and FP16 host embedding table.
 - [drafter/](drafter): `dflash2_lut4_gptq.aimodel`, numerical metadata, configuration, compact BF16 selector codebooks and source licenses/notices. These assets are unchanged from the previous paired release.
 - [release.json](release.json): complete per-file SHA-256/size inventory and target/drafter pairing.
+- [config.json](config.json): exact copy of `model/config.json` for Hub discovery and download counting, recorded separately as `hub_config` in the release inventory. The runtime continues to use the matching files under `model/`.
 
 The target's supported entries are **8K, 16K, 32K, 48K and 64K**. There is no 24K entry in this update. The 64K entry holds 65,472 history rows. These compiled sizes do not establish long-context quality.
 
 V8 caches store historical values as INT8 with FP16 scales per token and KV head. The host quantizes accepted rows; ANE attention reconstructs historical values. New graph outputs remain FP16. Keys and the recurrent GDN state retain their existing precision. Only the 16 full-attention layers grow this cache. Selectable packages contain both physical cache-format entry families; the runtime binds only the selected family.
 
-**Required source update:** use the V8-capable [KV-Cache-compression source branch](https://github.com/Anemll/anemll-forge/tree/KV-Cache-compression), or a newer merged revision with this support. Do not assume an older checkout or GitHub `main` supports these packages. A V8-capable runtime must select physical entries from `entries_by_kv`, preserve V codes/scales through context growth and speculative commits, and use the Swift bridge. The updated source's README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
+**Required source update:** use the current [ANEMLL Forge source](https://github.com/Anemll/anemll-forge/tree/main), which includes the merged V8 runtime. A V8-capable runtime must select physical entries from `entries_by_kv`, preserve V codes/scales through context growth and speculative commits, and use the Swift bridge. The source README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
 
 This release replaces target chunks and the cache manifest, and updates the inventory and this card. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
 
@@ -75,7 +77,7 @@ The logical persistent K/V/scale payload falls from **64 KiB to 48.125 KiB per h
 
 Validation covered all five paired contexts, finite logits, selected-function cached placement audits with no GPU regions, compile mode 2 and clean exits of the benchmark-owned servers. Cached placement audits do not prove live physical bonded-cluster allocation, native integer-MAC precision or dequantization fusion. No power/thermal conclusion is included. Further benchmarks will be added with their measured methods and limitations.
 
-The [dated KV-cache quantization research trace](https://github.com/Anemll/anemll-forge/blob/KV-Cache-compression/docs/research/KV_CACHE_QUANTIZATION_2026-10-02.md) preserves complete aggregate results, repeat ranges, methods and remaining work.
+The [dated KV-cache quantization research trace](https://github.com/Anemll/anemll-forge/blob/main/docs/research/KV_CACHE_QUANTIZATION_2026-10-02.md) preserves complete aggregate results, repeat ranges, methods and remaining work.
 
 ## Download and start
 

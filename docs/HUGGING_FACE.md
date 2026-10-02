@@ -38,6 +38,7 @@ bundle/
   NOTICE                          # ANEMLL-added Qwen attribution
   MODIFICATIONS.md                # prominent conversion/change notices
   QWEN_SOURCE.json                 # pinned upstream source evidence
+  config.json                     # exact model/config.json copy for Hub discovery
 ```
 
 Use config, tokenizer and embeddings from the **exact pinned checkpoint used to produce the runtime assets**. Stage the original `config.json`, including its `text_config`. The current checker expects 64 layers, hidden size 5120 and an explicit vocabulary size. `embed_tokens_fp16.npy` must be the matching embedding matrix, C-contiguous float16 with shape `(vocab_size, 5120)`. Renaming unrelated embeddings or substituting a newer tokenizer is not compatible.
@@ -64,7 +65,7 @@ python forge.py quick-test \
   --bundle /path/to/bundle --runtime coreai --check-only
 ```
 
-`release-manifest` writes `release.json` only after layout validation. It records upstream identity, runtime contexts, component paths, file sizes and SHA-256 hashes, including the required root model-card/license/notice/source records. Derived binary entries carry a `modification_notice` referencing `MODIFICATIONS.md`. Authors must also mark actually changed text files and supported model-package metadata appropriately. The supplied upstream revision does not itself prove artifact lineage; regenerate the inventory after any asset changes.
+`release-manifest` writes `release.json` only after layout validation. It records upstream identity, runtime contexts, component paths, file sizes and SHA-256 hashes, including the required root model-card/license/notice/source records. It also creates an exact root `config.json` copy and records its size/hash in optional `hub_config` metadata. An existing root config must already match; mismatches and symlinks are rejected. This optional field keeps older releases and inference clients compatible. Derived binary entries carry a `modification_notice` referencing `MODIFICATIONS.md`. Authors must also mark actually changed text files and supported model-package metadata appropriately. The supplied upstream revision does not itself prove artifact lineage; regenerate the inventory after any asset changes.
 
 `--check-only` checks selected-component hashes, manifests and the embedding header without loading the model. It still reads all selected assets for hashing, so large bundles take time. Passing it proves consistency, not correct generation or ANE placement.
 
@@ -87,6 +88,12 @@ python forge.py download \
 If repository access requires authentication, use `hf auth login` with your own account. `--repo` defaults to `anemll/anemll-forge-qwen3.8-27B` and can be overridden. The helper resolves a branch/tag to a commit before downloading, selects `model/`, `coreai/`, `drafter/` and the required release documents, and verifies their inventory. Core AI is the download and quick-test default. A full commit hash makes subsequent downloads reproducible. Use a new output directory for a different release.
 
 Add `--include-export` only when conversion weights are needed and the release includes them. The download step checks export hashes too when requested. For revision pinning, filtered downloads and local-directory behavior, see the [official Hugging Face download guide](https://huggingface.co/docs/huggingface_hub/guides/download).
+
+## Hub download counts
+
+Hugging Face counts server-side requests to selected query files rather than adding every chunk download. The published card uses YAML front matter with `library_name: anemll-forge`, `pipeline_tag: text-generation`, Apache-2.0 licensing and upstream attribution. A separate YAML file is unnecessary. The root `config.json` supplies the documented default query file; nested `model/config.json` and `drafter/config.json` do not replace this root discovery file. The current helper downloads and verifies the root copy through the normal pinned snapshot when `hub_config` is declared. It does not force cache bypasses or make counting-only requests. Earlier releases without the field remain supported.
+
+The reported count is a query-file request metric, including GET/HEAD requests, rather than a count of completed weight transfers or unique users. Direct chunk-only transfers can be absent from this metric. Setting a custom library name does not register a custom counting rule; an official Forge integration could use `release.json` as its single query file through Hugging Face's library-registration process. Follow the [download-count rules](https://huggingface.co/docs/hub/models-download-stats) and [library-integration guide](https://huggingface.co/docs/hub/models-adding-libraries). Check the live counter after normal downloads; these metadata changes do not establish a historical backfill.
 
 ## 4. Run a short macOS smoke test
 
