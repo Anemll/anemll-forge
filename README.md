@@ -13,6 +13,8 @@ The first model is an independent ANEMLL adaptation of **[Qwen/Qwen3.8-27B](http
 
 First-use compilation can take minutes. M5-family users should read the [cold-compilation issue and cache pre-warming workaround](docs/SESSION_LESSONS.md#release-preparation-diagnostic-m5m5-max-cold-compile-crash-bonded-vs-non-bonded-september-29) if the compiler reports a topological-sort failure. [Environment details](docs/ENVIRONMENT.md) distinguish prepared-bundle inference from the separate conversion toolchain.
 
+An [opt-in experimental profile for Apple M5 Pro with exactly 24 GB Unified Memory](docs/M5_PRO_SETUP.md) derives direct-attention 24K/31K graphs from a validated FP16 8K/16K source. It keeps batched prefill through 24K and uses eight-token prompt blocks above that. All 115 lean-build ANE entries and a synthetic 24,870-token boundary test passed on the measured configuration; memory remains tight and general long-context quality is unvalidated. The extension requires `--m5pro-24gb`, and marked builds are hardware-checked before loading. This is not an automatic fallback and does not activate on M6 or other memory capacities; normal upstream defaults are unchanged.
+
 ## 1. Set up the inference environment
 
 Install Python 3.11 and the compatible Xcode toolchain, then run:

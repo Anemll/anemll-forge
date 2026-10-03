@@ -77,5 +77,27 @@ class StateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metadata/layout mismatch"):
             m._alloc_kv(2048, 0)
 
+    def test_feed_falls_back_after_growth_without_batched_prefill(self):
+        m = runtime.CoreAIQwen.__new__(runtime.CoreAIQwen)
+        m.ctx, m.pos, m.T, m.TP = 24576, 24560, 8, 64
+        m.pkvlen = {24576: 24576}
+        m.chunks = [{"fns": {"p64_24k": object(), "v8_31k": object()}}]
+        m.cap = lambda ctx: ctx
+        calls = []
+        def fit(need):
+            if need > m.ctx:
+                m.ctx = 31744
+            return need <= m.ctx
+        def call(ids):
+            calls.append(len(ids))
+            return np.zeros((len(ids), 2))
+        def accept(n):
+            m.pos += n
+        m.fit, m.call, m.accept = fit, call, accept
+        m.prefill_block = lambda ids: self.fail("No p64 entry exists after growth")
+        m.feed(list(range(96)))
+        self.assertEqual((m.ctx, m.pos), (31744, 24656))
+        self.assertEqual(calls, [8] * 12)
+
 
 if __name__ == "__main__": unittest.main()

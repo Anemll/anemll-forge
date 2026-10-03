@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import forge
+import qwen38_hardware_profile as hardware
 
 
 class LauncherTests(unittest.TestCase):
@@ -86,6 +87,29 @@ class LauncherTests(unittest.TestCase):
                 forge.prepare(self.args("serve", "--runtime", "coreai", "--plain", "--build", str(build), "--ctx", str(ctx)))
         _, env = forge.prepare(self.args("serve", "--runtime", "coreai", "--plain", "--build", str(build), "--ctx", "8192"))
         self.assertEqual(env["RUNTIME"], "coreai")
+
+    def test_marked_m5_build_rejected_on_32gb_m6_before_launch(self):
+        build = self.root / 'marked'
+        build.mkdir()
+        (build / 'manifest.json').write_text(json.dumps({
+            'ctxs': [8192, 16384, 24576, 31744], 'pctxs': [8192, 16384, 24576],
+            'hardware_profile': hardware.M5PRO_24GB_PROFILE}))
+        with patch.object(hardware.platform, 'system', return_value='Darwin'), \
+             patch.object(hardware.subprocess, 'check_output', side_effect=['Apple M6', str(32 * 1024**3)]):
+            with self.assertRaisesRegex(ValueError, 'exactly Apple M5 Pro'):
+                forge.prepare(self.args('serve', '--runtime', 'coreai', '--plain',
+                                        '--build', str(build), '--ctx', '31744'))
+
+    def test_standard_build_keeps_normal_launch_behavior_without_gate(self):
+        build = self.root / 'standard'
+        build.mkdir()
+        (build / 'manifest.json').write_text(json.dumps({'ctxs': [8192, 16384, 32768]}))
+        with patch.object(hardware, 'require_m5pro_24gb') as gate:
+            command, env = forge.prepare(self.args('serve', '--runtime', 'coreai', '--plain',
+                                                  '--build', str(build), '--ctx', '32768'))
+            gate.assert_not_called()
+        self.assertEqual(command[command.index('--ctx') + 1], '32768')
+        self.assertEqual(env['RUNTIME'], 'coreai')
 
     def test_coreml_rejects_competing_v5_manifest(self):
         build = self.root / "build"

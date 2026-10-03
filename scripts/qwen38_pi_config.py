@@ -25,10 +25,11 @@ import stat
 import tempfile
 
 from pathlib import Path
+from qwen38_hardware_profile import require_m5pro_24gb
 
 PROVIDER, MODEL = "ane-qwen38", "qwen38-27b-ane"
 PI_SAFETY = 4096  # pi-ai CONTEXT_SAFETY_TOKENS reserved below the window for the response
-CONTEXTS = (8192, 16384, 24576, 32768, 49152, 65536)
+CONTEXTS = (8192, 16384, 24576, 31744, 32768, 49152, 65536)
 
 
 def budget(ctx: int) -> tuple[int, int, int]:
@@ -40,7 +41,7 @@ def budget(ctx: int) -> tuple[int, int, int]:
 
 
 def model_name(ctx: int, build: str, draft: bool) -> str:
-    base = (f"Qwen3.8 27B VQ {build} (M6 ANE, {ctx // 1024}K"
+    base = (f"Qwen3.8 27B VQ {build} (ANE, {ctx // 1024}K"
             f"{', DFlash' if draft else ''})").replace("VQ  (", "VQ (")
     return base
 
@@ -86,6 +87,8 @@ def _save(updates: list[tuple[Path, dict]]) -> None:
 
 def sync(pi_dir: Path, ctx: int, build: str, draft: bool, dry_run: bool = False) -> list[str]:
     """Apply the context budget to one Pi profile; return a list of human-readable changes."""
+    if ctx == 31744:
+        require_m5pro_24gb()
     models_path, settings_path = pi_dir / "models.json", pi_dir / "settings.json"
     if not models_path.is_file():
         raise ValueError(f"no models.json in {pi_dir}")

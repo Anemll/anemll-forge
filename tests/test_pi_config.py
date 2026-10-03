@@ -32,8 +32,30 @@ class PiConfigTests(unittest.TestCase):
     def test_budget_ladder(self):
         self.assertEqual(pc.budget(16384), (4096, 8192, 2048))
         self.assertEqual(pc.budget(32768), (8192, 12288, 4096))
+        self.assertEqual(pc.budget(31744), (7936, 12032, 3968))
         self.assertEqual(pc.budget(65536), (16384, 20480, 8192))
         self.assertEqual(pc.budget(8192), (2048, 6144, 1024))
+
+    def test_31k_profile_rejected_before_writing_on_other_hardware(self):
+        before = {name: (self.pi / name).read_bytes() for name in ('models.json', 'settings.json')}
+        with patch.object(pc, 'require_m5pro_24gb', side_effect=ValueError('incompatible hardware')):
+            with self.assertRaisesRegex(ValueError, 'incompatible hardware'):
+                pc.sync(self.pi, 31744, 'experimental', True)
+        for name, content in before.items():
+            self.assertEqual((self.pi / name).read_bytes(), content)
+        self.assertFalse((self.pi / 'models.json.orig-qwen38').exists())
+
+    def test_standard_32k_pi_profile_does_not_use_m5_gate(self):
+        with patch.object(pc, 'require_m5pro_24gb') as gate:
+            pc.sync(self.pi, 32768, 'standard', True)
+            gate.assert_not_called()
+
+    def test_31k_profile_checks_hardware_and_sets_budget(self):
+        with patch.object(pc, 'require_m5pro_24gb') as gate:
+            pc.sync(self.pi, 31744, 'experimental', True)
+            gate.assert_called_once_with()
+        self.assertEqual(self.entry()['contextWindow'], 31744)
+        self.assertEqual(self.override(), {'reserveTokens': 12032, 'keepRecentTokens': 3968})
 
     def test_invalid_context_does_not_modify_profile(self):
         before = {name: (self.pi / name).read_bytes() for name in ("models.json", "settings.json")}
@@ -49,7 +71,7 @@ class PiConfigTests(unittest.TestCase):
         self.assertEqual(len(changes), 2)
         self.assertEqual(self.entry()["contextWindow"], 65536)
         self.assertEqual(self.entry()["maxTokens"], 16384)
-        self.assertEqual(self.entry()["name"], "Qwen3.8 27B VQ coreai_mixr12 (M6 ANE, 64K, DFlash)")
+        self.assertEqual(self.entry()["name"], "Qwen3.8 27B VQ coreai_mixr12 (ANE, 64K, DFlash)")
         self.assertEqual(self.override(), {"reserveTokens": 20480, "keepRecentTokens": 8192})
         self.assertTrue((self.pi / "models.json.orig-qwen38").exists())
         self.assertTrue((self.pi / "settings.json.prev-qwen38").exists())
