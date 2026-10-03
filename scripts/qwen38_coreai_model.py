@@ -36,6 +36,7 @@ from pathlib import Path
 
 import numpy as np
 from qwen38_kv_cache import append_rows, cache_format, cache_formats, cache_entries
+from qwen38_hardware_profile import validate_hardware_profile
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -193,6 +194,7 @@ class CoreAIQwen:
     def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto"):
         self.root, self.log = root, log
         man = json.loads((root / "manifest.json").read_text())
+        validate_hardware_profile(man)
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
         if self.kv_cache_dtype == "v8" or len(self.kv_cache_formats) > 1:
@@ -498,11 +500,12 @@ class CoreAIQwenBridge(CoreAIQwen):
     Bindings are built once per (entry, parity) and rebuilt after a KV resize."""
 
     def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto"):
+        man = json.loads((root / "manifest.json").read_text())
+        validate_hardware_profile(man)
         sys.path.insert(0, str(BRIDGE_DIR))
         import coreai_bridge as B
         self.B = B
         self.root, self.log = root, log
-        man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
         self.log(f"KV cache: FP16 K / {'INT8 V + FP16 token/head scales' if self.kv_cache_dtype == 'v8' else 'FP16 V'}")

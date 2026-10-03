@@ -48,6 +48,11 @@ def wired_gb() -> float:
 
 # ---- probe: one package, alone, in this (fresh) process ------------------------------------------------------------
 def probe(pkg: Path) -> dict:
+    sys.path.insert(0, str(HERE.parent / "scripts"))
+    from qwen38_hardware_profile import validate_hardware_profile
+    manifest = pkg.parent / "manifest.json"
+    if manifest.is_file():
+        validate_hardware_profile(json.loads(manifest.read_text()))
     os.environ["MPSGRAPH_ANE_BONDED_COMPILE_MODE"] = MODE
     sys.path.insert(0, str(HERE / "swift_bridge"))
     import numpy as np

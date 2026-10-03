@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import hf_release
 from qwen38_kv_cache import cache_format
+from qwen38_hardware_profile import validate_hardware_profile
 NUMERICS = dict(SILU="tanh", MLP_SILU="tanh", GDN_SQ="16", GDN_SV="64",
                 MLP_DS="1", MLP_DS_DYN="0", V3_KV_IN="1", V3_PREFILL="0")
 
@@ -107,6 +108,7 @@ def prepare(a):
             raise ValueError(f"Missing build manifest: {manifest}")
         if runtime == "coreai":
             model_manifest = json.loads(manifest.read_text())
+            validate_hardware_profile(model_manifest)
             contexts = model_manifest.get("ctxs", [])
             cache_format(model_manifest, getattr(a, "kv_cache_dtype", "auto"))
             if a.ctx not in contexts:
