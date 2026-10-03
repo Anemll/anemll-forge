@@ -170,6 +170,8 @@ pi --offline --provider ane-qwen38 --model qwen38-27b-ane --thinking off
 
 Start with a small edit and check its diff/tests. The profile declares **16,384 total context tokens and up to 4,096 output tokens**; instructions, tools, retained reasoning, and output share that context. Use low thinking when needed. See [Pi setup, thinking budgets, and compaction](docs/PI_CODING.md), including the optional live throughput extension. `--offline` disables Pi startup network operations, not requests to the local server or network access by coding tools.
 
+For Droid, see the [ANE Qwen reasoning configuration example](docs/DROID_CODING.md). Its fixed High preset targets a 64K server and must be merged with existing Droid settings.
+
 ## Research, evaluation, and limitations
 
 The repository includes mixed-bit GPTQ, scalar/vector LUT quantization, per-channel scaling, online rotations, low-rank corrections, calibration and KL evaluation, Core ML/Core AI conversion, and the speculative runtime. It also preserves failed experiments and compiler/ANE findings from the original research, with source provenance recorded in [docs/provenance.json](docs/provenance.json).

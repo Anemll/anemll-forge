@@ -1,0 +1,11 @@
+# Droid with the ANE Qwen3.8 server
+
+The [Droid settings example](../examples/droid/settings.json) configures the same `qwen38-27b-ane` Chat Completions endpoint as the [Pi example](../examples/pi/models.json), with a 65,472-token server context, 8,192-token response cap, and compaction at 48,000 tokens. Its loopback URL is for a server on the same Mac; change `baseUrl` when Droid runs on another machine. The file has no credentials or personal paths.
+
+Merge the `customModels` entry and its `compactionTokenLimitPerModel` override into `~/.factory/settings.json`. Keep unrelated models and settings. If an ANE Qwen entry already exists, update that entry instead of adding a duplicate, and key the compaction override to its **actual** `id`. Check the running server's `/v1/health` context before using the example's `maxContextLimit`.
+
+`enableThinking` makes Droid show reasoning for this custom model. The `extraArgs` fields are what Forge receives: `enable_thinking: true`, `preserve_thinking: true`, and `reasoning_effort: high`. Forge passes them into Qwen's chat template, then returns generated thinking separately as `reasoning_content`. `thinkingMaxTokens` describes the model capability to Droid; Forge enforces its own budget from `reasoning_effort` and `max_tokens` unless the request includes `thinking_budget`.
+
+This is a **fixed High preset**. Pi's `chatTemplateKwargs` can use `$var` expressions to follow its Off/Low/Medium/High selector and send `thinking_budget`. Droid's documented `extraArgs` are static request values. In Droid 0.233.0, a local transport probe sent top-level `reasoning_effort: high` for each selected Low, Medium, and High level. The explicit High values here make the effective request match the preset; changing the Droid UI level alone does not turn this entry Off or lower Forge's budget. Use separate custom-model entries for other fixed levels, or a request adapter if per-level switching is needed.
+
+After merging, restart Droid and start or resume a session using this model. A resumed session can retain its previous reasoning-level label, so check it before judging the UI. Verify a real turn by checking for a `thinking` block and final `text` block in its session record; the UI label alone does not establish model behavior. Long existing contexts can spend minutes in prefill before the first response token.
