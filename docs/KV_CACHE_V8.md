@@ -4,6 +4,8 @@ This option keeps full-attention **keys in FP16** and stores historical **values
 
 The [dated KV-cache quantization research trace](research/KV_CACHE_QUANTIZATION_2026-10-02.md) preserves the complete aggregate prefill, decode and KL results with their measurement boundaries and limitations. Raw prompts and traces are excluded.
 
+A separate [NIAH retrieval pilot](research/NIAH_PILOT_2026-10-03.md) reports four paired FP16/V8 placements through 64K context. It is one trial per case, with raw records still unavailable for independent inspection.
+
 ## Model update and compatibility
 
 The selectable model update uses the same [Hugging Face repository](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/coreai). Update both this runtime and the target bundle: the new chunks contain both cache formats, and `coreai/manifest.json` declares `format: selectable` with `default: v8`. It provides 8K/16K/32K/48K/64K entries and retains the matching head, tokenizer/embeddings and Core AI DFlash2 drafter. Earlier FP16-only revisions remain supported but cannot provide V8 through a flag. Download a different release into a fresh directory and keep its release inventory intact.
