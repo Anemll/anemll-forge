@@ -4,7 +4,7 @@ This option keeps full-attention **keys in FP16** and stores historical **values
 
 The [dated KV-cache quantization research trace](research/KV_CACHE_QUANTIZATION_2026-10-02.md) preserves the complete aggregate prefill, decode and KL results with their measurement boundaries and limitations. Raw prompts and traces are excluded.
 
-A separate [NIAH retrieval pilot](research/NIAH_PILOT_2026-10-03.md) reports four paired FP16/V8 placements through 64K context. It is one trial per case, with raw records still unavailable for independent inspection.
+A separate [M6 NIAH retrieval pilot](research/NIAH_PILOT_2026-10-03.md) reports four paired FP16/V8 placements through 64K context. All eight runs passed exact match. It is one trial per case, and the source artifacts remain on M6.
 
 ## Model update and compatibility
 
