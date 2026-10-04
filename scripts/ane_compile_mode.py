@@ -43,7 +43,8 @@ class SocInfo:
 
 def _run(cmd: list[str]) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return ""
 

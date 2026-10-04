@@ -1,9 +1,11 @@
 """Compile (specialize) a Core AI target build for this Mac's ANE ahead of serving, with the guided progress of
 coreai_compile_guide: what is compiling, time left, safe to stop (finished packages stay cached; rerun to resume).
-Run it with the same Python the server uses: the compile cache is keyed by macOS build and Python executable name.
+Run it with the same Python the server uses: the compile cache is keyed by macOS build and Python (its bundle
+identifier, e.g. org.python.python for a framework Python, else its executable name). --force drops this Python's
+cached specializations of the build first, so every package recompiles.
 
-    python forge.py compile --build <target build> [--draft <dflash2 .aimodel>]
-    python scripts/coreai_compile.py --build <target build> [--draft <dflash2 .aimodel>]"""
+    python forge.py compile --build <target build> [--draft <dflash2 .aimodel>] [--force]
+    python scripts/coreai_compile.py --build <target build> [--draft <dflash2 .aimodel>] [--force]"""
 from __future__ import annotations
 
 import argparse
@@ -30,6 +32,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", type=Path, required=True, help="target build directory (manifest.json, packages)")
     ap.add_argument("--draft", type=Path, help="also compile this DFlash2 drafter package")
+    ap.add_argument("--force", action="store_true", help="drop this Python's cached specializations first and recompile")
     a = ap.parse_args(argv)
     try:
         SOC.apply(strict=True)
@@ -38,6 +41,11 @@ def main(argv=None):
         return 2
     man = json.loads((a.build / "manifest.json").read_text())
     stamp(graph_line(man, a.build))
+    if a.force:
+        pkgs = [a.build / c["file"] for c in man["chunks"]] + [a.build / man["head"]["file"]] + ([a.draft] if a.draft else [])
+        n = sum(G.purge(p) for p in pkgs)
+        stamp(f"{G.TAG} --force: purged {n} cached specializations of {len(pkgs)} packages "
+              f"(macOS {G.os_build()} / {G.process_key()})")
     extra = [(f"drafter {a.draft.name}", a.draft, G.DRAFTER_S)] if a.draft else []
     guide = G.target_guide(man, a.build, log=stamp, extra=extra, mode=int(os.environ.get(MODE_ENV, "0")))
     guide.hint_lines = [h for h in guide.hint_lines if "forge.py compile" not in h]  # this is that command
@@ -54,7 +62,7 @@ def main(argv=None):
     if a.draft:
         guide.load(f"drafter {a.draft.name}", lambda: B.Model(a.draft, compute="ane"))
     stamp(f"{G.TAG} done in {G.fmt(time.time() - t0)}: {len(entries) + bool(a.draft)} packages compiled and cached for "
-          f"macOS {G.os_build()} / {Path(sys.executable).name}; the server now loads them in seconds")
+          f"macOS {G.os_build()} / {G.process_key()}; the server now loads them in seconds")
 
 
 if __name__ == "__main__":

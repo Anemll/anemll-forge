@@ -8,11 +8,13 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import hf_release
 import ane_compile_mode as SOC
+import coreai_compile_guide as G
 from qwen38_kv_cache import cache_format
 NUMERICS = dict(SILU="tanh", MLP_SILU="tanh", GDN_SQ="16", GDN_SV="64",
                 MLP_DS="1", MLP_DS_DYN="0", V3_KV_IN="1", V3_PREFILL="0")
@@ -30,6 +32,8 @@ def parser():
     c.add_argument("--build", type=path, required=True, help="Core AI target build directory")
     c.add_argument("--draft", type=path, help="DFlash2 drafter package; default: bundle/drafter/dflash2_lut4_gptq.aimodel "
                    "next to the build, when present")
+    c.add_argument("--force", action="store_true", help="drop this Python's cached ANE specializations of the build "
+                   "(and drafter) first, so every package recompiles")
     c.add_argument("--dry-run", action="store_true", help="print command only")
     hf_release.add_commands(sub)
     for name in ("quantize", "convert", "chat", "serve"):
@@ -148,6 +152,25 @@ def prepare(a):
     return [sys.executable, str(ROOT / "scripts" / script), *args], env
 
 
+def run_recovering(command, env):
+    """Run a package-loading child. If it dies by a crash signal while loading a package (MPSGraph aborts on a cached
+    specialization it cannot use), purge that package's cache for this Python and retry once: it recompiles."""
+    fd, state = tempfile.mkstemp(prefix="anemll-forge-loading-")
+    os.close(fd)
+    env = {**env, G.STATE_ENV: state}
+    try:
+        for attempt in range(2):
+            rc = subprocess.call(command, env=env, cwd=ROOT)
+            pkg = Path(state).read_text().strip()
+            if attempt or -rc not in G.CRASH_SIGNALS or not pkg:
+                return rc
+            n = G.purge(Path(pkg))
+            print(f"{G.TAG} crashed (signal {-rc}) while loading {Path(pkg).name}; purged {n} cached specializations "
+                  f"for '{G.process_key()}' and retrying once (it recompiles)", file=sys.stderr, flush=True)
+    finally:
+        os.unlink(state)
+
+
 def main(argv=None):
     p = parser()
     a = p.parse_args(argv)
@@ -167,18 +190,18 @@ def main(argv=None):
                 draft = None
         command = [sys.executable, str(ROOT / "scripts" / "coreai_compile.py"), "--build", str(a.build)]
         command += ["--draft", str(draft)] if draft else []
+        command += ["--force"] if a.force else []
         if a.dry_run:
             print(json.dumps(dict(argv=command), indent=2))
             return 0
         if sys.platform != "darwin":
             p.error("Core AI compilation requires macOS")
-        env = os.environ.copy()
+        env = os.environ.copy()   # before apply(): the child derives and logs the mode (not as an explicit override)
         try:
-            mode = SOC.apply(strict=True)
+            SOC.apply(strict=True, log=lambda m: None)
         except SOC.UnsupportedSocError as e:
             p.error(str(e))
-        env[SOC.MODE_ENV] = str(mode)
-        return subprocess.call(command, env=env, cwd=ROOT)
+        return run_recovering(command, env)
     if a.command == "doctor":
         versions = {}
         for name in ("numpy", "torch", "coremltools", "transformers", "safetensors",
@@ -218,6 +241,8 @@ def main(argv=None):
     for key in ("PLAN", "SWEEP", "ONLY", "NLAYERS", "MLP_DS_TABLE", "DBG_MIXER_IN", "DBG_GDN", "DBG_TAPS", "CTX_LADDER"):
         env.pop(key, None)
     env.update(overrides)
+    if a.command in ("serve", "chat"):
+        return run_recovering(command, env)
     return subprocess.call(command, env=env, cwd=ROOT)
 
 

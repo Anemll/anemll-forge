@@ -63,6 +63,38 @@ class CacheTests(unittest.TestCase):
                 self.assertFalse(G.is_cached(pkg, 0))
             self.assertTrue(G.is_cached(tmp / "x.aimodelc"))
 
+    def test_process_key_falls_back_to_the_executable_name(self):
+        G.process_key.cache_clear()
+        self.addCleanup(G.process_key.cache_clear)
+        with unittest.mock.patch("ctypes.cdll.LoadLibrary", side_effect=OSError), \
+                unittest.mock.patch.object(sys, "executable", "/venv/bin/python3.12"):
+            self.assertEqual(G.process_key(), "python3-12")
+
+    @unittest.skipUnless(sys.platform == "darwin" and "Python.framework" in sys._base_executable,
+                         "framework Python only")
+    def test_framework_python_is_keyed_by_bundle_identifier(self):
+        G.process_key.cache_clear()
+        self.addCleanup(G.process_key.cache_clear)
+        self.assertEqual(G.process_key(), "org.python.python")   # not Path(sys.executable).name ('python')
+
+    def test_purge_removes_only_this_process_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            pkg = tmp / "chunk.aimodel"
+            pkg.mkdir()
+            (pkg / "main.hash").write_bytes(b"\x01\x02")
+            with unittest.mock.patch.object(G, "CACHE", tmp / "cache"), \
+                    unittest.mock.patch.object(G, "os_build", return_value="26A434"), \
+                    unittest.mock.patch.object(G, "process_key", return_value="org.python.python"):
+                self.assertEqual(G.purge(pkg), 0)
+                for spec in ("A", "B"):
+                    (G.cache_dir(pkg) / spec).mkdir(parents=True)
+                other = tmp / "cache/26A434/python/0102/A"
+                other.mkdir(parents=True)
+                self.assertEqual(G.purge(pkg), 2)
+                self.assertFalse(G.is_cached(pkg))
+                self.assertTrue(other.is_dir())
+
 
 class GuideTests(unittest.TestCase):
     def guide(self, cold, lines):
@@ -90,6 +122,26 @@ class GuideTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith(G.TAG + " compiling a.aimodel (1/1)"))
         self.assertTrue(any("so far" in l for l in lines))
         self.assertIn("compiled a.aimodel", lines[-1])
+
+    def test_a_missed_cache_hit_does_not_zero_the_eta(self):
+        lines = []
+        g = self.guide({"a", "c"}, lines)
+        g.load("a.aimodel", lambda: "hit")          # 'cold' but returned at once: it was cached after all
+        self.assertTrue(lines[-1].startswith(G.TAG + " loaded a.aimodel"))
+        self.assertEqual(g.remaining_s(), 20.0)     # c keeps its estimate instead of scaling to ~0
+
+    def test_loading_package_is_named_for_crash_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            g = self.guide({"a"}, [])
+            seen = []
+            with unittest.mock.patch.dict("os.environ", {G.STATE_ENV: str(state)}):
+                g.load("a.aimodel", lambda: seen.append(state.read_text()))
+                g.load("b.aimodel", lambda: seen.append(state.read_text()))
+                with self.assertRaises(RuntimeError):
+                    g.load("c.aimodel", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+            self.assertEqual(seen, ["/a", "/b"])
+            self.assertEqual(state.read_text(), "")  # cleared after each load, also when it raises
 
     def test_errors_reach_the_caller(self):
         g = self.guide({"a"}, [])

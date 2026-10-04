@@ -8,9 +8,11 @@ Estimates come from cold compiles measured on the M6 (docs/research/M6_COMPUTE_A
 re-scaled by the compile times measured during the run."""
 from __future__ import annotations
 
+import functools
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,18 +23,57 @@ CACHE = Path.home() / "Library/Caches/coreai-cache"
 TAG = "[ANE compile]"
 HEARTBEAT_S = float(os.environ.get("ANE_COMPILE_HEARTBEAT_S", "30"))
 HEAD_S, DRAFTER_S = 30.0, 60.0          # rough cold compile of the head / DFlash2 drafter packages
+STATE_ENV = "ANE_COMPILE_STATE"         # file naming the package being loaded, for a parent to recover from a crash
+CRASH_SIGNALS = (6, 4, 5, 10, 11)       # SIGABRT (MPSGraph assertion), SIGILL, SIGTRAP, SIGBUS, SIGSEGV
 
 
 def os_build() -> str:
     return subprocess.run(["sw_vers", "-buildVersion"], capture_output=True, text=True).stdout.strip() or "unknown"
 
 
+@functools.lru_cache(maxsize=1)
+def process_key() -> str:
+    """Core AI's per-process cache folder: the main bundle identifier when the process has one (a framework Python,
+    such as Homebrew's, runs inside Python.app: org.python.python), else the executable name with '.' and '_' as '-'
+    (a uv/standalone python3.12 -> python3-12). The executable name alone misses the framework case."""
+    try:
+        import ctypes
+        import ctypes.util
+        cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+        cf.CFBundleGetMainBundle.restype = ctypes.c_void_p
+        cf.CFBundleGetIdentifier.argtypes, cf.CFBundleGetIdentifier.restype = [ctypes.c_void_p], ctypes.c_void_p
+        cf.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+        ident, buf = cf.CFBundleGetIdentifier(cf.CFBundleGetMainBundle()), ctypes.create_string_buffer(1024)
+        if ident and cf.CFStringGetCString(ident, buf, len(buf), 0x08000100):   # kCFStringEncodingUTF8
+            return buf.value.decode()
+    except (OSError, AttributeError, TypeError):
+        pass
+    return re.sub(r"[._]", "-", Path(sys.executable).name)
+
+
 def cache_dir(path: Path) -> Path | None:
-    """This executable's Core AI cache folder for a package: <os build>/<executable name, '_' -> '-'>/<main.hash>."""
+    """This process's Core AI cache folder for a package: <os build>/<process_key()>/<main.hash>."""
     h = Path(path) / "main.hash"
     if not h.is_file():
         return None
-    return CACHE / os_build() / Path(sys.executable).name.replace("_", "-") / h.read_bytes().hex()
+    return CACHE / os_build() / process_key() / h.read_bytes().hex()
+
+
+def purge(path: Path) -> int:
+    """Remove this process's cached specializations of a package (the next load recompiles it); returns how many."""
+    d = cache_dir(path)
+    entries = [e for e in d.iterdir() if e.is_dir()] if d is not None and d.is_dir() else []
+    for e in entries:
+        shutil.rmtree(e, ignore_errors=True)
+    return len(entries)
+
+
+def mark_loading(path: Path | None):
+    """Name the package being loaded in $ANE_COMPILE_STATE (cleared after the load), so a parent process can purge
+    its cache and retry when an uncatchable abort kills the load (forge.py compile / serve)."""
+    f = os.environ.get(STATE_ENV)
+    if f:
+        Path(f).write_text(str(path) if path is not None else "")
 
 
 def is_cached(path: Path, mode: int | None = None) -> bool:
@@ -84,7 +125,7 @@ def hints(s: dict, total_s: float, build: Path | None = None) -> list[str]:
         out.append("quick test: convert with fewer contexts, e.g. --ctx 8192,16384 --pctx 8192,16384")
     where = f" --build {build}" if build else " --build <build>"
     out.append(f"compile ahead without serving: python forge.py compile{where} (use the same Python as the server: "
-               "the cache is per macOS build and Python executable name)")
+               f"the cache is per macOS build and Python, here '{process_key()}')")
     return out
 
 
@@ -105,15 +146,14 @@ class CompileGuide:
         self.items = [(lbl, Path(p), float(e)) for lbl, p, e in items]
         self.cold = {lbl for lbl, p, _ in self.items if not is_cached(p, mode)}
         self.est = {lbl: e for lbl, _, e in self.items}
+        self.paths = {lbl: p for lbl, p, _ in self.items}
         self.done: dict[str, float] = {}
 
     def remaining_s(self) -> float:
         left = [l for l in self.cold if l not in self.done]
         if not left:
             return 0.0
-        measured = [l for l in self.done if l in self.cold]
-        scale = (sum(self.done[l] for l in measured) / sum(self.est[l] for l in measured)) if measured else 1.0
-        return scale * sum(self.est[l] for l in left)
+        return self._scale() * sum(self.est[l] for l in left)
 
     def announce(self):
         n, k = len(self.items), len(self.cold)
@@ -122,7 +162,7 @@ class CompileGuide:
             return
         total = self.remaining_s()
         self.log(f"{TAG} {k} of {n} packages are not compiled yet for this Mac (macOS {os_build()}, Python "
-                 f"'{Path(sys.executable).name}'): compiling them once now; later starts load from the cache in seconds")
+                 f"'{process_key()}'): compiling them once now; later starts load from the cache in seconds")
         self.log(f"{TAG} estimated ~{fmt(total)} in total{f' for {self.settings}' if self.settings else ''}; "
                  "progress and time left are printed below")
         self.log(f"{TAG} safe to stop at any time (Ctrl-C or qwen38_server.sh stop): each package is cached as soon as "
@@ -132,6 +172,13 @@ class CompileGuide:
 
     def load(self, label: str, fn):
         """Run fn(); for a cold package, in a worker thread with a heartbeat and an immediate Ctrl-C exit."""
+        mark_loading(self.paths.get(label))
+        try:
+            return self._load(label, fn)
+        finally:
+            mark_loading(None)
+
+    def _load(self, label: str, fn):
         if label not in self.cold:
             return fn()
         i = len([l for l in self.done if l in self.cold]) + 1
@@ -167,12 +214,17 @@ class CompileGuide:
         if "error" in box:
             raise box["error"]
         self.done[label] = time.time() - t0
-        self.log(f"{TAG} compiled {label} in {fmt(self.done[label])} ({i}/{k} done); "
+        verb = "loaded" if self._cache_hit(label) else "compiled"
+        self.log(f"{TAG} {verb} {label} in {fmt(self.done[label])} ({i}/{k} done); "
                  f"~{fmt(self.remaining_s())} left in total")
         return box.get("value")
 
+    def _cache_hit(self, label: str) -> bool:
+        """A 'cold' load far under its estimate came from a cache the check missed: no compile time to learn from."""
+        return self.done[label] < 0.1 * self.est[label]
+
     def _scale(self) -> float:
-        measured = [l for l in self.done if l in self.cold]
+        measured = [l for l in self.done if l in self.cold and not self._cache_hit(l)]
         return (sum(self.done[l] for l in measured) / sum(self.est[l] for l in measured)) if measured else 1.0
 
 

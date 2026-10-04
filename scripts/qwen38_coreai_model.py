@@ -28,7 +28,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 import types
@@ -112,13 +111,11 @@ def _modes(manifests) -> set[int]:
 
 def _cache_entries(path: Path) -> list[tuple[Path, set[int]]]:
     """(folder, compile modes) of this process's cached specializations of an .aimodel. The cache is keyed by OS build
-    and executable name ('_' -> '-'), not by compile mode."""
-    h = path / "main.hash"
-    if not h.exists():
+    and process (bundle identifier or executable name: G.process_key), not by compile mode."""
+    d = G.cache_dir(path)
+    if d is None or not d.is_dir():
         return []
-    build = subprocess.run(["sw_vers", "-buildVersion"], capture_output=True, text=True).stdout.strip() or "*"
-    proc = Path(sys.executable).name.replace("_", "-")
-    return [(d, _modes(d.rglob("manifest.plist"))) for d in CACHE.glob(f"{build}/{proc}/{h.read_bytes().hex()}/*")]
+    return [(e, _modes(e.rglob("manifest.plist"))) for e in d.iterdir() if e.is_dir()]
 
 
 def _align_mode(path: Path, log=print) -> None:

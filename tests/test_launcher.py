@@ -111,6 +111,35 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matching --build"):
             forge.prepare(self.args("serve", "--plain", "--build", str(build), "--kv-cache-dtype", "fp16"))
 
+    def test_compile_force_reaches_the_compiler(self):
+        build = self.root / "build"
+        build.mkdir()
+        (build / "manifest.json").write_text("{}")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(forge.main(["compile", "--build", str(build), "--force", "--dry-run"]), 0)
+        self.assertEqual(json.loads(out.getvalue())["argv"][-1], "--force")
+
+    def test_crash_while_loading_purges_that_package_and_retries_once(self):
+        pkg = self.root / "chunk_L00-03.aimodel"
+
+        def child(rc, loading):
+            def call(command, env, cwd):
+                Path(env[forge.G.STATE_ENV]).write_text(str(pkg) if loading else "")
+                return rc
+            return call
+        for rcs, loading, calls, purges in (([-6, 0], True, 2, 1),      # abort while loading: purge, retry
+                                            ([-6, -6], True, 2, 1),     # still crashing: give up after one retry
+                                            ([-6], False, 1, 0),        # crash after loading: not a cache problem
+                                            ([-15], True, 1, 0),        # stopped (SIGTERM): no retry
+                                            ([1], True, 1, 0)):         # Python error: no retry
+            results = iter(rcs)
+            with patch("forge.subprocess.call", side_effect=lambda c, env, cwd: child(next(results), loading)(c, env, cwd)) as run, \
+                    patch("forge.G.purge", return_value=3) as purge, contextlib.redirect_stderr(io.StringIO()):
+                rc = forge.run_recovering(["x"], {})
+            self.assertEqual((run.call_count, purge.call_count, rc), (calls, purges, rcs[calls - 1]), rcs)
+            if purges:
+                purge.assert_called_with(pkg)
+
     def test_quantizer_requires_dataset_and_safe_tag(self):
         wiki = self.root / "wiki"
         wiki.mkdir()
