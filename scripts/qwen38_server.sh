@@ -18,6 +18,8 @@
 #   DRAFT         on (default, sibling drafter/), off/--plain, or a path to a *.aimodel package
 #   DRAFTER       directory holding the drafter config.json + selector.safetensors (default: package parent)
 #   PY            python with the inference environment (default: .venv/bin/python if present, else python3)
+#   MPSGRAPH_ANE_BONDED_COMPILE_MODE  ANE compile mode override (M5 family -> 1, M6+ -> 2; see
+#                 docs/ANE_COMPILE_MODE_POLICY.md). Normally chosen by SoC policy automatically.
 #   LOG, PIDFILE  runtime state paths (default: $ANEMLL_FORGE_STATE/server.log and .pid)
 #   PI_SYNC       sync the Pi profile after start (default: 1); PI_DIR (default: ~/.pi/agent)
 #   PI_BUILD      build name recorded in Pi's model display name (default: basename of BUILD)

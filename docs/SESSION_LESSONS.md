@@ -92,6 +92,8 @@ Isolated reproduction attempts all succeeded with zero errors, in mode 2: a sing
 
 Disk discipline matters here: a single top-to-bottom cold compile of all 16 chunks + head used roughly 11–14 GB of `~/Library/Caches/coreai-cache`; a crash-looping run left unattended can exhaust disk outright (`LLVM ERROR: ... No space left on device` was observed directly). Repeatedly interrupting a compiling run mid-flight (e.g. via a wrapper's process timeout) wastes the partial compile and does not reliably avoid the disk cost of the next attempt. Clear `coreai-cache` before retrying after a disk-exhaustion crash.
 
+**Update (2026-10-04):** `MPSGRAPH_ANE_BONDED_COMPILE_MODE=1` made the real `serve` path compile and start on an Apple M5 base, so the bonded mode *is* generation-specific after all; the September 29 mode-`0`/`2` failures above are preserved as that record. The runtime now selects the mode by SoC generation — `1` on the M5 family (H17), `2` on M6 and newer (H18+), fail on pre-M5 — through one helper (`scripts/ane_compile_mode.py`) used by `forge.py serve`/`compile`, `coreai_compile.py` and the Core AI runtime. An explicit `MPSGRAPH_ANE_BONDED_COMPILE_MODE` still wins. See [ANE compile mode policy](ANE_COMPILE_MODE_POLICY.md). M5 Pro/Max are a maintainer directive, not yet reproduced in-tree.
+
 ## Compute acceleration on M6: what the compiler taught (October 3)
 
 - **Measure the split before choosing a kernel.** A byte model put KV traffic at 23% of a 64K verify; timing the context ladder showed attention at 47%, because the history path was op bound (about 36 GB/s of K/V), not bandwidth bound. INT8 or FP8 MACs would not have touched the dominant cost.

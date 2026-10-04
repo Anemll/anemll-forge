@@ -134,5 +134,5 @@ These are measured mitigations and research switches, not settings most users ne
 | --- | --- | --- |
 | `DRAFT_GAP_MS` | `3` | Minimum interval after a verify before the next draft is submitted |
 | `COREAI_DRAFTER_COMPUTE` | `ane` (set by the launcher) | Drafter compute device |
-| `MPSGRAPH_ANE_BONDED_COMPILE_MODE` | `2` (set by the runtime) | ANE compile mode; compiled packages are cached per mode |
+| `MPSGRAPH_ANE_BONDED_COMPILE_MODE` | set by SoC policy (`1` on the M5 family, H17; `2` on M6+, H18) | ANE compile mode; an explicit value overrides the policy. Compiled packages are cached per mode. See [ANE compile mode policy](ANE_COMPILE_MODE_POLICY.md) |
 | `ANE_COMPILE_HEARTBEAT_S` | `30` | Seconds between `[ANE compile]` progress lines during a long compile |

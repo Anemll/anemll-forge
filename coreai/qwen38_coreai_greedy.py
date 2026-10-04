@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "scripts"))
+import ane_compile_mode as SOC  # noqa: E402
 PY = HERE / ".venv/bin/python"
 CACHE = Path.home() / "Library/Caches/coreai-cache"
 MODE = "2"
@@ -48,7 +50,8 @@ def wired_gb() -> float:
 
 # ---- probe: one package, alone, in this (fresh) process ------------------------------------------------------------
 def probe(pkg: Path) -> dict:
-    os.environ["MPSGRAPH_ANE_BONDED_COMPILE_MODE"] = MODE
+    SOC.apply(strict=False)  # SoC policy: H17/M5 -> 1, H18/M6+ -> 2; honors an explicit override
+    os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", MODE)
     sys.path.insert(0, str(HERE / "swift_bridge"))
     import numpy as np
     import coreai_bridge as B

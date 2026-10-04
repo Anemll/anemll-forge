@@ -13,10 +13,10 @@ import sys
 import time
 from pathlib import Path
 
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "coreai" / "swift_bridge"))
+import ane_compile_mode as SOC  # noqa: E402
 import coreai_bridge as B  # noqa: E402
 import coreai_compile_guide as G  # noqa: E402
 from qwen38_coreai_model import MODE_ENV, graph_line, pick_package  # noqa: E402
@@ -31,6 +31,11 @@ def main(argv=None):
     ap.add_argument("--build", type=Path, required=True, help="target build directory (manifest.json, packages)")
     ap.add_argument("--draft", type=Path, help="also compile this DFlash2 drafter package")
     a = ap.parse_args(argv)
+    try:
+        SOC.apply(strict=True)
+    except SOC.UnsupportedSocError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     man = json.loads((a.build / "manifest.json").read_text())
     stamp(graph_line(man, a.build))
     extra = [(f"drafter {a.draft.name}", a.draft, G.DRAFTER_S)] if a.draft else []
@@ -53,4 +58,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

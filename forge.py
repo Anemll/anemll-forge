@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import hf_release
+import ane_compile_mode as SOC
 from qwen38_kv_cache import cache_format
 NUMERICS = dict(SILU="tanh", MLP_SILU="tanh", GDN_SQ="16", GDN_SV="64",
                 MLP_DS="1", MLP_DS_DYN="0", V3_KV_IN="1", V3_PREFILL="0")
@@ -172,7 +173,11 @@ def main(argv=None):
         if sys.platform != "darwin":
             p.error("Core AI compilation requires macOS")
         env = os.environ.copy()
-        env.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+        try:
+            mode = SOC.apply(strict=True)
+        except SOC.UnsupportedSocError as e:
+            p.error(str(e))
+        env[SOC.MODE_ENV] = str(mode)
         return subprocess.call(command, env=env, cwd=ROOT)
     if a.command == "doctor":
         versions = {}
@@ -182,13 +187,27 @@ def main(argv=None):
                 versions[name] = importlib.metadata.version(name)
             except importlib.metadata.PackageNotFoundError:
                 versions[name] = None
+        soc = SOC.detect_soc()
+        try:
+            mode = SOC.apply(strict=False, soc=soc)
+        except SOC.UnsupportedSocError:
+            mode = None
         print(json.dumps(dict(python=sys.version, platform=platform.platform(), packages=versions,
+                             soc={"class": soc.klass, "generation": soc.generation, "source": soc.source},
+                             ane_bonded_compile_mode=mode,
                              note="Presence is not compatibility or ANE-placement verification."), indent=2))
         return 0
     try:
         command, overrides = prepare(a)
     except (ValueError, OSError) as e:
         p.error(str(e))
+    if a.command in ("serve", "chat"):
+        try:
+            SOC.apply(strict=True)
+        except SOC.UnsupportedSocError as e:
+            p.error(str(e))
+        if SOC.MODE_ENV in os.environ:
+            overrides[SOC.MODE_ENV] = os.environ[SOC.MODE_ENV]
     if a.dry_run:
         print(json.dumps(dict(argv=command, environment=overrides), indent=2))
         return 0

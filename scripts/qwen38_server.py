@@ -697,6 +697,9 @@ def make_handler(engine):
                                  "kv_cache_dtype": getattr(engine.model, "kv_cache_dtype", "fp16"),
                                  "kv_cache_formats": list(getattr(engine.model, "kv_cache_formats", ("fp16",))),
                                  "target_graph": getattr(engine.model, "graph", None),
+                                 "soc_generation": getattr(getattr(engine.model, "soc", None), "generation", None),
+                                 "soc_class": getattr(getattr(engine.model, "soc", None), "klass", None),
+                                 "ane_bonded_compile_mode": getattr(engine.model, "bonded_compile_mode", None),
                                  "active_context_entry": getattr(engine.model, "ctx", engine.ctx),
                                  "prefill": getattr(engine, "prefill_stats", None),
                                  "decode": getattr(engine, "decode_stats", None)})

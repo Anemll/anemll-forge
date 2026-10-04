@@ -110,4 +110,6 @@ Native M6 checks, macOS 27.0.1 (26A434), recorded in [M6_COMPUTE_ACCELERATION_20
 
 Published as Hugging Face revision `1192a9c83d1b3e7ad76602ed6ec6d05e6852cad2` (4 October 2026). Before upload, the staged bundle passed `release-manifest`, `quick-test --check-only` and a full speculative `quick-test` run with the public Forge source `6e0a85c` (16 tokens, coherent output). After upload, all 74 inventory files at that revision matched their recorded sizes and SHA-256 (LFS) or git blob hashes through the Hub API.
 
+SoC compile-mode policy (4 October 2026): implemented with mocked-detection unit tests; **not** validated end-to-end. The only positive runtime evidence is one successful base-M5 `forge.py serve` with `MPSGRAPH_ANE_BONDED_COMPILE_MODE=1` (maintainer). M5 Pro/Max are a maintainer directive without an in-tree reproduction; M6 remains on mode 2. See [ANE compile mode policy](ANE_COMPILE_MODE_POLICY.md).
+
 Not covered: a clean-environment install, M5-family hardware, a full `forge.py download` of the published revision, long-run memory and repeated context transitions on the new graph, sampled (temperature above 0) quality, and broader capability or retrieval evaluation.

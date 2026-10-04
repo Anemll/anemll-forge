@@ -41,6 +41,7 @@ from qwen38_kv_cache import append_rows, cache_format, cache_formats, cache_entr
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import qwen38_ane_model as M  # noqa: E402
+import ane_compile_mode as SOC  # noqa: E402
 
 try:  # the Python binding (not needed by the bridge runtime)
     from coreai.runtime import AIModel, NDArray  # noqa: E402
@@ -51,11 +52,10 @@ except ImportError:  # pragma: no cover
 
 COREAI_DIR = Path(os.path.expanduser(os.environ.get("COREAI_DIR", "~/Models/vq27b/coreai/full_mix25_mixer4_head4")))
 CACHE = Path.home() / "Library/Caches/coreai-cache"
-# MPSGraph ANE compile mode 2 keeps only the bonded variant of each procedure (default 0 keeps bonded + nonbonded):
-# ~0.45 GB less program memory per 4-layer chunk, same speed, bit-identical outputs. Read at specialization time, so
-# setting it here works even after torch has loaded MPSGraph.
-MODE_ENV = "MPSGRAPH_ANE_BONDED_COMPILE_MODE"
-os.environ.setdefault(MODE_ENV, "2")
+# Compile mode is chosen by SoC policy (scripts/ane_compile_mode.py; docs/ANE_COMPILE_MODE_POLICY.md) and applied
+# at load time in CoreAIQwen and by the forge.py / coreai_compile.py entry points. The helper honors an explicit
+# MPSGRAPH_ANE_BONDED_COMPILE_MODE override: H17/M5 family -> 1, H18/M6 and newer -> 2; below H17 is unsupported.
+MODE_ENV = SOC.MODE_ENV
 BRIDGE_DIR = Path(os.path.expanduser(os.environ.get(
     "COREAI_BRIDGE_DIR", str(Path(__file__).resolve().parents[1] / "coreai" / "swift_bridge"))))
 f16 = np.float16
@@ -529,6 +529,9 @@ class CoreAIQwenBridge(CoreAIQwen):
         import coreai_bridge as B
         self.B = B
         self.root, self.log = root, log
+        soc = SOC.detect_soc()
+        self.bonded_compile_mode = SOC.apply(strict=True, log=self.log, soc=soc)
+        self.soc = soc
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
