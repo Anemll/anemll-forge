@@ -10,6 +10,8 @@ Eight evaluated rows therefore do not guarantee eight emitted tokens. Useful tok
 
 For greedy decoding the acceptance rule checks each proposal against the target argmax. Equivalence to plain greedy decoding depends on the same target weights, numerical behavior, state and generation policy: a batched graph can differ numerically from a single-token path. For sampling the implementation treats the proposed path as deterministic, accepts a proposal with its target probability and samples the target distribution excluding it on rejection. This preserves the specified target distribution in the algorithmic construction; it does not promise identical random draws or token sequences from the same seed across implementations. Validate the actual runtime, including penalties, stops and context transitions. A fluent response or high acceptance alone does not establish quality.
 
+Drafts are proposed deterministically, so a sampled draft is accepted with the target probability of that token; at temperature 0.7 to 1.0 this accepts fewer drafts than greedy decoding. The [DFlash2 sampling plan](research/DFLASH2_SAMPLING_PLAN.md) describes exact speculative sampling with the drafter's own distribution and the tests needed before changing this rule. Verifier cost does not depend on temperature, and an 8-row verifier stays the fastest end to end ([verifier block length](verifier_len.md)).
+
 The source is [qwen38_server.py](../scripts/qwen38_server.py), particularly `draft_cycle`; [qwen38_spec_unit_test.py](../scripts/qwen38_spec_unit_test.py) is the historical CPU sampling experiment. It is not a hardware validation or a routine fast test.
 
 ## Exact release pairing
@@ -54,7 +56,7 @@ python forge.py serve --runtime coreai \
   --model /path/to/bundle/model --build /path/to/bundle/coreai --ctx 16384
 ```
 
-The launcher resolves the sibling `drafter/` package and configuration by default and fails if required assets are absent. For independently organized assets, set `--draft /path/to/dflash2_lut4_gptq.aimodel` and `--drafter /path/to/config-and-selector-directory`. `--plain` explicitly disables speculation for a diagnostic run. Keep diagnostic reports separate from release performance results.
+The launcher resolves the sibling `drafter/` package and configuration by default and fails if required assets are absent. [SERVER.md](SERVER.md) lists every startup option, wrapper variable and request default. For independently organized assets, set `--draft /path/to/dflash2_lut4_gptq.aimodel` and `--drafter /path/to/config-and-selector-directory`. `--plain` explicitly disables speculation for a diagnostic run. Keep diagnostic reports separate from release performance results.
 
 The Core AI path uses the Swift bridge, bonded compile mode `2`, and a default `DRAFT_GAP_MS=3` minimum interval after verification before the next draft submission. The drafter fixes PyTorch's host thread count to one to avoid contention observed on the research machine. These are measured mitigations for that stack, not permanent hardware requirements or universal speed guarantees.
 
@@ -87,7 +89,7 @@ The largest prepared entry is labeled 64K but has **65,472 usable history rows**
 
 `--ctx 16384` caps a growing 8K→16K ladder; it does not pin every call to the 16K entry. Speculation reserves eight positions for verifier writes, so the server may reduce the requested output cap to fit. Record the actual prompt length, granted cap and entry transitions.
 
-Startup loads packages but does not execute a full inference warm-up. A short first request exercises the small-context prefill, verifier, head and drafter; a later larger-context entry can still be cold. Report compilation/load time, cold first-request time and warmed serving time separately. Count prompt prefill and summarization calls in task wall time, not just generation throughput.
+The first start of a build on a macOS build compiles every target and drafter package for the ANE once and prints `[ANE compile]` progress (packages left, estimate, time left, safe-stop and faster-option hints); `python forge.py compile --build <dir>` does this without serving. Startup loads packages but does not execute a full inference warm-up. A short first request exercises the small-context prefill, verifier, head and drafter; a later larger-context entry can still be cold. Report compilation/load time, cold first-request time and warmed serving time separately. Count prompt prefill and summarization calls in task wall time, not just generation throughput.
 
 ## Eviction, memory pressure and stalled calls
 

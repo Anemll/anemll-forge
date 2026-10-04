@@ -58,6 +58,7 @@ def dims(cfg):
 
 
 # ---- gated delta rule on one chunk of T <= 8 rows (UT transform), split into reusable pieces -----------------
+# (chunkwise WY / UT-transform form: Songlin Yang, "DeltaNet Explained (Part II)", https://sustcsonglin.github.io/blog/2024/deltanet-2/)
 def delta_core(kh, vh, beta, g, T, nv):
     """cum (nv,T,1) inclusive log-decay cumsum, pair (nv,T,T) = exp(cum_i - cum_j) [i >= j], and u, wk such that
     the rows' effective values given the chunk's initial state S0 are vn = u - wk @ S0."""

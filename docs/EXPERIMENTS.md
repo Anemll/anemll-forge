@@ -15,6 +15,17 @@ Original module names are retained to keep the research trail navigable. Histori
 - [Quantization notebook](../QUANTIZATION_NOTES.md): include failed and pending runs as such, not as successful results.
 - [Initial scalar sensitivity prior](../VQ2BIT_SENSITIVITY.md) and accompanying JSON/CSVs/tiers: kept for attribution and historical comparison. Its early recommendation to compress late MLP layers conflicts with later in-domain VQ results; do not present it as the final allocation recipe.
 
+## ANE compute dtypes (research)
+
+- [M6 ANE compute notes](research/M6_ANE_COMPUTE_2026-10-02.md): ranked INT8-INT8 / FP8-FP8 attention options versus the current V8 dequant-to-FP16 path. Distinguishes measured prior results from inferred ranks. Not a claimed 2x.
+- `scripts/m6_attn_compute.py`: host recipes, V8 score-scale identity, E4M3 240/448, and a Core ML skeleton. [M6 runbook](research/M6_ATTN_COMPUTE_README.md).
+- [M6 compute feasibility](research/M6_COMPUTE_FEASIBILITY_2026-10-02.md): Amdahl / traffic leverage model for how much an attention-compute speedup can move end-to-end, with an on-device measurement gate.
+- `scripts/m6_compute_roofline.py`: pure-Python Amdahl and byte-traffic model behind the feasibility doc.
+- [M6 compute acceleration](research/M6_COMPUTE_ACCELERATION_2026-10-03.md): measured on the M6. `GDN_FAST=1` (exact DeltaNet core rewrites) and attention history tiles (`ATT_BLOCK=2048` for verify, `ATT_BLOCK_PREFILL=4096` for prefill) cut full-target verify 19 to 31% and prefill 29 to 35% with unchanged quality, at about the release graph's cold compile time. Builder defaults in `coreai/qwen38_coreai_build.py` since 3 October; `GDN_FAST=0 ATT_BLOCK=16384` restores the release graph.
+- On-device tools: `scripts/m6_entry_sweep.py` (per-entry and full-chain timing, context fits), `m6_layer_ablation.py` (per-part cost of a real chunk), `m6_gdn_bench.py` and `m6_attn_bench.py` (GDN core and attention core variants with FP32 checks and placement), `m6_chunk_ab.py` (two builds of one chunk), `m6_kl512_eval.py` (compiled KL-512 gate), `m6_long_ctx_eval.py` (64K prefill plus teacher forcing, build-to-build KL), `m6_server_bench.py` (owned full-server prefill/decode case). Host test: `tests/test_gdn_fast.py`.
+- [DFlash2 sampling plan](research/DFLASH2_SAMPLING_PLAN.md): temperature sampling with the drafter's own distribution (exact speculative sampling), baseline measurement matrix, exactness tests and presence-penalty notes. Plan only.
+- [Verifier block length](verifier_len.md): 8-, 4- and 3-row verifiers measured on the optimized target (`scripts/m6_verify_len.py`, `m6_verify_len_report.py`); 8 rows stays fastest end to end.
+
 ## Inference and numerics
 
 - `scripts/qwen38_ane_chunk.py`: MIL graph construction and numerical workarounds.

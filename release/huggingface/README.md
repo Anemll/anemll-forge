@@ -17,7 +17,7 @@ tags:
 
 # ANEMLL Forge · Qwen3.8-27B for ANE
 
-**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update adds selectable **V-only INT8 KV caching, enabled by default**, with an explicit FP16-cache fallback in the same target packages. Keys remain FP16. Model-weight quantization is unchanged.
+**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update replaces the 16 target chunks with a **faster exact ANE graph**: the same weights and model function, evaluated with less serial work. On M6 a full target verify is **19 to 31% faster** and a 64-row prefill call **29 to 35% faster** than the previous packages. The target now carries only the **V-only INT8 KV cache** (FP16 keys, INT8 values), which was already the default. Model-weight quantization is unchanged.
 
 The normal inference path uses the included, tested **Core AI DFlash2 speculative drafter**. Each T=8 verifier cycle checks one anchor and seven draft proposals. T=8 target functions are verification functions; the separate `drafter/` package generates the proposals. Do not substitute a Core ML or unpaired drafter.
 
@@ -25,7 +25,7 @@ ANEMLL independently converts and quantizes [Qwen/Qwen3.8-27B](https://huggingfa
 
 ## Files and runtime compatibility
 
-- [coreai/](coreai): 16 target chunks, the unchanged output head and a selectable-cache manifest. Target recipe: `mix25in_mixr_lr64mix`, with mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections.
+- [coreai/](coreai): 16 target chunks (faster graph, V8 cache), the unchanged output head and the manifest. Target recipe: `mix25in_mixr_lr64mix`, with mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections.
 - [model/](model): matching tokenizer/configuration files and FP16 host embedding table.
 - [drafter/](drafter): `dflash2_lut4_gptq.aimodel`, numerical metadata, configuration, compact BF16 selector codebooks and source licenses/notices. These assets are unchanged from the previous paired release.
 - [release.json](release.json): complete per-file SHA-256/size inventory and target/drafter pairing.
@@ -33,15 +33,38 @@ ANEMLL independently converts and quantizes [Qwen/Qwen3.8-27B](https://huggingfa
 
 The target's supported entries are **8K, 16K, 32K, 48K and 64K**. There is no 24K entry in this update. The 64K entry holds 65,472 history rows. These compiled sizes do not establish long-context quality.
 
-V8 caches store historical values as INT8 with FP16 scales per token and KV head. The host quantizes accepted rows; ANE attention reconstructs historical values. New graph outputs remain FP16. Keys and the recurrent GDN state retain their existing precision. Only the 16 full-attention layers grow this cache. Selectable packages contain both physical cache-format entry families; the runtime binds only the selected family.
+V8 caches store historical values as INT8 with FP16 scales per token and KV head. The host quantizes accepted rows; ANE attention reconstructs historical values. New graph outputs remain FP16. Keys and the recurrent GDN state retain their existing precision. Only the 16 full-attention layers grow this cache. These packages contain only V8 entries. The FP16-cache fallback remains in the previous revision [`cd7dfc6`](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/cd7dfc605ccad091b961f7788939c30d01c3793e), which has selectable FP16/V8 packages with the earlier graph.
 
-**Required source update:** use the current [ANEMLL Forge source](https://github.com/Anemll/anemll-forge/tree/main), which includes the merged V8 runtime. A V8-capable runtime must select physical entries from `entries_by_kv`, preserve V codes/scales through context growth and speculative commits, and use the Swift bridge. The source README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
+**Source:** use the current [ANEMLL Forge source](https://github.com/Anemll/anemll-forge/tree/main), which includes the V8 runtime; the faster graph needs no runtime change. The V8 runtime preserves V codes/scales through context growth and speculative commits and uses the Swift bridge. The source README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
 
-This release replaces target chunks and the cache manifest, and updates the inventory and this card. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
+This update replaces the 16 target chunks and the manifest, and updates the inventory, [MODIFICATIONS.md](MODIFICATIONS.md) and this card. The output head, model assets and drafter are byte-identical to the previous revision. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
 
-## Measured performance and evaluation
+## Faster exact graph (this update)
 
-Measurements below are M6 experiments with the matching Core AI DFlash2 drafter and a 3 ms draft gap. They are research results, not a general capability score or a comparison against published Qwen leaderboard results.
+Two rewrites change how the ANE evaluates the target, not its weights or math:
+
+- **Gated DeltaNet (48 of 64 layers).** Verification and prefill process tokens in 8-row blocks, and each block needs a small triangular solve: every token's delta-rule update depends on the earlier tokens in the block. The previous graph solved it row by row (7 dependent steps). The new graph uses the exact closed form `(I + N)^-1 = (I - N)(I + N^2)(I + N^4)` for the strictly lower-triangular block (3 steps and a matrix product), a native depthwise convolution, and one fewer state product per prefill block. Background on the chunkwise delta rule: [DeltaNet Explained (Part II)](https://sustcsonglin.github.io/blog/2024/deltanet-2/).
+- **Attention history tiles.** The 16 full-attention layers read the KV history in 2,048-wide tiles when verifying and 4,096-wide tiles when prefilling (previously 16,384). Smaller tiles cost the ANE less per call, most at long context.
+
+Full 16-chunk target on M6, previous packages (V8 entries) to this update, idle machine, median of repeated calls:
+
+| Context entry | Verify (8 rows) | Prefill call (64 rows) | Prefill rows/s |
+| --- | --- | --- | --- |
+| 8K | 113.1 → 91.5 ms (−19.1%) | 284.5 → 202.8 ms (−28.7%) | 225 → 316 |
+| 16K | 123.5 → 97.4 ms (−21.1%) | 351.5 → 230.9 ms (−34.3%) | 182 → 277 |
+| 32K | 144.8 → 108.1 ms (−25.4%) | 412.6 → 285.1 ms (−30.9%) | 155 → 225 |
+| 48K | 168.2 → 119.5 ms (−28.9%) | 497.7 → 338.1 ms (−32.1%) | 129 → 189 |
+| 64K | 190.3 → 131.5 ms (−30.9%) | 603.4 → 394.1 ms (−34.7%) | 106 → 162 |
+
+These are target-only call times, not end-to-end generation rates. With the DFlash2 drafter, a full server measured cold prefill **26% (8K) to 41% (64K)** faster and decode **21 to 25%** faster at 32K to 64K, with identical replies at 48K and 64K, on one synthetic coding workload. That server run used an earlier two-format build of the same graph (2,048-wide tiles everywhere), not these exact packages.
+
+Quality: after a 64,000-token prefill through the whole context ladder, perplexity on the next 1,024 WikiText-2 positions was **5.0673** (previous packages 5.0686); direct KL between the previous and new targets averaged **5.0e-5** nats, and the top token agreed at 99.7% of positions. On the short 64-sequence KL-512 trace, the two-format build of the same graph measured mean KL to BF16 **0.184168** (previous V8 0.184270). The differences are floating-point rounding order. This is not a coding, reasoning or retrieval evaluation.
+
+**First start compiles the new packages.** The first `quick-test` or server start on a Mac compiles the target for the ANE once: **22 min 48 s** for the 16 chunks on M6 (measured, with the unchanged head and drafter already cached from the previous revision; on a fresh Mac they add an estimated 1 to 2 minutes). Later starts load from the compile cache in seconds. The cache is per macOS build, so a macOS update compiles again. Stopping is safe: each finished package stays cached and the next start resumes. Updated Forge source prints an `[ANE compile]` readout during this step: packages left, an estimate, a line per package with the time left, and options that compile faster. Earlier source prints each chunk as it finishes.
+
+## V8 cache measurements (previous update)
+
+The measurements in this section compare FP16 and V8 caches on the previous revision's packages (earlier graph). The V8 cache format is unchanged in this update. Measurements below are M6 experiments with the matching Core AI DFlash2 drafter and a 3 ms draft gap. They are research results, not a general capability score or a comparison against published Qwen leaderboard results.
 
 Full-server prefill throughput, FP16 values → INT8 values:
 
@@ -81,7 +104,7 @@ The [dated KV-cache quantization research trace](https://github.com/Anemll/aneml
 
 ## Download and start
 
-First install the required V8-capable source revision and environment using the source README above. When replacing an older bundle, use a fresh output directory; the helper rejects a different release inventory in an existing destination. Pin `HF_COMMIT` to this updated bundle's actual commit, not the upstream Qwen revision or the older FP16-only release:
+First install the current source and environment using the source README above. When replacing an older bundle, use a fresh output directory; the helper rejects a different release inventory in an existing destination. Pin `HF_COMMIT` to this updated bundle's actual commit, not the upstream Qwen revision or an older release:
 
 ```sh
 python forge.py download \
@@ -105,7 +128,7 @@ PY="python" CTX=64K \
 bash scripts/qwen38_server.sh start
 ```
 
-The default Core AI download includes the paired drafter and selector assets. Automatic cache selection follows `coreai/manifest.json`: **V8 is the default** for this update. `CTX=64K` sets the growth cap; the runtime starts with a smaller entry and grows its KV state. Set `KV_CACHE_DTYPE=fp16` on the wrapper command for the explicit FP16-cache fallback, or use `--kv-cache-dtype fp16` with `forge.py serve`. `--plain` is a target-only diagnostic. The integrity-only check does not run inference; a short smoke generation does not establish sustained performance or broad quality.
+The default Core AI download includes the paired drafter and selector assets. The runtime reads the V8 cache format from `coreai/manifest.json`. The full `quick-test` performs the one-time ANE compile (about 23 minutes on M6, above), so the server then starts in seconds. `CTX=64K` sets the growth cap; the runtime starts with a smaller entry and grows its KV state. For the FP16-cache fallback, download revision `cd7dfc605ccad091b961f7788939c30d01c3793e` instead and set `KV_CACHE_DTYPE=fp16` on the wrapper command, or use `--kv-cache-dtype fp16` with `forge.py serve`. `--plain` is a target-only diagnostic. The integrity-only check does not run inference; a short smoke generation does not establish sustained performance or broad quality.
 
 ## Attribution and licenses
 

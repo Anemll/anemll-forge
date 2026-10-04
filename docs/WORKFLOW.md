@@ -75,15 +75,16 @@ The port preserves the latest Core AI build/runtime and Swift bridge. Use a sepa
 ```sh
 MODEL="$MODEL" EXPORT_DIR="$RUNS/export/qwen38-27b-vq2" OUT=/path/to/coreai-builds \
   python coreai/qwen38_coreai_build.py all --ctx 8192,16384 --pctx 8192,16384
-python forge.py serve --runtime coreai --model "$MODEL" --build /path/to/coreai-builds/qwen38-27b-vq2 --ctx 16384 \
+python forge.py compile --build /path/to/coreai-builds/qwen38-27b-vq2_kvv8      # optional: first-start ANE compile now
+python forge.py serve --runtime coreai --model "$MODEL" --build /path/to/coreai-builds/qwen38-27b-vq2_kvv8 --ctx 16384 \
   --draft /path/to/matching-drafter/dflash2_lut4_gptq.aimodel --drafter /path/to/matching-drafter
 ```
 
 A freshly quantized target needs its own matched and validated drafter/head pairing; the prepared `mix25in_mixr_lr64mix` drafter is not automatically compatible with the example export above. For the ready-made pair, use the downloaded bundle workflow instead. The drafter conversion source is `coreai/dflash2_coreai_build.py`; pin `DRAFT_EXPORT`, `HEAD_EXPORT`, `DRAFTER`, numerical settings and metadata. Read [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) before building or changing that pair.
 
-The example above retains FP16 cache inputs. To produce shared-weight FP16/V8 packages, add `--kv-cache-dtype both` to the converter and use the resulting `_kvselect` build path; its manifest defaults to V8. `--kv-cache-default fp16` can retain an FP16 default. This conversion changes cache entry interfaces and attention arithmetic, not the quantized target weights. Follow the [full V8 recipe and research report](KV_CACHE_V8.md) before comparing results or updating a released bundle.
+The converter defaults to V8 cache inputs (FP16 keys, INT8 values; build path suffix `_kvv8`) and to the faster exact graph: `GDN_FAST=1`, `ATT_BLOCK=2048`, `ATT_BLOCK_PREFILL=4096` ([M6 compute acceleration](research/M6_COMPUTE_ACCELERATION_2026-10-03.md)). Add `--kv-cache-dtype fp16` for FP16 cache inputs, `--kv-cache-dtype both` for shared-weight FP16/V8 packages (`_kvselect`, default V8; `--kv-cache-default fp16` keeps an FP16 default; about 1.5 times the first-start compile), and `GDN_FAST=0 ATT_BLOCK=16384` for the release graph. The manifest records these choices and the server prints them at startup. These options change cache entry interfaces and graph arithmetic order, not the quantized target weights. Follow the [full V8 recipe and research report](KV_CACHE_V8.md) before comparing results or updating a released bundle.
 
-These Core AI commands remain unverified in a clean environment. Start with a single `chunk 0-3` build. The current runtime defaults to compile mode 2 and removes incompatible cache specializations for the selected package before loading; inspect this behavior before changing modes on an existing installation. The Python binding has documented long-run allocation problems; the Swift bridge was the later research solution.
+These Core AI commands remain unverified in a clean environment. Start with a single `chunk 0-3` build. The first load of each package compiles it for the ANE (about 1.5 minutes per default chunk on M6) and prints `[ANE compile]` progress; run `forge.py compile` and the server with the same Python, because the compile cache is keyed by macOS build and Python executable name. The current runtime defaults to compile mode 2 and removes incompatible cache specializations for the selected package before loading; inspect this behavior before changing modes on an existing installation. The Python binding has documented long-run allocation problems; the Swift bridge was the later research solution.
 
 ## Validation before release
 

@@ -159,8 +159,11 @@ class Engine:
             os.environ["COREAI_DIR"] = str(mdir)  # chunk share one weight copy; the context grows through the ladder
             import qwen38_coreai_model as A
             man = json.loads((mdir / "manifest.json").read_text())
+            import coreai_compile_guide as G
+            extra = [] if dpath is None else [(f"drafter {Path(dpath).name}", Path(dpath), G.DRAFTER_S)]
             self.model = A.CoreAIQwen(ladder=[c for c in man["ctxs"] if c <= a.ctx], log=log,
-                                     kv_cache_dtype=a.kv_cache_dtype)  # [ctx] switches, timestamped
+                                     kv_cache_dtype=a.kv_cache_dtype,  # [ctx] switches, timestamped
+                                     extra_packages=extra)
         else:
             self.model = M.load_model()
         self.v2 = hasattr(self.model, "snapshot")   # v2 / v3: batched prefill + zero-copy DeltaNet states
@@ -171,7 +174,9 @@ class Engine:
             assert hasattr(self.model, "call"), "--draft needs a v3/v4 build (one T=8 function per chunk)"
             import dflash2_ane_drafter as D
             from dflash2_coreai_drafter import CoreAIDrafter
-            self.drafter = CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
+            guide = getattr(self.model, "compile_guide", None)
+            make = lambda: CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)  # noqa: E731
+            self.drafter = guide.load(f"drafter {Path(dpath).name}", make) if guide else make()
             log(f"drafter: Core AI {dpath.name}")
         self.tok = AutoTokenizer.from_pretrained(str(hf))
         self.a = a
@@ -691,6 +696,7 @@ def make_handler(engine):
                                  "position": engine.model.pos,
                                  "kv_cache_dtype": getattr(engine.model, "kv_cache_dtype", "fp16"),
                                  "kv_cache_formats": list(getattr(engine.model, "kv_cache_formats", ("fp16",))),
+                                 "target_graph": getattr(engine.model, "graph", None),
                                  "active_context_entry": getattr(engine.model, "ctx", engine.ctx),
                                  "prefill": getattr(engine, "prefill_stats", None),
                                  "decode": getattr(engine, "decode_stats", None)})

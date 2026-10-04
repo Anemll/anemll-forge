@@ -92,6 +92,16 @@ Isolated reproduction attempts all succeeded with zero errors, in mode 2: a sing
 
 Disk discipline matters here: a single top-to-bottom cold compile of all 16 chunks + head used roughly 11–14 GB of `~/Library/Caches/coreai-cache`; a crash-looping run left unattended can exhaust disk outright (`LLVM ERROR: ... No space left on device` was observed directly). Repeatedly interrupting a compiling run mid-flight (e.g. via a wrapper's process timeout) wastes the partial compile and does not reliably avoid the disk cost of the next attempt. Clear `coreai-cache` before retrying after a disk-exhaustion crash.
 
+## Compute acceleration on M6: what the compiler taught (October 3)
+
+- **Measure the split before choosing a kernel.** A byte model put KV traffic at 23% of a 64K verify; timing the context ladder showed attention at 47%, because the history path was op bound (about 36 GB/s of K/V), not bandwidth bound. INT8 or FP8 MACs would not have touched the dominant cost.
+- **Op count is the cost for small graphs.** The DeltaNet core had little arithmetic but cost as much as an MLP layer at 64 rows. Replacing 7 serial row updates with a closed-form inverse halved it.
+- **Matmul chains between computed tensors fail ANEC.** The compiler aborts with an internal error and the program falls back to the GPU. The same products written as broadcast multiply plus reduce compile and stay on the ANE.
+- **A cost model is a hint.** anemll-profile's Core ML cost model ranked transposes first; removing them in Core AI saved 3% at 64 rows and slowed 8 rows.
+- **Compile time grows faster than the program.** Narrow attention tiles made a chunk compile 5 times longer; three quarters of it came from the 64-row prefill entries, which gained nothing below 4096-wide tiles. Writing the tiles as one batched op did not help: the compiler expands it into the same per-tile work. The same tiles compiled in a standalone program cost about one fifteenth as much as inside a chunk.
+- **There are two compile caches.** Deleting a package's Core AI cache entry redoes only the MPSGraph stage; the system ANE service also keeps compiled programs it has seen. Time true cold compiles with packages that are new to the system (for example a negligible constant change).
+- **Guide long first starts.** A cold compile is now announced with an estimate, per-package progress and time left, and can be interrupted safely; see [M6 compute acceleration](research/M6_COMPUTE_ACCELERATION_2026-10-03.md).
+
 ## Current release interpretation
 
 DFlash2 is a required part of the intended fast Core AI release, not an optional side experiment. Preserve the historical findings above, including unsuccessful recalibration and stale-head checks, while using [the current pairing guide](SPECULATIVE_DECODING.md) for release assets and flags. The earlier observations are not new validation of the assembled download.

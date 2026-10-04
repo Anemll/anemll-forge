@@ -22,8 +22,14 @@
 #   PI_SYNC       sync the Pi profile after start (default: 1); PI_DIR (default: ~/.pi/agent)
 #   PI_BUILD      build name recorded in Pi's model display name (default: basename of BUILD)
 #
+#   START_WAIT_S  how long start / restart keep watching the startup (default: 7200)
+#
 # `restart` validates the requested build before stopping a running server. Startup shows completed target chunks
-# and elapsed time; the chunk percentage excludes head/drafter loading. `log` follows the server log.
+# and elapsed time; the chunk percentage excludes head/drafter loading. The first start of a build on a macOS build
+# compiles its packages for the ANE once: the `[ANE compile]` lines show the plan, per-package progress, time left
+# and options that compile faster. Ctrl-C only stops watching (the server keeps going; compiled packages stay cached
+# and a later start resumes). `python forge.py compile --build <dir>` compiles without serving. `log` follows the
+# server log.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -45,6 +51,7 @@ ANEMLL_FORGE_STATE="${ANEMLL_FORGE_STATE:-$HOME/.anemll-forge}"
 LOG="${LOG:-$ANEMLL_FORGE_STATE/server.log}"
 PIDFILE="${PIDFILE:-$ANEMLL_FORGE_STATE/server.pid}"
 PI_SYNC="${PI_SYNC:-1}"
+START_WAIT_S="${START_WAIT_S:-7200}"   # how long start / restart watches a (cold-compiling) startup
 PI_DIR="${PI_DIR:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
 PI_BUILD="${PI_BUILD:-$(basename "$BUILD")}"
 
@@ -124,16 +131,26 @@ start() {
   local args
   launch_args || return 1
 
-  local total_chunks loaded_chunks last_loaded=-1 startup_elapsed
+  local total_chunks loaded_chunks last_loaded=-1 startup_elapsed shown=0 n
   total_chunks=$("$PY" -c "import json,sys; print(len(json.load(open(sys.argv[1]))['chunks']))" "$BUILD/manifest.json")
   echo "starting (log $LOG)"
   nohup "$PY" -u "${args[@]}" > "$LOG" 2>&1 &
   echo $! > "$PIDFILE"
-  for startup_elapsed in {0..599}; do
-    grep -q "serving OpenAI API" "$LOG" 2>/dev/null && { grep -E "loaded|serving" "$LOG" | tail -3; pi_sync; return 0; }
-    running || { echo "failed to start:"; tail -20 "$LOG"; return 1; }
+  # Ctrl-C only stops watching: the server keeps loading / compiling, and finished packages stay cached.
+  trap 'echo; echo "stopped watching; the server keeps starting in the background (compiled packages are cached)."; \
+        echo "follow: $0 log   status: $0 status   stop: $0 stop (a later start resumes the compile)"; \
+        trap - INT; return 0' INT
+  for (( startup_elapsed = 0; startup_elapsed < START_WAIT_S; startup_elapsed++ )); do
+    n=$(grep -c "\[ANE compile\]" "$LOG" 2>/dev/null || true)
+    if (( n > shown )); then grep "\[ANE compile\]" "$LOG" | tail -n +"$((shown + 1))"; shown=$n; fi
+    if grep -q "serving OpenAI API" "$LOG" 2>/dev/null; then
+      trap - INT
+      { grep -E "target graph:|KV cache:" "$LOG" || true; } | tail -2
+      grep -E "loaded|serving" "$LOG" | tail -3; pi_sync; return 0
+    fi
+    running || { trap - INT; echo "failed to start:"; tail -20 "$LOG"; return 1; }
     loaded_chunks=$(awk '/loaded chunk_[^ ]+\.aimodel \([0-9]+ entries,/ { n++ } END { print n+0 }' "$LOG")
-    if (( loaded_chunks != last_loaded || startup_elapsed % 10 == 0 )); then
+    if (( loaded_chunks != last_loaded || startup_elapsed % 30 == 0 )); then
       if (( total_chunks > 0 && loaded_chunks < total_chunks )); then
         printf 'loading target chunks: %d/%d (%d%%), %ds elapsed\n' \
           "$loaded_chunks" "$total_chunks" "$((loaded_chunks * 100 / total_chunks))" "$startup_elapsed"
@@ -145,7 +162,9 @@ start() {
     fi
     sleep 1
   done
-  echo; echo "NOT SERVING YET: still loading in the background (cold ANE compilation can take minutes)."
+  trap - INT
+  echo; echo "NOT SERVING YET after ${START_WAIT_S}s: still starting in the background."
+  { grep "\[ANE compile\]" "$LOG" || true; } | tail -1
   echo "Follow: $0 log"
 }
 
@@ -164,6 +183,6 @@ case "${1:-}" in
   restart) check || exit 1; stop || exit 1; sleep 1; start ;;
   status) status ;;
   check) check && echo "ok: $BUILD has a ctx $CTX build" ;;
-  log) tail -f "$LOG" ;;
+  log) tail -F "$LOG" ;;
   *) echo "usage: $0 start|stop|restart|status|check|log"; exit 2 ;;
 esac

@@ -9,7 +9,7 @@ The drafter source is [ProCreations/Ternary-Bonsai-2-27B-DFlash2 at `4cfb6ad0326
 ## Target conversion and packaging
 
 - **`coreai/*.aimodel`:** model graph conversion, partitioning and packaging with quantized weights and selected numerical implementations. The target recipe uses mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections. Per-artifact inventory and export metadata identify the applicable transforms.
-- **`coreai/manifest.json`:** prepared from the selectable V8/FP16 build. The local export path was replaced by the portable target identifier `mix25in_mixr_lr64mix`, preserving the unchanged drafter/head pairing. V8 is the declared default. Physical function maps and 8K/16K/32K/48K/64K context entries were preserved; this update has no 24K entry.
+- **`coreai/manifest.json`:** prepared from the V8-only build with the faster exact graph. The local export path was replaced by the portable target identifier `mix25in_mixr_lr64mix`, preserving the unchanged drafter/head pairing, and a modification notice was added. V8 is the only cache format. The 8K/16K/32K/48K/64K context entries were preserved; there is no 24K entry.
 - **`model/embed_tokens_fp16.npy`:** the original target embedding tensor converted to FP16 and packaged as a NumPy array for host lookup.
 - **Target configuration/tokenizer assets:** copies of the pinned upstream files, retained without content changes.
 - **Optional quantized exports:** transformed weight representations, codebooks, indices, scales, rotations and residual factors, where included. These are separate reproduction artifacts rather than required runtime assets.
@@ -30,11 +30,17 @@ The complete local drafter BF16 checkpoint was rehashed and matched the pinned u
 
 The Core AI drafter body has not been independently reconstructed from the source checkpoint and GPTQ export. Head/target and calibration linkage are currently supported by the source sidecar/export metadata. The paired target/drafter has separate M6 prefill, decode and short KL experiments summarized with limitations in the model card. Packaging integrity checks do not run inference again or establish complete hardware or quality validation.
 
-## Selectable historical value-cache update
+## Faster exact graph, V8-only update
 
-The target packages now contain both FP16-cache and V8-cache entry families for 8K, 16K, 32K, 48K and 64K contexts, using the same quantized weights and unchanged output head. V8 preserves FP16 keys and stores historical values as INT8 with FP16 scales per token/head. The host quantizes accepted rows and ANE attention reconstructs historical values; newly returned activations remain FP16. V8 uses stable attention arithmetic, which differs from the stock short-context FP16 arithmetic. The manifest selects V8 by default; explicit FP16 fallback remains.
+The 16 target source packages are new graph derivatives of the same quantized export, with the same weights and the unchanged output head. Two exact rewrites change how the ANE evaluates the model, not its weights or mathematical function. In the Gated DeltaNet layers, the within-block triangular solve of the chunkwise delta rule uses the closed-form inverse `(I + N)^-1 = (I - N)(I + N^2)(I + N^4)` of its strictly lower-triangular block instead of row-by-row forward substitution, the short convolution uses a native depthwise convolution, and prefill merges two state products. History attention is evaluated in 2,048-wide tiles for verification and 4,096-wide tiles for prefill (previously 16,384). Each chunk's manifest `numerics` record `GDN_FAST`, `ATT_BLOCK` and `ATT_BLOCK_PREFILL`.
 
-The 16 target source packages are new graph derivatives. Their binary program bytes were copied unchanged from the completed selectable export; only the external runtime manifest was sanitized. Tokenizer, embedding and tested Core AI DFlash2 assets remain unchanged from the previous paired release. Updated source code is required for physical entry selection, cache growth and speculative commit handling. A manifest flag alone does not retrofit older FP16-only packages.
+The packages contain only the V8 cache entry family; the FP16-cache entries were not built. Outputs differ from the previous packages by floating-point rounding order: on M6, direct KL between the previous and new V8 targets measured a mean of 5.0e-5 nats after a 64,000-token prefill. The binary program bytes were copied unchanged from the completed build; only the external runtime manifest was sanitized. Tokenizer, embedding, output head and the tested Core AI DFlash2 assets are byte-identical to the previous paired release.
+
+## Selectable historical value-cache update (previous revision)
+
+The previous revision (`cd7dfc605ccad091b961f7788939c30d01c3793e`) contained both FP16-cache and V8-cache entry families for 8K, 16K, 32K, 48K and 64K contexts, using the same quantized weights and unchanged output head. V8 preserves FP16 keys and stores historical values as INT8 with FP16 scales per token/head. The host quantizes accepted rows and ANE attention reconstructs historical values; newly returned activations remain FP16. V8 uses stable attention arithmetic, which differs from the stock short-context FP16 arithmetic. Its manifest selected V8 by default with an explicit FP16 fallback; that revision remains available for the FP16 cache.
+
+Its 16 target source packages were new graph derivatives. Their binary program bytes were copied unchanged from the completed selectable export; only the external runtime manifest was sanitized. Tokenizer, embedding and tested Core AI DFlash2 assets remain unchanged from the previous paired release. Updated source code is required for physical entry selection, cache growth and speculative commit handling. A manifest flag alone does not retrofit older FP16-only packages.
 
 ## Retaining notices
 

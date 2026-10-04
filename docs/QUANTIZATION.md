@@ -212,7 +212,7 @@ SILU=tanh MLP_SILU=tanh GDN_SQ=16 GDN_SV=64 MLP_DS=1 TPS=64 \
   --pctx 8192,16384,24576,32768,49152,65536
 ```
 
-Run in an environment without experimental `MLP_DS_TABLE` overrides. The default chunk plan is 16 groups of four consecutive layers. Keep source `.aimodel` packages for redistribution so a compatible target OS can compile them. Optional precompiled packages must have recorded SDK/OS/architecture provenance. Follow [HUGGING_FACE.md](HUGGING_FACE.md) for staging, hashing, download and smoke testing.
+Run in an environment without experimental `MLP_DS_TABLE` overrides. The default chunk plan is 16 groups of four consecutive layers. Since 3 October 2026 the converter also defaults to a V8-only cache and the faster exact graph (`GDN_FAST=1`, `ATT_BLOCK=2048`, `ATT_BLOCK_PREFILL=4096`); a plain conversion matches the current published packages (revision `1192a9c`). To reproduce the previous selectable packages (revision `cd7dfc6`), add `GDN_FAST=0 ATT_BLOCK=16384` and `--kv-cache-dtype both`. Quantized weights are the same either way. Keep source `.aimodel` packages for redistribution so a compatible target OS can compile them. Optional precompiled packages must have recorded SDK/OS/architecture provenance. Follow [HUGGING_FACE.md](HUGGING_FACE.md) for staging, hashing, download and smoke testing.
 
 ### Interpret KL carefully
 

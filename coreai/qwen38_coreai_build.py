@@ -11,7 +11,10 @@ before optimize(). Weights come straight from the checkpoint + export (qwen38_an
     .venv/bin/python qwen38_coreai_build.py head
     .venv/bin/python qwen38_coreai_build.py all  [--plan 0-3,4-7,...] [--ctx ...] [--pctx ...]
 Env: EXPORT_DIR (default ~/Models/vq27b/export/full_mix25_mixer4_head4), OUT (default ~/Models/vq27b/coreai);
-SILU, MLP_SILU (tanh | native), GDN_SQ, GDN_SV, MLP_DS_TABLE: ANE fp16 numerics fixes (see silu()); DBG_O=1 debug outputs."""
+SILU, MLP_SILU (tanh | native), GDN_SQ, GDN_SV, MLP_DS_TABLE: ANE fp16 numerics fixes (see silu()); GDN_FAST (default 1):
+faster exact DeltaNet core; ATT_BLOCK / ATT_BLOCK_PREFILL (default 2048 / 4096): attention history tile width of the
+verify / prefill entries; KV_CACHE_DTYPE / --kv-cache-dtype (default v8). The release graph: GDN_FAST=0
+ATT_BLOCK=16384. DBG_O=1 debug outputs."""
 from __future__ import annotations
 
 import argparse
@@ -40,8 +43,12 @@ OUT = Path(os.path.expanduser(os.environ.get("OUT", "~/Models/vq27b/coreai"))) /
 CFG = M.cfg()
 P, C_SUB = 8, 8                                    # pending rows (lazy commit), prefill sub-chunk
 TPS = [int(x) for x in os.environ.get("TPS", "64").split(",")]  # prefill entry sizes (rows)
-ATT_BLOCK = int(os.environ.get("ATT_BLOCK", "16384"))  # history slice for entries above it (32K / 64K fail ANEC)
-KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "fp16")
+# ATT_BLOCK: history slice width of the 8-row verify entries (32K / 64K single-softmax graphs fail ANEC; 2048 is the
+# fastest on the M6). ATT_BLOCK_PREFILL: the same for the 64-row prefill entries; they gain nothing below 4096 and
+# narrow slices cost ANE compile time, so it defaults to max(ATT_BLOCK, 4096). Release graph: ATT_BLOCK=16384.
+ATT_BLOCK = int(os.environ.get("ATT_BLOCK", "2048"))
+ATT_BLOCK_PREFILL = int(os.environ.get("ATT_BLOCK_PREFILL", str(max(ATT_BLOCK, 4096))))
+KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "v8")  # v8 | fp16 | both (selectable, about 1.5x the compile)
 STABLE_ATTN = os.environ.get("ATT_STABLE", "0") == "1"
 TAPS = M.TAPS
 nk, nv = CFG["linear_num_key_heads"], CFG["linear_num_value_heads"]
@@ -170,6 +177,10 @@ def softplus(x):  # the ANE's fp16 softplus returns 0 above ~11 (exp overflow)
 SILU, MLP_SILU = os.environ.get("SILU", "tanh"), os.environ.get("MLP_SILU", "tanh")
 GDN_SQ, GDN_SV = float(os.environ.get("GDN_SQ", "16")), float(os.environ.get("GDN_SV", "64"))
 MLP_DS = float(os.environ.get("MLP_DS", "1"))
+# GDN_FAST (default 1): exact rewrites of the DeltaNet core that the M6 ANE runs faster (scripts/m6_gdn_bench.py): the
+#   triangular solve as one matmul with a Neumann-product inverse (tri_solve), the causal conv1d as one native
+#   depthwise conv, and one state matmul per prefill sub-chunk instead of two. GDN_FAST=0: the release graph.
+GDN_FAST = os.environ.get("GDN_FAST", "1") == "1"
 MLP_DS_TABLE = json.loads(Path(os.path.expanduser(os.environ["MLP_DS_TABLE"])).read_text())["ds"] \
     if os.environ.get("MLP_DS_TABLE") else None
 DBG_O = os.environ.get("DBG_O") == "1"   # debug: every layer also outputs the tensor entering out_proj / o_proj (o<j>_dbg)
@@ -190,14 +201,41 @@ def tri(n: int, strict: bool):
 
 def fwd_sub(n, rhs, rows: int):
     """Solve (I + N) X = rhs for strictly lower-triangular N over the last-but-one axis (rows), row by row (the
-    doubling-inverse chain of computed matmuls keeps MPSGraph off the ANE)."""
+    doubling-inverse chain of computed matmuls keeps MPSGraph off the ANE). This is the UT transform of the chunkwise
+    delta rule (WY representation, T = (I - A)^-1 with A = -N, by forward substitution) as explained in Songlin Yang,
+    "DeltaNet Explained (Part II)", https://sustcsonglin.github.io/blog/2024/deltanet-2/"""
     xs = [rhs[..., 0:1, :]]
     for t in range(1, rows):
         xs.append(rhs[..., t:t + 1, :] - (n[..., t, 0:t].unsqueeze(-1) * torch.cat(xs, -2)).sum(-2, keepdim=True))
     return torch.cat(xs, -2)
 
 
+def inv_unit_lower(n, rows: int):
+    """(I + N)^-1 for strictly lower-triangular (nilpotent) N: (I - N)(I + N^2)(I + N^4)... exactly. With A = -N this is
+    the path sum I + A + ... + A^(rows-1) of the UT transform's graph view (entry [i, j] sums the weights of all paths
+    from j to i; no path in a block is longer than rows - 1; Yang, "DeltaNet Explained (Part II)", see fwd_sub),
+    grouped by binary path length so it takes log2(rows) steps instead of rows - 1 dependent row updates. The small
+    products are broadcast multiply + reduce: ANEC fails on matmul chains between computed tensors (an internal-error
+    compile that sends the program to the GPU), but takes these."""
+    eye = torch.eye(rows, dtype=n.dtype).expand(n.shape)
+    t, p, k = eye - n, n, 2
+    while k < rows:
+        p = (p.unsqueeze(-1) * p.unsqueeze(-3)).sum(-2)
+        t = (t.unsqueeze(-1) * (eye + p).unsqueeze(-3)).sum(-2)
+        k *= 2
+    return t
+
+
+def tri_solve(n, rhs, rows: int):
+    """(I + N) X = rhs: GDN_FAST, one matmul with the Neumann-product inverse; else the row-by-row substitution."""
+    if GDN_FAST:
+        return inv_unit_lower(n, rows) @ rhs
+    return fwd_sub(n, rhs, rows)
+
+
 # ---- layers ------------------------------------------------------------------------------------------------------
+# Gated DeltaNet in the chunkwise form (8-row blocks: WY representation, UT transform, one state update per block);
+# background: Songlin Yang, "DeltaNet Explained (Part II)", https://sustcsonglin.github.io/blog/2024/deltanet-2/
 class GDNW(nn.Module):
     def __init__(self, W: dict, i: int) -> None:
         super().__init__()
@@ -216,8 +254,13 @@ class GDNW(nn.Module):
         return qkv, z, self.b(h).reshape(nv, T, 1), self.a(h).reshape(nv, T, 1)
 
     def qkv_heads(self, rows, T: int):
-        conv = rows[0:T] * self.cw[0:1] + rows[1:T + 1] * self.cw[1:2] + rows[2:T + 2] * self.cw[2:3] + rows[3:T + 3] * self.cw[3:4]
-        conv = silu(conv).transpose(0, 1)
+        if GDN_FAST:  # the causal conv1d as one depthwise conv over the channel-major (1, cdim, 1, T + 3) rows
+            conv = F.conv2d(rows.transpose(0, 1).reshape(1, cdim, 1, T + 3),
+                            self.cw.transpose(0, 1).reshape(cdim, 1, 1, 4), groups=cdim)
+            conv = silu(conv).reshape(cdim, T)
+        else:
+            conv = rows[0:T] * self.cw[0:1] + rows[1:T + 1] * self.cw[1:2] + rows[2:T + 2] * self.cw[2:3] + rows[3:T + 3] * self.cw[3:4]
+            conv = silu(conv).transpose(0, 1)
         qq, kk, vv = conv[:kd], conv[kd:2 * kd], conv[2 * kd:]
 
         def heads(t):
@@ -257,7 +300,7 @@ class GDNW(nn.Module):
         pair = torch.exp(torch.clamp(cum - cum.reshape(nv, 1, T), max=0)) * l_inc
         kb, vb = kh * beta, vh * beta
         n = (kb @ kh.transpose(1, 2)) * (pair * l_str)
-        x = fwd_sub(n, torch.cat([vb, kb * torch.exp(cum)], -1), T)
+        x = tri_solve(n, torch.cat([vb, kb * torch.exp(cum)], -1), T)
         u, wk = x[..., :dv], x[..., dv:]
         crow = torch.cat([cum.reshape(nv, 1, T), torch.zeros(nv, 1, dv - T, dtype=cum.dtype)], 2)
         pend_out = torch.cat([kh, u, wk, crow], 1)
@@ -282,15 +325,21 @@ class GDNW(nn.Module):
         pair = torch.exp(torch.clamp(cum - cum.reshape(nv, NB, 1, C), max=0)) * l_inc
         kb, vb = k4 * b4, v4 * b4
         n = (kb @ k4.transpose(-1, -2)) * (pair * l_str)
-        x = fwd_sub(n, torch.cat([vb, kb * torch.exp(cum)], -1), C)                         # all sub-chunks at once
+        x = tri_solve(n, torch.cat([vb, kb * torch.exp(cum)], -1), C)                         # all sub-chunks at once
         u, wk = x[..., :dv], x[..., dv:]
         total = cum[:, :, C - 1:C, :]                                                       # (nv, NB, 1, 1)
         qd, kdc = q4 * torch.exp(cum), k4 * torch.exp(total - cum)
         intra = (q4 @ k4.transpose(-1, -2)) * pair
         outs = []
+        wq = torch.cat([wk, qd], 2) if GDN_FAST else None                                  # (nv, NB, 2C, dk)
         for bi in range(NB):
-            vn = u[:, bi] - wk[:, bi] @ s
-            outs.append(qd[:, bi] @ s + intra[:, bi] @ vn)
+            if GDN_FAST:  # wk @ S and qd @ S in one matmul
+                ws = wq[:, bi] @ s
+                vn = u[:, bi] - ws[:, :C]
+                outs.append(ws[:, C:] + intra[:, bi] @ vn)
+            else:
+                vn = u[:, bi] - wk[:, bi] @ s
+                outs.append(qd[:, bi] @ s + intra[:, bi] @ vn)
             s = s * torch.exp(total[:, bi]) + kdc[:, bi].transpose(1, 2) @ vn
         conv_out = torch.cat([conv_sel_out @ rows, torch.zeros(P, cdim, dtype=rows.dtype)], 0)  # (P + 3, cdim)
         return self.finish(torch.cat(outs, 1), z, T), conv_out, s, pend * 0
@@ -330,14 +379,15 @@ class AttnW(nn.Module):
         if cache_v8:
             v_st = torch.ops.coreai.dequantize(v_st, self.v8_unit, zero_point=self.v8_zero,
                                               output_dtype=torch.float16)
-        if ctx <= ATT_BLOCK and not cache_v8 and not STABLE_ATTN:
+        blk = ATT_BLOCK_PREFILL if T > P else ATT_BLOCK
+        if ctx <= blk and not cache_v8 and not STABLE_ATTN:
             sc_h = ((qg4 @ k_st.transpose(1, 2)) * hd ** -0.5) + mask.reshape(1, 1, ctx)
             pr = torch.softmax(torch.cat([sc_h, sc_b], -1), -1)
             o = pr[:, :, :ctx] @ v_st + pr[:, :, ctx:] @ vt
         else:
             # history in ATT_BLOCK slices (ANEC fails on the 32K / 64K single-softmax graph): one global max over all
             # blocks, then exp(s - m) per block - exactly softmax over [history | block], no tensor wider than a block
-            edges = list(range(0, ctx, ATT_BLOCK)) + [ctx]
+            edges = list(range(0, ctx, blk)) + [ctx]
             spans = list(zip(edges[:-1], edges[1:]))
             scs = [((qg4 @ k_st[:, a:b].transpose(1, 2)) * hd ** -0.5) + mask[:, a:b].reshape(1, 1, b - a) for a, b in spans]
             m = sc_b.amax(-1, keepdim=True)
@@ -611,7 +661,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
     info = {"file": out.name, "layers": [layers[0], layers[-1]], "entries": [x[0] for x in entries],
             "gdn_j": e0.gdn_j, "att_j": e0.att_j, "taps": e0.taps, "mb": round(mb),
             "numerics": {"SILU": SILU, "MLP_SILU": MLP_SILU, "GDN_SQ": GDN_SQ, "GDN_SV": GDN_SV,   # fp16 fixes built in
-                         "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS}}
+                         "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS, "GDN_FAST": GDN_FAST,
+                         "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
     print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)

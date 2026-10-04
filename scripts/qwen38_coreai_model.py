@@ -35,6 +35,7 @@ import types
 from pathlib import Path
 
 import numpy as np
+import coreai_compile_guide as G
 from qwen38_kv_cache import append_rows, cache_format, cache_formats, cache_entries
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
@@ -187,14 +188,37 @@ def _purge(path: Path) -> int:
     return n
 
 
+def target_graph(man: dict) -> dict:
+    """Graph options the target was converted with (qwen38_coreai_build.py: GDN_FAST, ATT_BLOCK), from the manifest's
+    chunk numerics. Manifests written before these were recorded describe the release graph (GDN_FAST off, 16384)."""
+    nums = [c.get("numerics") or {} for c in man.get("chunks", [])]
+    recorded = bool(nums) and all("GDN_FAST" in n and "ATT_BLOCK" in n for n in nums)
+    gdn = sorted({bool(n.get("GDN_FAST", False)) for n in nums}) or [False]
+    att = sorted({int(n.get("ATT_BLOCK", 16384)) for n in nums}) or [16384]
+    attp = sorted({int(n.get("ATT_BLOCK_PREFILL", n.get("ATT_BLOCK", 16384))) for n in nums}) or [16384]
+    one = lambda v: v[0] if len(v) == 1 else v  # noqa: E731
+    return {"gdn_fast": one(gdn), "att_block": one(att), "att_block_prefill": one(attp), "recorded": recorded}
+
+
+def graph_line(man: dict, root: Path) -> str:
+    g = target_graph(man)
+    fast = g["gdn_fast"] if isinstance(g["gdn_fast"], list) else int(g["gdn_fast"])
+    note = "" if g["recorded"] else " (not recorded in manifest: release defaults)"
+    pre = "" if g["att_block_prefill"] == g["att_block"] else f" ATT_BLOCK_PREFILL={g['att_block_prefill']}"
+    return f"target graph: GDN_FAST={fast} ATT_BLOCK={g['att_block']}{pre}{note} | build {root}"
+
+
 class CoreAIQwen:
     """Qwen3.8-27B on the ANE through Core AI; the AneQwen3 interface (T = 8 rows per call, TP = 64-row prefill)."""
 
-    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto"):
+    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto",
+                 extra_packages=()):
         self.root, self.log = root, log
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
+        self.graph = target_graph(man)
+        self.log(graph_line(man, root))
         if self.kv_cache_dtype == "v8" or len(self.kv_cache_formats) > 1:
             raise ValueError("V8/selectable KV cache requires the Swift bridge; set COREAI_BRIDGE=1")
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
@@ -497,7 +521,10 @@ class CoreAIQwenBridge(CoreAIQwen):
     views the current set), per-chunk per-entry outputs (y, k/v_new, taps; chunk k's y is chunk k+1's x), head logits.
     Bindings are built once per (entry, parity) and rebuilt after a KV resize."""
 
-    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto"):
+    def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto",
+                 extra_packages=()):
+        """extra_packages: (label, path, estimated cold seconds) of other packages the caller loads next (the
+        drafter), so the first-load compile guide covers them; load them through self.compile_guide.load."""
         sys.path.insert(0, str(BRIDGE_DIR))
         import coreai_bridge as B
         self.B = B
@@ -505,6 +532,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
+        self.graph = target_graph(man)
+        self.log(graph_line(man, root))
         self.log(f"KV cache: FP16 K / {'INT8 V + FP16 token/head scales' if self.kv_cache_dtype == 'v8' else 'FP16 V'}")
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
         self.TP = man.get("TP", 0)
@@ -520,15 +549,20 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.gshapes = {"conv": (self.P + 3, self.cdim), "rec": (nv, dk, dv), "pend": (nv, 3 * self.P + 1, dv)}
         self.chunks = []
         t_all = time.time()
+        self.compile_guide = G.target_guide(man, root, log=self.log, extra=extra_packages,
+                                            mode=int(os.environ.get(MODE_ENV, "0")))
+        self.compile_guide.announce()
         for ch in man["chunks"]:
             t0 = time.time()
             aliases = cache_entries(man, ch, self.kv_cache_dtype)
-            model, physical = self._load(ch["file"], list(aliases.values()), ch.get("compiled"))
+            model, physical = self.compile_guide.load(
+                ch["file"], lambda ch=ch, aliases=aliases: self._load(ch["file"], list(aliases.values()), ch.get("compiled")))
             fns = {canonical: physical[name] for canonical, name in aliases.items()}
             self.chunks.append({"model": model, "fns": fns, "layers": ch["layers"], "gdn_j": ch["gdn_j"],
                                 "att_j": ch["att_j"], "taps": ch["taps"], "last": ch["layers"][1]})
             self.log(f"loaded {ch['file']} ({len(fns)} entries, {time.time() - t0:.0f}s, bridge)")
-        self.head_model, hf = self._load(man["head"]["file"], ["h8"], man["head"].get("compiled"))
+        self.head_model, hf = self.compile_guide.load(
+            man["head"]["file"], lambda: self._load(man["head"]["file"], ["h8"], man["head"].get("compiled")))
         self.head = hf["h8"]
         ck = M.Checkpoint()
         import torch

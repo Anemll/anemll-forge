@@ -25,6 +25,11 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="report environment without loading a model")
+    c = sub.add_parser("compile", help="compile a Core AI build for this Mac's ANE ahead of serving, with progress and ETA")
+    c.add_argument("--build", type=path, required=True, help="Core AI target build directory")
+    c.add_argument("--draft", type=path, help="DFlash2 drafter package; default: bundle/drafter/dflash2_lut4_gptq.aimodel "
+                   "next to the build, when present")
+    c.add_argument("--dry-run", action="store_true", help="print command only")
     hf_release.add_commands(sub)
     for name in ("quantize", "convert", "chat", "serve"):
         q = sub.add_parser(name)
@@ -150,6 +155,25 @@ def main(argv=None):
             return hf_release.run(a)
         except (ValueError, OSError, RuntimeError) as e:
             p.error(str(e))
+    if a.command == "compile":
+        if not (a.build / "manifest.json").is_file():
+            p.error(f"Missing build manifest: {a.build / 'manifest.json'}")
+        draft = a.draft
+        if draft is None:
+            try:
+                draft, _ = hf_release.drafter_paths(a.build)
+            except ValueError:
+                draft = None
+        command = [sys.executable, str(ROOT / "scripts" / "coreai_compile.py"), "--build", str(a.build)]
+        command += ["--draft", str(draft)] if draft else []
+        if a.dry_run:
+            print(json.dumps(dict(argv=command), indent=2))
+            return 0
+        if sys.platform != "darwin":
+            p.error("Core AI compilation requires macOS")
+        env = os.environ.copy()
+        env.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+        return subprocess.call(command, env=env, cwd=ROOT)
     if a.command == "doctor":
         versions = {}
         for name in ("numpy", "torch", "coremltools", "transformers", "safetensors",
