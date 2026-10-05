@@ -469,6 +469,50 @@ FP8 forms need an option enabled per chip (the M5 ANE has no FP8). The core is a
 
 One value scale per tile (or per layer) instead of per token would remove the fold pass and its error, and the key-scale pass with it; FP8 weights (`sm8`) are the M6 alternative. Accuracy losses here may also be recoverable by retraining the rank-64 low-rank corrections with the 8-bit attention simulated.
 
+These errors are pooled over layers (root of summed squared errors over summed squared references), which weights layer 63 most; the layer means below are the fairer measure (INT8 scores at 1/4: 2.3% as a layer mean).
+
+### 8-bit attention on V8 (FP16 keys)
+
+On V8 the keys are FP16, so there is no key-scale pass and QK writes the true scores: the INT8 pair sits directly on the QK output and again after the mask (`s8` and `s8b` on the same scores, step 1/4). The forms tested, each a full graph with every 8-bit operand as a quantize / dequantize pair:
+
+- A: INT8 scores, UINT8 PV weights (`s8,s8b,pvtu`); M5 and M6.
+- B: A plus the FP8 softmax sum (`s8,s8b,sm8,pvtu`); M6.
+- C: INT8 scores, FP8 softmax sum, FP8 PV weights (`s8,s8b,sm8,pvf8`); M6.
+
+**Accuracy on real text** (host simulation, 26,160 tokens of KL-trace chats and wikitext, error of the attention output against FP32, mean over the 16 attention layers; the V8 value codes alone cost 1.06%):
+
+| Form | Error | Weight codes that round to zero (share of softmax mass) |
+| --- | ---: | --- |
+| INT8 scores alone | 2.33% | |
+| A | 5.41% (7.2% on wikitext) | 84% of entries (6.95% of the mass) |
+| B | 5.47% | the same |
+| C | 2.81% | 22% (0.02%) |
+| FP8 PV weights, exact sum | 2.77% | 22% (0.02%) |
+| Per-tile value scales, UINT8 weights (cache-format change) | 3.74% | 73% (2.31%) |
+
+Folding the per-token value scales into the weights makes most UINT8 codes zero and drops about 7% of the softmax mass; FP8 weights keep it. Per-tile value scales double the value error by themselves (2.38% against 1.06%) and only help an INT8-only path.
+
+**KL-512** (8K entry, 64 sequences, 40,023 positions; full builds with only these forms changed, `QCONV_INT8=0`):
+
+| Build | Mean KL to BF16 | Top-1 agreement | Perplexity | Direct KL vs V8 | Same top token as V8 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| V8 (faster graph) | 0.184168 | 86.03% | 2.4131 | | |
+| A | 0.186473 | 85.89% | 2.4328 | 0.0113 | 96.4% |
+| B | 0.187369 | 85.92% | 2.4349 | 0.0113 | 96.3% |
+| **C** | **0.184021** | **86.02%** | **2.4135** | **0.00037** | **99.3%** |
+
+C matches V8 (for scale, `kv8` against V8 measured 0.00007). A and B move the model measurably; the INT8-only path needs better PV weights before it is usable.
+
+**Chunk 0** (3 DeltaNet layers and one attention layer) against the V8 chunk, idle machine, two interleaved runs:
+
+| Form | Prefill 8K | Prefill 32K | Prefill 64K | Verify 8K | Verify 32K | Verify 64K |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | -2.6 to -3.3% | -6.8 to -7.8% | -9.6 to -9.8% | -1.0% | -3.2% | -6.2 to -6.6% |
+| B | -3.2% | -9.9 to -11.3% | -14.7 to -15.4% | -1.5 to -1.8% | -3.9 to -4.6% | -5.9 to -6.3% |
+| **C** | **-2.5 to -2.8%** | **-8.1 to -8.8%** | **-13.9 to -14.1%** | **-1.5%** | **-3.8%** | **-6.2%** |
+
+C is the M6 candidate: about 14% off a chunk's 64K prefill and 6% off its 64K verify at V8 quality. A full build of C with the server benchmark and a 64K long-context check follows.
+
 ### Review of coreai-torch `_compression` for attention
 
 | Item | Use for attention |

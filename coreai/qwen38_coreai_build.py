@@ -75,7 +75,8 @@ ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
 # the scores; pvtm is pvt with minval mode (offset by qmin instead of a zero point); pvf8 / pvf5 quantize the pvt
 # weights to FP8 e4m3 (scale 1/256) / e5m2 (scale 1/32768); s8 puts an INT8 pair (step ATT_S8_UNIT) on the raw QK
 # output (before the key scales), s8b an INT8 pair (step ATT_S8B_UNIT) on the scores after the key scales and the mask
-# (the tensor the max and exp passes read), t8 an INT8 pair (step 1/8) on s - m_t before the exp of the pvt forms;
+# (the tensor the max and exp passes read; on v8, without key scales, s8 and s8b sit on the same true scores),
+# t8 an INT8 pair (step 1/8) on s - m_t before the exp of the pvt forms;
 # sm8 (FP8, M6 only) quantizes the exp output of the pvt forms to FP8 e4m3 (scale 1/256) and takes the softmax sum
 # from it, an 8-bit sum without the UINT8 underflow bias; the PV weights are then those FP8 weights times the value
 # scales. Forms combine as a comma-separated list (e.g. s8b,t8,sm8,pvtu)
@@ -452,10 +453,12 @@ class AttnW(nn.Module):
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
         sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
-        mm8 = set(filter(None, ATT_INT8MM.split(","))) if cache_k8 and cache_v8 else set()
+        mm8 = set(filter(None, ATT_INT8MM.split(","))) if cache_v8 else set()  # INT8 values: v8 and kv8
 
         def has(*forms):
             return any(f in mm8 for f in forms)
+        if not cache_k8 and has("qk", "both", "qkt", "botht", "qkto", "botho", "bothn"):
+            raise ValueError(f"ATT_INT8MM {sorted(mm8)}: these forms read INT8 key codes (kv8 only)")
         tile_v = cache_v8 and ATT_TILE_DEQUANT and not mm8  # per-tile dequantize (see ATT_TILE_DEQUANT)
         tile_k = cache_k8 and ATT_TILE_DEQUANT and not mm8
         if cache_v8 and not tile_v and not has("pv", "both", "botht", "pvdq", "pvo", "botho", "pvn", "bothn", "pvt", "pvta", "pvtu", "pvtm",
@@ -891,7 +894,11 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS, "GDN_FAST": GDN_FAST,
                          "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL,
                          **({"ATT_SOFTMAX": ATT_SOFTMAX} if ATT_SOFTMAX != "two_pass" else {}),
-                         **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {})}}
+                         **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {}),
+                         **({"ATT_INT8MM": ATT_INT8MM, "ATT_S8_UNIT": ATT_S8_UNIT, "ATT_S8B_UNIT": ATT_S8B_UNIT}
+                            if ATT_INT8MM else {}),
+                         **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
+                         **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {})}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
     print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)
