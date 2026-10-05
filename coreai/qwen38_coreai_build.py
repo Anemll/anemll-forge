@@ -60,6 +60,10 @@ ATT_SOFTMAX_PREFILL = os.environ.get("ATT_SOFTMAX_PREFILL", ATT_SOFTMAX)  # the 
 # INT8 caches: dequantize each history tile next to its matmul instead of the whole history once per call (no FP16
 # copy of the cache inside the program; the same values, dequantization is elementwise)
 ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
+# key cache layout: KV_KEYS_T=1 stores keys as (KV head, head dim, token), the (256, token) operand QK reads, so no key
+# tile is transposed inside the program (otherwise a pass per tile before every QK); the new key rows are still
+# returned as (KV head, T, head dim) and the runtime writes them transposed
+KV_KEYS_T = os.environ.get("KV_KEYS_T", "0") == "1"
 # timing research only (wrong numerics): INT8 x INT8 history matmuls on kv8 caches. qk quantizes the queries, pv the
 # exp weights, each with a fixed scale, as quantize -> dequantize next to the matmul so the ANE compiler can fuse them
 # variants: qk | qkt (keys untransposed) | pv | both | botht | pvdq (control: V dequantized per tile, FP16 weights); the
@@ -480,15 +484,21 @@ class AttnW(nn.Module):
         if cache_k8 and not tile_k and not has("qk", "both", "qkt", "botht", "qkto", "botho", "bothn"):
             k_st = dequant8(k_st, self.v8_unit, self.v8_zero)
 
-        def ktile(a, b):
-            return dequant8(k_st[:, a:b], self.v8_unit, self.v8_zero) if tile_k else k_st[:, a:b]
+        if KV_KEYS_T and has("qk", "both", "qkt", "botht", "qkto", "botho", "bothn"):
+            raise ValueError("KV_KEYS_T: the INT8 key-code forms read the (token, head dim) layout")
+
+        def kT(a, b):
+            """History keys a:b as the QK operand (KV head, head dim, b - a)."""
+            if KV_KEYS_T:
+                return dequant8(k_st[:, :, a:b], self.v8_unit, self.v8_zero) if tile_k else k_st[:, :, a:b]
+            return (dequant8(k_st[:, a:b], self.v8_unit, self.v8_zero) if tile_k else k_st[:, a:b]).transpose(1, 2)
 
         def vtile(a, b):
             return dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero) if tile_v else v_st[:, a:b]
         blk = ATT_BLOCK_PREFILL if T > P else ATT_BLOCK
         form = ATT_SOFTMAX_PREFILL if T > P else ATT_SOFTMAX
         if ctx <= blk and not cache_v8 and not cache_k8 and not STABLE_ATTN:
-            sc_h = ((qg4 @ k_st.transpose(1, 2)) * hd ** -0.5) + mask.reshape(1, 1, ctx)
+            sc_h = ((qg4 @ (k_st if KV_KEYS_T else k_st.transpose(1, 2))) * hd ** -0.5) + mask.reshape(1, 1, ctx)
             pr = torch.softmax(torch.cat([sc_h, sc_b], -1), -1)
             o = pr[:, :, :ctx] @ v_st + pr[:, :, ctx:] @ vt
         else:
@@ -510,14 +520,14 @@ class AttnW(nn.Module):
 
             def hist(a, b):
                 if has("qkn"):
-                    s_ = (qn8 @ ktile(a, b).transpose(1, 2)) * qscale
+                    s_ = (qn8 @ kT(a, b)) * qscale
                 elif has("qkf"):
-                    s_ = (qf8 @ ktile(a, b).transpose(1, 2)) * hd ** -0.5
+                    s_ = (qf8 @ kT(a, b)) * hd ** -0.5
                 elif has("qk", "both", "bothn"):  # INT8 queries x INT8 key codes (timing research)
                     qd = dequant8(quant8(qg4, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
                     s_ = (qd @ dequant8(k_st[:, a:b], self.mm8_cache_unit, self.v8_zero).transpose(1, 2)) * hd ** -0.5
                 elif has("nomm"):  # timing only: scores of the same shape without the QK multiply-adds
-                    s_ = qg4.sum(-1, keepdim=True) * ktile(a, b).sum(-1).reshape(nkv, 1, b - a) * hd ** -0.5
+                    s_ = qg4.sum(-1, keepdim=True) * kT(a, b).sum(1).reshape(nkv, 1, b - a) * hd ** -0.5
                 elif has("qkt", "botht", "qkto", "botho"):  # keys as the untransposed operand: (K Q^T)^T
                     qd = dequant8(quant8(qg4, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
                     raw = dequant8(k_st[:, a:b], self.mm8_cache_unit, self.v8_zero) @ qd.transpose(1, 2)
@@ -525,7 +535,7 @@ class AttnW(nn.Module):
                         raw = dequant8(quant8(raw, self.mm8_out_unit, self.v8_zero), self.mm8_out_unit, self.v8_zero)
                     s_ = raw.transpose(1, 2) * hd ** -0.5
                 else:
-                    s_ = (qg4 @ ktile(a, b).transpose(1, 2)) * hd ** -0.5
+                    s_ = (qg4 @ kT(a, b)) * hd ** -0.5
                 if has("s8r") and not cache_k8:  # v8: QK gives the true scores
                     s_ = s_ - shift
                 if S8_STATS is not None:
@@ -761,8 +771,9 @@ class Entry(nn.Module):
         int8 = {"k": self.cache_k8, "v": self.cache_v8}
         for _ in self.att_j:
             for s in KV_INPUTS[self.kv_mode]:
+                shape = (nkv, hd, self.ctx) if s == "k" and KV_KEYS_T else (nkv, self.ctx, hd)
                 ex.append(torch.ones(nkv, self.ctx, dtype=f) / 128 if s in ("ks", "vs") else
-                          torch.zeros(nkv, self.ctx, hd, dtype=torch.int8 if int8[s] else f))
+                          torch.zeros(*shape, dtype=torch.int8 if int8[s] else f))
         return tuple(ex)
 
 
@@ -923,7 +934,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          **({"ATT_INT8MM_BY_LAYER": {str(k): v for k, v in ATT_INT8MM_BY_LAYER.items() if k in layers}}
                             if any(k in layers for k in ATT_INT8MM_BY_LAYER) else {}),
                          **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
-                         **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {})}}
+                         **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {}),
+                         **({"KV_KEYS_T": True} if KV_KEYS_T else {})}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
     print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)

@@ -164,6 +164,37 @@ class Int8CacheAttention(unittest.TestCase):
                             outs.append(mix(h, cos, sin, c["mask"], k, v, ctx, T, vs, v8, ks, k8)[0])
                     torch.testing.assert_close(outs[1], outs[0], rtol=1e-10, atol=1e-10)
 
+    def test_transposed_keys_are_identical(self):
+        """KV_KEYS_T (keys stored as (KV head, head dim, token), the operand QK reads) gives exactly the output, new keys
+        and new values of the (token, head dim) layout: fp16, v8 and kv8, every softmax form, verify and prefill
+        widths, and the C2 8-bit forms on v8 (host quantize: rounding, the same in both layouts)."""
+        quant = lambda x, unit, zero, dtype=None, axis=0, minval=None: torch.round(x / unit)
+        dequant = lambda codes, unit, zero=None, axis=0, minval=None, input_dtype=None: codes.to(f64) * unit
+        for T, ctx, filled in ((8, 2048, 1500), (64, 3072, 2100)):
+            mix, c = attention(T, T + ctx + 13), self.history(ctx, filled, T + ctx + 13)
+            for name, unit in (("s8_unit", 0.25), ("s8b_unit", 0.25), ("pf8_unit", 1 / 64), ("p8_unit", 1 / 127)):
+                mix.register_buffer(name, torch.tensor(unit, dtype=f64))
+            cos, sin = torch.ones(T, Bld.rot, dtype=f64), torch.zeros(T, Bld.rot, dtype=f64)
+            h = torch.zeros(1, 8, 1, T, dtype=f64)
+            cases = {"fp16": (c["kf"], c["vf"], None, False, None, False),
+                     "v8": (c["kf"], c["vc"], c["vs"], True, None, False),
+                     "kv8": (c["kc"], c["vc"], c["vs"], True, c["ks"], True)}
+            for mode, (k, v, vs, v8, ks, k8) in cases.items():
+                for form, forms in (("two_pass", ""), ("online", ""), ("split", ""), ("two_pass", "s8,s8b,sm8,pvf8")):
+                    if forms and mode != "v8":
+                        continue
+                    with self.subTest(T=T, mode=mode, form=form, forms=forms):
+                        outs = []
+                        for keys_t in (False, True):
+                            kk = k.transpose(1, 2).contiguous() if keys_t else k
+                            with Patched(ATT_BLOCK=512, ATT_BLOCK_PREFILL=1024, STABLE_ATTN=True, ATT_SOFTMAX=form,
+                                         ATT_SOFTMAX_PREFILL=form, ATT_INT8MM=forms, KV_KEYS_T=keys_t, quant8=quant):
+                                if forms:
+                                    Bld.dequant8 = dequant
+                                outs.append(mix(h, cos, sin, c["mask"], kk, v, ctx, T, vs, v8, ks, k8))
+                        for a, b in zip(*outs):
+                            torch.testing.assert_close(b, a, rtol=0, atol=0)
+
     def test_masked_rows_do_not_matter(self):
         T, ctx, filled = 8, 2048, 900
         mix, c = attention(T, 3), self.history(ctx, filled, 3)
