@@ -6,13 +6,26 @@ misleads (zeros, wrong scales and failed fusions all change speed); the compiled
 The measurements behind every rule here are in
 [M6 compute acceleration, follow-up 5 October](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#follow-up-5-october-compiled-ane-programs-and-8-bit-attention-measured).
 
+## Requirements
+
+- **SIP disabled.** aned keeps compiled programs in `/Library/Caches/com.apple.aned` (and `com.apple.aneuserd`).
+  Both directories carry the `datavault` flag (`ls -ldO`), and data vaults are enforced by System Integrity
+  Protection: with SIP enabled, only entitled system processes can open them, root included. The tools here were
+  used with SIP disabled (`csrutil status`); disabling SIP lowers system security, so do this on a research machine
+  only.
+- **Admin rights once**, to add a read ACL for your user (the directories are owned by root / `_neuralengine`, mode
+  700). After that the inspector runs without sudo, and new cache entries inherit the ACL.
+- **Without either:** the MLIR level (section 3) needs neither, and isolated Core ML MIL kernels can be compiled to
+  HWX directly with `mil_to_hwx` from the same repository (`-a h18g` for M6), which writes the HWX to its own
+  output directory. That shows how the ANE compiler treats a construction, but not the program of a Core AI package.
+
 ## Quick start
 
 ```sh
 # once: the HWX parser (macOS, Xcode command-line tools)
 git clone https://github.com/freedomtan/coreml_to_ane_hwx && make -C coreml_to_ane_hwx/hwx_dump
 export HWX_PARSING=$PWD/coreml_to_ane_hwx/hwx_dump/hwx_parsing
-# once: read access to aned's cache (root-owned); the user runs this, it only adds an inherited read ACL
+# once, SIP disabled: read access to aned's cache (root-owned data vault); only adds an inherited read ACL
 sudo chmod -R +a "$USER allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit" \
     /Library/Caches/com.apple.aned /Library/Caches/com.apple.aneuserd
 
