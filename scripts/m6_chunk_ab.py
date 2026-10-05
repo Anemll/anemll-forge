@@ -3,12 +3,15 @@ packages, output agreement (relative RMSE per output, A as reference) and call t
 
     python scripts/m6_chunk_ab.py --a <release chunk.aimodel> --b <candidate chunk.aimodel> \
         --manifest <release manifest.json> --format v8 [--entries v8_8k,p64_8k] [--out ab.json]
-Inputs are random (see m6_entry_sweep.fill), so agreement is a numerical sanity check, not a quality metric."""
+Inputs are random (see m6_entry_sweep.fill), so agreement is a numerical sanity check, not a quality metric.
+--visible sets the visible prefix of the history (default 0.75); --unused-scale sets the key / value scales of the
+masked positions (the runtime leaves 1 there)."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +43,8 @@ def main():
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--visible", type=float, default=0.75, help="visible prefix of the history (mask)")
+    ap.add_argument("--unused-scale", type=float, default=None, help="key / value scales of masked positions")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--cold-b", action="store_true", help="drop B's cached specialization first (time a cold compile)")
     a = ap.parse_args()
@@ -62,7 +67,11 @@ def main():
     for e in names:
         fa = ma.function(alias[e])
         fb = mb.function(alias[e] if alias[e] in mb.function_names else e)
-        ins_a = S.fill(fa, rng, 0.75)
+        ins_a = S.fill(fa, rng, a.visible)
+        if a.unused_scale is not None:  # masked positions' scales as the runtime leaves them (unfilled cache)
+            for n, buf in ins_a.items():
+                if re.fullmatch(r"[kv]s\d+", n):
+                    buf.np[..., int(buf.np.shape[-1] * a.visible):] = a.unused_scale
         ins_b = {}
         for n, buf in ins_a.items():
             nb = fb.buffer("input", n)

@@ -77,7 +77,7 @@ ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
 # output (before the key scales), s8b an INT8 pair (step ATT_S8B_UNIT) on the scores after the key scales and the mask
 # (the tensor the max and exp passes read; on v8, without key scales, s8 and s8b sit on the same true scores),
 # t8 an INT8 pair (step 1/8) on s - m_t before the exp of the pvt forms;
-# sm8 (FP8, M6 only) quantizes the exp output of the pvt forms to FP8 e4m3 (scale 1/256) and takes the softmax sum
+# sm8 (FP8, M6 only) quantizes the exp output of the pvt forms to FP8 e4m3 (scale ATT_PF8_UNIT) and takes the softmax sum
 # from it, an 8-bit sum without the UINT8 underflow bias; the PV weights are then those FP8 weights times the value
 # scales; s8r subtracts each row's block maximum plus ATT_S8R_SHIFT from all scores before the pairs (softmax is
 # shift-invariant), so the fixed INT8 range covers [m_b - 32 + shift, m_b + 32 + shift] per row instead of +-32
@@ -433,7 +433,10 @@ class AttnW(nn.Module):
             self.register_buffer("s8_unit", torch.tensor(ATT_S8_UNIT, dtype=torch.float16))  # s8: raw scores
             self.register_buffer("t8_unit", torch.tensor(1 / 8, dtype=torch.float16))  # t8: s - m_t in [-16, 0]
             self.register_buffer("s8b_unit", torch.tensor(ATT_S8B_UNIT, dtype=torch.float16))  # s8b: true scores
-            self.register_buffer("pf8_unit", torch.tensor(1 / 256, dtype=torch.float16))  # pvf8: e4m3 max 448
+            # pvf8 / sm8 FP8 scale: values in [0, 1] become at most 64. The M6 ANE computed INT8 x FP8 PV wrongly for a
+            # head whose FP8 operand reached about 200 (scale 1/256), although e4m3 holds 448; at 100 and below it matches
+            self.register_buffer("pf8_unit", torch.tensor(float(os.environ.get("ATT_PF8_UNIT", 1 / 64)),
+                                                          dtype=torch.float16))
             self.register_buffer("pf5_unit", torch.tensor(1 / 32768, dtype=torch.float16))  # pvf5: e5m2 max 57344
 
     def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None, kscale=None,
@@ -906,7 +909,9 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          **({"ATT_SOFTMAX": ATT_SOFTMAX} if ATT_SOFTMAX != "two_pass" else {}),
                          **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {}),
                          **({"ATT_INT8MM": ATT_INT8MM, "ATT_S8_UNIT": ATT_S8_UNIT, "ATT_S8B_UNIT": ATT_S8B_UNIT,
-                             **({"ATT_S8R_SHIFT": ATT_S8R_SHIFT} if "s8r" in ATT_INT8MM else {})}
+                             **({"ATT_S8R_SHIFT": ATT_S8R_SHIFT} if "s8r" in ATT_INT8MM else {}),
+                             **({"ATT_PF8_UNIT": float(os.environ.get("ATT_PF8_UNIT", 1 / 64))}
+                                if "sm8" in ATT_INT8MM or "pvf8" in ATT_INT8MM else {})}
                             if ATT_INT8MM else {}),
                          **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
                          **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {})}}

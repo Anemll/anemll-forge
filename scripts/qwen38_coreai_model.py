@@ -634,8 +634,8 @@ class CoreAIQwenBridge(CoreAIQwen):
                     if b.shape != expected or b.dtype != np.dtype(dtype):
                         raise ValueError(f"KV metadata/layout mismatch for {s}{j}: {b.shape}/{b.dtype}; "
                                          f"expected {expected}/{np.dtype(dtype)}")
-                    if s in ("ks", "vs"):
-                        b.np[:] = 1
+                    if s in ("ks", "vs"):  # unfilled positions (masked); KV_UNUSED_SCALE research override
+                        b.np[:] = float(os.environ.get("KV_UNUSED_SCALE", "1"))
                     if old is not None and keep:
                         b.np[:, :keep] = old[i][f"{s}{j}"][1][:, :keep]
                     d[f"{s}{j}"] = (b, b.np)
