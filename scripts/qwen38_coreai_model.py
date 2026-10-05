@@ -201,6 +201,33 @@ def target_graph(man: dict) -> dict:
             "att_int8mm": one(att8), "att_int8mm_by_layer": by_layer, "att_pf8_unit": one(pf8) if pf8 else None}
 
 
+ATT8_WORDS = [  # ATT_INT8MM forms (qwen38_coreai_build.py) in words, in reading order
+    (("s8r",), "scores relative to the block maximum"),
+    (("s8", "s8b"), "INT8 scores{s8}"),
+    (("t8",), "INT8 s - max"),
+    (("sm8",), "FP8 softmax (weights and sum{pf8})"),
+    (("pvf8",), "FP8 PV weights"),
+    (("pvtu",), "UINT8 PV weights"),
+    (("pvt", "pvn", "pv"), "INT8 PV weights"),
+]
+
+
+def att8_words(forms: str, nums: dict) -> str:
+    """ATT_INT8MM forms in words, e.g. INT8 scores (step 1/4), FP8 softmax (weights and sum, FP8 scale 1/64), ..."""
+    def frac(x):
+        return f"1/{round(1 / x)}" if x and abs(1 / x - round(1 / x)) < 1e-6 else f"{x}"
+    have = set(filter(None, forms.split(",")))
+    out = []
+    for keys, words in ATT8_WORDS:
+        if have & set(keys):
+            unit = nums.get("ATT_S8B_UNIT", nums.get("ATT_S8_UNIT"))
+            out.append(words.format(s8=f" (step {frac(unit)})" if unit else "",
+                                    pf8=f", FP8 scale {frac(nums['ATT_PF8_UNIT'])}" if "ATT_PF8_UNIT" in nums else ""))
+            have -= set(keys)
+    out += sorted(have)  # research forms without words
+    return ", ".join(out)
+
+
 def graph_line(man: dict, root: Path) -> str:
     g = target_graph(man)
     fast = g["gdn_fast"] if isinstance(g["gdn_fast"], list) else int(g["gdn_fast"])
@@ -208,11 +235,11 @@ def graph_line(man: dict, root: Path) -> str:
     pre = "" if g["att_block_prefill"] == g["att_block"] else f" ATT_BLOCK_PREFILL={g['att_block_prefill']}"
     att8 = ""
     if g["att_int8mm"]:
-        att8 = f" | 8-bit attention ATT_INT8MM={g['att_int8mm']}"
-        if g["att_pf8_unit"] is not None:
-            att8 += f" (FP8 scale {g['att_pf8_unit']})"
+        n0 = next((c.get("numerics") or {} for c in man.get("chunks", [])), {})
+        words = att8_words(g["att_int8mm"], n0) if isinstance(g["att_int8mm"], str) else str(g["att_int8mm"])
+        att8 = f" | 8-bit attention: {words} [ATT_INT8MM={g['att_int8mm']}]"
         if g["att_int8mm_by_layer"]:
-            att8 += " per-layer " + ";".join(f"{k}:{v}" for k, v in sorted(g["att_int8mm_by_layer"].items()))
+            att8 += " per-layer " + ";".join(f"{k}:{v or 'FP16'}" for k, v in sorted(g["att_int8mm_by_layer"].items()))
     return f"target graph: GDN_FAST={fast} ATT_BLOCK={g['att_block']}{pre}{note}{att8} | build {root}"
 
 
