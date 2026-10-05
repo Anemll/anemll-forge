@@ -60,24 +60,38 @@ def example_inputs(ctx: int, T: int, rng, visible: float = 0.75) -> list[np.ndar
     return [q, k, v, cos, sin, mask, kcodes, vcodes, kscale, vscale]
 
 
-def host_outputs(ctx: int, T: int) -> list[np.ndarray]:
-    """FP32 host evaluation of the same graph (native dequantize replaced by codes * unit)."""
+def host_outputs(ctx: int, T: int, mm8: str = "") -> list[np.ndarray]:
+    """FP32 host evaluation of the same graph (native dequantize replaced by codes * unit). mm8 "" is the true
+    attention (the reference); an ATT_INT8MM form simulates its INT8 rounding (quantize as round / clamp)."""
     mod = Cores8(ctx, T, host=False).float()
     ins = [torch.from_numpy(x).float() if x.dtype != np.int8 else torch.from_numpy(x)
            for x in example_inputs(ctx, T, np.random.default_rng(0))]
-    tri, deq, mm8 = Bld.tri, Bld.dequant8, Bld.ATT_INT8MM
-    Bld.ATT_INT8MM = ""  # the reference is the true attention (ATT_INT8MM is timing research)
+    tri, deq, q8, old = Bld.tri, Bld.dequant8, Bld.quant8, Bld.ATT_INT8MM
+    Bld.ATT_INT8MM = mm8
     Bld.tri = lambda n, strict: tri(n, strict).float()
-    Bld.dequant8 = lambda codes, unit, zero: (codes.float() - zero.float()) * unit.float()
+    def quant(x, unit, zero, dtype=torch.int8, axis=0, minval=None):
+        if dtype.is_floating_point:  # FP8: cast(x / scale)
+            return (x / unit.float()).to(dtype)
+        lo, hi = (0, 255) if dtype == torch.uint8 else (-128, 127)
+        if minval is not None:  # minval mode: round((x - minval) / scale) + q_min
+            return torch.clamp(torch.round((x - minval.float()) / unit.float()) + lo, lo, hi)
+        return torch.clamp(torch.round(x / unit.float()) + (0.0 if zero is None else zero.float()), lo, hi)
+
+    def dequant(codes, unit, zero, axis=0, minval=None, input_dtype=None):
+        if minval is not None:
+            lo = 0 if input_dtype == torch.uint8 else -128
+            return (codes.float() - lo) * unit.float() + minval.float()
+        return (codes.float() - (0.0 if zero is None else zero.float())) * unit.float()
+    Bld.dequant8, Bld.quant8 = dequant, quant
     try:
         with torch.no_grad():
             return [o.numpy() for o in mod(*ins)]
     finally:
-        Bld.tri, Bld.dequant8, Bld.ATT_INT8MM = tri, deq, mm8
+        Bld.tri, Bld.dequant8, Bld.quant8, Bld.ATT_INT8MM = tri, deq, q8, old
 
 
 def package(a, ctx: int) -> Path:
-    tag = (a.variant if a.variant != "two_pass" else "") + (f"_i8{a.int8mm}" if a.int8mm else "") + ("_u" if a.units else "")
+    tag = (a.variant if a.variant != "two_pass" else "") + (f"_i8{a.int8mm.replace(',', '+')}" if a.int8mm else "") + ("_u" if a.units else "")
     return a.out / f"kv8{'_' + tag.lstrip('_') if tag else ''}_{ctx // 1024}k.aimodel"
 
 
@@ -140,9 +154,18 @@ def cmd_time(a):
             ref = host_outputs(ctx, T)
             err = A.rel(outs["o"].np.astype(np.float32), ref[0])
             r[name] = {"err_o_vs_fp32_host": err, "median_ms": S.timed(plan, a.n, 2)["median_ms"]}
+            if set(a.int8mm.split(",")) & {"pvn", "bothn", "pvt", "pvta", "pvtu", "pvtm", "pvf8", "pvf5"}:  # what INT8 rounding alone costs, and how many weight codes are zero
+                Bld.P8_STATS = []
+                sim = host_outputs(ctx, T, a.int8mm)
+                st = np.array(Bld.P8_STATS)
+                Bld.P8_STATS = None
+                r[name].update(err_sim_vs_fp32_host=A.rel(sim[0], ref[0]), err_device_vs_sim=A.rel(outs["o"].np.astype(np.float32), sim[0]),
+                               p8_rounded_to_zero=float(st[:, 0].mean()), p8_masked=float(st[:, 1].mean()))
         res[p.name] = r
-        cells = "  ".join(f"{k} {v['median_ms']:.2f} ms (err {v['err_o_vs_fp32_host']:.1e})" for k, v in r.items()
-                          if isinstance(v, dict))
+        cells = "  ".join(f"{k} {v['median_ms']:.2f} ms (err {v['err_o_vs_fp32_host']:.1e}"
+                          + (f", sim {v['err_sim_vs_fp32_host']:.1e}, dev-sim {v['err_device_vs_sim']:.1e}, P zero"
+                             f" {v['p8_rounded_to_zero']:.1%} + masked {v['p8_masked']:.1%}" if "p8_masked" in v else "") + ")"
+                          for k, v in r.items() if isinstance(v, dict))
         print(f"{p.name} [{place}] load {load:.1f}s | {cells}", flush=True)
     (a.out / f"time_{a.variant}.json").write_text(json.dumps(res, indent=1))
 
@@ -154,10 +177,14 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--n", type=int, default=15)
     ap.add_argument("--variant", choices=("two_pass", "online", "split", "recompute"), default="two_pass")
-    ap.add_argument("--int8mm", choices=("", "qk", "qkt", "pv", "both", "botht", "pvdq", "qkto", "pvo", "botho", "nomm"), default="",
+    ap.add_argument("--int8mm", default="",
                     help="ATT_INT8MM timing research")
     ap.add_argument("--units", default="", help="ATT_INT8MM_UNITS act,cache (package name gets _u)")
     a = ap.parse_args()
+    forms = {"qk", "qkt", "pv", "both", "botht", "pvdq", "qkto", "pvo", "botho", "nomm", "pvn", "bothn", "pvt", "pvta", "pvtu",
+             "qkn", "qkf", "pvtm", "pvf8", "pvf5", "s8", "t8", "s8b", "sm8"}
+    if a.int8mm and not set(a.int8mm.split(",")) <= forms:
+        ap.error(f"--int8mm: comma-separated forms from {sorted(forms)}")
     a.ctxs = [int(c) for c in a.ctx.split(",")]
     {"build": cmd_build, "time": cmd_time}[a.cmd](a)
 

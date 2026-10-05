@@ -57,17 +57,39 @@ STABLE_ATTN = os.environ.get("ATT_STABLE", "0") == "1"
 # decoding), recompute (timing control: the second pass recomputes the scores). ONLINE_SOFTMAX=1 is the older spelling of online.
 ATT_SOFTMAX = os.environ.get("ATT_SOFTMAX", "online" if os.environ.get("ONLINE_SOFTMAX", "0") == "1" else "two_pass")
 ATT_SOFTMAX_PREFILL = os.environ.get("ATT_SOFTMAX_PREFILL", ATT_SOFTMAX)  # the prefill entries' form (hybrid: split)
+# INT8 caches: dequantize each history tile next to its matmul instead of the whole history once per call (no FP16
+# copy of the cache inside the program; the same values, dequantization is elementwise)
+ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
 # timing research only (wrong numerics): INT8 x INT8 history matmuls on kv8 caches. qk quantizes the queries, pv the
 # exp weights, each with a fixed scale, as quantize -> dequantize next to the matmul so the ANE compiler can fuse them
 # variants: qk | qkt (keys untransposed) | pv | both | botht | pvdq (control: V dequantized per tile, FP16 weights); the
 # *o forms (qkto | pvo | botho) also requantize the matmul output, as W8A8 graphs do (activation scales in and out);
-# nomm (timing only) replaces the history QK and PV matmuls by reductions that still read every key / value of a tile
+# nomm (timing only) replaces the history QK and PV matmuls by reductions that still read every key / value of a tile;
+# pvn (bothn: plus qk) quantizes the exp weights correctly: per row and tile divided by their maximum (values in [0, 1],
+# step 1/127), the partial output multiplied back, so only INT8 rounding of the weights changes the result; pvt gets
+# weights in [0, 1] without that extra pass over the scores: exp against each tile's own row maximum (already computed
+# for the global max) and the value scales divided by their tile maximum per head, both corrections on the PV output;
+# pvta is pvt with asymmetric codes (zero point -128, step 1/255): the weights are never negative; pvtu uses UINT8
+# codes (step 1/255, zero point 0) instead; qkn quantizes the queries per row to [-1, 1] (step 1/127), the scores
+# rescaled per row; qkf puts that per-row scale inside the quantize / dequantize pair (per-axis scale, no rescale of
+# the scores; pvtm is pvt with minval mode (offset by qmin instead of a zero point); pvf8 / pvf5 quantize the pvt
+# weights to FP8 e4m3 (scale 1/256) / e5m2 (scale 1/32768); s8 puts an INT8 pair (step ATT_S8_UNIT) on the raw QK
+# output (before the key scales), s8b an INT8 pair (step ATT_S8B_UNIT) on the scores after the key scales and the mask
+# (the tensor the max and exp passes read), t8 an INT8 pair (step 1/8) on s - m_t before the exp of the pvt forms;
+# sm8 (FP8, M6 only) quantizes the exp output of the pvt forms to FP8 e4m3 (scale 1/256) and takes the softmax sum
+# from it, an 8-bit sum without the UINT8 underflow bias; the PV weights are then those FP8 weights times the value
+# scales. Forms combine as a comma-separated list (e.g. s8b,t8,sm8,pvtu)
 ATT_INT8MM = os.environ.get("ATT_INT8MM", "")
+P8_STATS = None  # host research only: a list collects (rounded-to-zero, masked) fractions of the pvn weight codes
+S8_STATS = None  # host research only: a list collects max |raw QK score| per tile (s8 step choice)
+ATT_S8_UNIT = float(os.environ.get("ATT_S8_UNIT", "0.125"))
+ATT_S8B_UNIT = float(os.environ.get("ATT_S8B_UNIT", "0.125"))
+S8B_STATS = None  # host research only: max |score| per tile after the key scales, masked entries excluded
 ATT_INT8MM_UNITS = [float(u) for u in os.environ.get("ATT_INT8MM_UNITS", "0.0625,0.0078125,0.25").split(",")]  # act, cache, out
 
 
-def quant8(x, unit, zero):
-    return torch.ops.coreai.quantize(x, unit, torch.int8, zero_point=zero)
+def quant8(x, unit, zero, dtype=torch.int8, axis=0, minval=None):
+    return torch.ops.coreai.quantize(x, unit, dtype, zero_point=zero, minval=minval, axis=axis)
 TAPS = M.TAPS
 nk, nv = CFG["linear_num_key_heads"], CFG["linear_num_value_heads"]
 dk, dv = CFG["linear_key_head_dim"], CFG["linear_value_head_dim"]
@@ -117,7 +139,8 @@ def layer_arrays(ck, i: int) -> dict:
 
 class QConv(nn.Module):
     """1x1 conv with an exported weight: LUT (dense lut[idx], registered for exact palettization) + per-channel scale as
-    a mul after the conv, int8 (dequantized to fp16) or dense."""
+    a mul after the conv, int8 (a compile-time INT8 constant with its per-channel scales; QCONV_INT8=0: dequantized to
+    dense fp16) or dense."""
 
     def __init__(self, W: dict, key: str) -> None:
         super().__init__()
@@ -129,12 +152,20 @@ class QConv(nn.Module):
             KNOWN_LUTS[wkey(w)] = (lut, idx)
             if f"{key}/scale" in W:
                 self.register_buffer("scale", torch.from_numpy(W[f"{key}/scale"].astype(np.float16)).view(1, -1, 1, 1))
+        elif f"{key}/int8" in W and QCONV_INT8:
+            import coreai_torch._compression.custom_layers  # noqa: F401  registers coreai::constexpr_blockwise_shift_scale
+            codes = np.ascontiguousarray(W[f"{key}/int8"])
+            self.register_buffer("w8", torch.from_numpy(codes).view(codes.shape[0], codes.shape[1], 1, 1))
+            self.register_buffer("w8_scale", torch.from_numpy(np.asarray(W[f"{key}/scale"], np.float16)).view(-1, 1, 1, 1))
+            w = None
         elif f"{key}/int8" in W:
             w = (W[f"{key}/int8"].astype(np.float32) * W[f"{key}/scale"].astype(np.float32)[:, None]).astype(np.float16)
         else:
             w = W[f"{key}/dense"].astype(np.float16)
-        self.conv = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
-        self.conv.weight = nn.Parameter(torch.from_numpy(w).view(w.shape[0], w.shape[1], 1, 1), requires_grad=False)
+        self.conv = None
+        if w is not None:
+            self.conv = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
+            self.conv.weight = nn.Parameter(torch.from_numpy(w).view(w.shape[0], w.shape[1], 1, 1), requires_grad=False)
         self.lr_b = self.lr_a = None
         if f"{key}/lr_a" in W:  # + a @ (b @ x): fp16 low-rank error correction (two 1x1 convs, not palettized)
             a, b = W[f"{key}/lr_a"].astype(np.float16), W[f"{key}/lr_b"].astype(np.float16)
@@ -144,7 +175,10 @@ class QConv(nn.Module):
             self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
 
     def forward(self, x):
-        y = self.conv(x)
+        if self.conv is None:  # INT8 constant: never expanded to an FP16 weight in the program
+            y = F.conv2d(x, torch.ops.coreai.constexpr_blockwise_shift_scale(self.w8, self.w8_scale, None, None, torch.int8))
+        else:
+            y = self.conv(x)
         y = y if self.scale is None else y * self.scale
         return y if self.lr_a is None else y + self.lr_a(self.lr_b(x))
 
@@ -199,6 +233,9 @@ MLP_DS = float(os.environ.get("MLP_DS", "1"))
 #   triangular solve as one matmul with a Neumann-product inverse (tri_solve), the causal conv1d as one native
 #   depthwise conv, and one state matmul per prefill sub-chunk instead of two. GDN_FAST=0: the release graph.
 GDN_FAST = os.environ.get("GDN_FAST", "1") == "1"
+# INT8 export weights (full-attention k / v projections) stay compile-time INT8 constants with their per-channel
+# scales; QCONV_INT8=0 expands them to dense FP16 as builds before 4 October 2026 did (byte-for-byte reproduction)
+QCONV_INT8 = os.environ.get("QCONV_INT8", "1") == "1"
 MLP_DS_TABLE = json.loads(Path(os.path.expanduser(os.environ["MLP_DS_TABLE"])).read_text())["ds"] \
     if os.environ.get("MLP_DS_TABLE") else None
 DBG_O = os.environ.get("DBG_O") == "1"   # debug: every layer also outputs the tensor entering out_proj / o_proj (o<j>_dbg)
@@ -363,9 +400,10 @@ class GDNW(nn.Module):
         return self.finish(torch.cat(outs, 1), z, T), conv_out, s, pend * 0
 
 
-def dequant8(codes, unit, zero):
+def dequant8(codes, unit, zero, axis=0, minval=None, input_dtype=None):
     """INT8 cache codes to FP16 codes * unit with the native op (host tests substitute a torch version)."""
-    return torch.ops.coreai.dequantize(codes, unit, zero_point=zero, output_dtype=torch.float16)
+    return torch.ops.coreai.dequantize(codes, unit, zero_point=zero, minval=minval, axis=axis, input_dtype=input_dtype,
+                                       output_dtype=torch.float16)
 
 
 class AttnW(nn.Module):
@@ -383,6 +421,16 @@ class AttnW(nn.Module):
             self.register_buffer("mm8_unit", torch.tensor(ATT_INT8MM_UNITS[0], dtype=torch.float16))  # ATT_INT8MM operands
             self.register_buffer("mm8_cache_unit", torch.tensor(ATT_INT8MM_UNITS[1], dtype=torch.float16))
             self.register_buffer("mm8_out_unit", torch.tensor(ATT_INT8MM_UNITS[2], dtype=torch.float16))
+            self.register_buffer("p8_unit", torch.tensor(1 / 127, dtype=torch.float16))  # pvn: weights in [0, 1]
+            self.register_buffer("p8a_unit", torch.tensor(1 / 255, dtype=torch.float16))  # pvta: [0, 1] on -128..127
+            self.register_buffer("p8a_zero", torch.tensor(-128, dtype=torch.int8))
+            self.register_buffer("p8u_zero", torch.tensor(0, dtype=torch.uint8))
+            self.register_buffer("p8_minval", torch.tensor(0.0, dtype=torch.float16))  # pvtm
+            self.register_buffer("s8_unit", torch.tensor(ATT_S8_UNIT, dtype=torch.float16))  # s8: raw scores
+            self.register_buffer("t8_unit", torch.tensor(1 / 8, dtype=torch.float16))  # t8: s - m_t in [-16, 0]
+            self.register_buffer("s8b_unit", torch.tensor(ATT_S8B_UNIT, dtype=torch.float16))  # s8b: true scores
+            self.register_buffer("pf8_unit", torch.tensor(1 / 256, dtype=torch.float16))  # pvf8: e4m3 max 448
+            self.register_buffer("pf5_unit", torch.tensor(1 / 32768, dtype=torch.float16))  # pvf5: e5m2 max 57344
 
     def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None, kscale=None,
                 cache_k8=None):
@@ -404,11 +452,23 @@ class AttnW(nn.Module):
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
         sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
-        mm8 = ATT_INT8MM if cache_k8 and cache_v8 else ""
-        if cache_v8 and mm8 not in ("pv", "both", "botht", "pvdq", "pvo", "botho"):
+        mm8 = set(filter(None, ATT_INT8MM.split(","))) if cache_k8 and cache_v8 else set()
+
+        def has(*forms):
+            return any(f in mm8 for f in forms)
+        tile_v = cache_v8 and ATT_TILE_DEQUANT and not mm8  # per-tile dequantize (see ATT_TILE_DEQUANT)
+        tile_k = cache_k8 and ATT_TILE_DEQUANT and not mm8
+        if cache_v8 and not tile_v and not has("pv", "both", "botht", "pvdq", "pvo", "botho", "pvn", "bothn", "pvt", "pvta", "pvtu", "pvtm",
+                                              "pvf8", "pvf5"):
             v_st = dequant8(v_st, self.v8_unit, self.v8_zero)
-        if cache_k8 and mm8 not in ("qk", "both", "qkt", "botht", "qkto", "botho"):
+        if cache_k8 and not tile_k and not has("qk", "both", "qkt", "botht", "qkto", "botho", "bothn"):
             k_st = dequant8(k_st, self.v8_unit, self.v8_zero)
+
+        def ktile(a, b):
+            return dequant8(k_st[:, a:b], self.v8_unit, self.v8_zero) if tile_k else k_st[:, a:b]
+
+        def vtile(a, b):
+            return dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero) if tile_v else v_st[:, a:b]
         blk = ATT_BLOCK_PREFILL if T > P else ATT_BLOCK
         form = ATT_SOFTMAX_PREFILL if T > P else ATT_SOFTMAX
         if ctx <= blk and not cache_v8 and not cache_k8 and not STABLE_ATTN:
@@ -420,23 +480,45 @@ class AttnW(nn.Module):
             # blocks, then exp(s - m) per block - exactly softmax over [history | block], no tensor wider than a block
             edges = list(range(0, ctx, blk)) + [ctx]
             spans = list(zip(edges[:-1], edges[1:]))
+            if has("qkn"):  # INT8 queries per row in [-1, 1] x INT8 key codes; scores rescaled per row
+                rq = torch.clamp_min(qg4.abs().amax(-1, keepdim=True), 1e-4)
+                qn8 = dequant8(quant8(qg4 * (1 / rq), self.p8_unit, self.v8_zero), self.p8_unit, self.v8_zero)
+                qscale = rq * hd ** -0.5
+            if has("qkf"):  # the same per-row scale as the pair's per-axis scale (queries flattened to rows x hd)
+                q2 = qg4.reshape(nkv * grp * T, hd)
+                sq = torch.clamp_min(q2.abs().amax(-1, keepdim=True), 1e-4) * (1 / 127)
+                qf8 = dequant8(quant8(q2, sq, None, axis=0), sq, None, axis=0).reshape(nkv, grp * T, hd)
+
             def hist(a, b):
-                if mm8 in ("qk", "both"):  # INT8 queries x INT8 key codes (timing research)
+                if has("qkn"):
+                    s_ = (qn8 @ ktile(a, b).transpose(1, 2)) * qscale
+                elif has("qkf"):
+                    s_ = (qf8 @ ktile(a, b).transpose(1, 2)) * hd ** -0.5
+                elif has("qk", "both", "bothn"):  # INT8 queries x INT8 key codes (timing research)
                     qd = dequant8(quant8(qg4, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
                     s_ = (qd @ dequant8(k_st[:, a:b], self.mm8_cache_unit, self.v8_zero).transpose(1, 2)) * hd ** -0.5
-                elif mm8 == "nomm":  # timing only: scores of the same shape without the QK multiply-adds
-                    s_ = qg4.sum(-1, keepdim=True) * k_st[:, a:b].sum(-1).reshape(nkv, 1, b - a) * hd ** -0.5
-                elif mm8 in ("qkt", "botht", "qkto", "botho"):  # keys as the untransposed operand: (K Q^T)^T
+                elif has("nomm"):  # timing only: scores of the same shape without the QK multiply-adds
+                    s_ = qg4.sum(-1, keepdim=True) * ktile(a, b).sum(-1).reshape(nkv, 1, b - a) * hd ** -0.5
+                elif has("qkt", "botht", "qkto", "botho"):  # keys as the untransposed operand: (K Q^T)^T
                     qd = dequant8(quant8(qg4, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
                     raw = dequant8(k_st[:, a:b], self.mm8_cache_unit, self.v8_zero) @ qd.transpose(1, 2)
-                    if mm8 in ("qkto", "botho"):  # INT8 output boundary
+                    if has("qkto", "botho"):  # INT8 output boundary
                         raw = dequant8(quant8(raw, self.mm8_out_unit, self.v8_zero), self.mm8_out_unit, self.v8_zero)
                     s_ = raw.transpose(1, 2) * hd ** -0.5
                 else:
-                    s_ = (qg4 @ k_st[:, a:b].transpose(1, 2)) * hd ** -0.5
+                    s_ = (qg4 @ ktile(a, b).transpose(1, 2)) * hd ** -0.5
+                if S8_STATS is not None:
+                    S8_STATS.append(float(s_.abs().max()))
+                if has("s8"):  # INT8 raw scores: QK writes 8-bit, the softmax passes read 8-bit
+                    s_ = dequant8(quant8(s_, self.s8_unit, self.v8_zero), self.s8_unit, self.v8_zero)
                 if cache_k8:  # key scales per token on the scores: q . (codes / 128) * (scale * 128) = q . k
                     s_ = s_ * (kscale[:, a:b].reshape(nkv, 1, b - a) * 128)
-                return s_ + mask[:, a:b].reshape(1, 1, b - a)
+                mk = mask[:, a:b].reshape(1, 1, b - a)
+                if S8B_STATS is not None:
+                    S8B_STATS.append(float((s_ * (mk > -1)).abs().max()))
+                if has("s8b"):  # INT8 scores after the key scales and the mask (masked entries clip to -128 steps)
+                    return dequant8(quant8(s_ + mk, self.s8b_unit, self.v8_zero), self.s8b_unit, self.v8_zero)
+                return s_ + mk
             if form == "online":
                 # running max over [block | tiles]: partial sums rescale when it grows, so each tile's scores are
                 # used as soon as they exist instead of staying live until the global max is known
@@ -451,7 +533,7 @@ class AttnW(nn.Module):
                     den = den * alpha + e_.sum(-1, keepdim=True)
                     if cache_v8:
                         e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
-                    num = num * alpha + e_ @ v_st[:, a:b]
+                    num = num * alpha + e_ @ vtile(a, b)
                     m = m_new
             elif form == "split":
                 # every tile independent (its own max, sum and output); only these small partials are combined, so
@@ -466,7 +548,7 @@ class AttnW(nn.Module):
                     d_i = e_.sum(-1, keepdim=True)
                     if cache_v8:
                         e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
-                    parts.append((m_i, d_i, e_ @ v_st[:, a:b]))
+                    parts.append((m_i, d_i, e_ @ vtile(a, b)))
                 m = parts[0][0]
                 for m_i, _, _ in parts[1:]:
                     m = torch.maximum(m, m_i)
@@ -477,31 +559,71 @@ class AttnW(nn.Module):
                     num = n_i * w if num is None else num + n_i * w
             else:
                 scs = [hist(a, b) for a, b in spans]
+                mts = [s_.amax(-1, keepdim=True) for s_ in scs]
                 m = sc_b.amax(-1, keepdim=True)
-                for s_ in scs:
-                    m = torch.maximum(m, s_.amax(-1, keepdim=True))
+                for m_t in mts:
+                    m = torch.maximum(m, m_t)
                 e_b = torch.exp(sc_b - m)
                 den, num = e_b.sum(-1, keepdim=True), e_b @ vt
-                for s_, (a, b) in zip(scs, spans):
+                for s_, m_t, (a, b) in zip(scs, mts, spans):
                     if form == "recompute":  # timing control only: a true second pass that recomputes the scores
                         s_ = hist(a, b)
+                    if has("pvt", "pvta", "pvtu", "pvtm", "pvf8", "pvf5"):  # 8-bit PV, weights in [0, 1] per tile
+                        t_ = s_ - m_t
+                        if has("t8"):
+                            t_ = dequant8(quant8(t_, self.t8_unit, self.v8_zero), self.t8_unit, self.v8_zero)
+                        e_ = torch.exp(t_)
+                        if has("sm8"):  # FP8 softmax weights; the sum below reads them
+                            e_ = dequant8(quant8(e_, self.pf8_unit, None, torch.float8_e4m3fn), self.pf8_unit, None)
+                        w_t = torch.exp(m_t - m)
+                        den = den + e_.sum(-1, keepdim=True) * w_t
+                        vs_t = vscale[:, a:b].reshape(nkv, 1, b - a) * 128
+                        vmax = torch.clamp_min(vs_t.amax(-1, keepdim=True), 1e-4)
+                        pn = e_ * (vs_t * (1 / vmax))
+                        unit, zero, dt, mv = ((self.p8a_unit, self.p8a_zero, torch.int8, None) if has("pvta") else
+                                              (self.p8a_unit, self.p8u_zero, torch.uint8, None) if has("pvtu") else
+                                              (self.p8a_unit, None, torch.int8, self.p8_minval) if has("pvtm") else
+                                              (self.pf8_unit, None, torch.float8_e4m3fn, None) if has("pvf8") else
+                                              (self.pf5_unit, None, torch.float8_e5m2, None) if has("pvf5") else
+                                              (self.p8_unit, self.v8_zero, torch.int8, None))
+                        if P8_STATS is not None:  # weights that become zero codes (host research only)
+                            z = ((pn / unit.float()).to(dt).float() == 0) if dt.is_floating_point else (
+                                (pn / unit.float()).round() == 0)
+                            P8_STATS.append((float(z.logical_and(pn > 0).float().mean()), float((pn == 0).float().mean())))
+                        ed = dequant8(quant8(pn, unit, zero, dt, minval=mv), unit, zero, minval=mv,
+                                      input_dtype=dt if mv is not None else None)
+                        # both matmul operands as quantize -> dequantize, the INT8 value codes too (their quantize is
+                        # exact: codes / 128 * 128); this compiler gives the same program without it, the pair is the
+                        # form Apple's W8A8 export emits for every quantized operand
+                        vd = dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero)
+                        vd = dequant8(quant8(vd, self.v8_unit, self.v8_zero), self.v8_unit, self.v8_zero)
+                        num = num + (ed @ vd) * (w_t * vmax)
+                        continue
                     e_ = torch.exp(s_ - m)
                     den = den + e_.sum(-1, keepdim=True)
                     if cache_v8:
                         # Move dynamic V scales onto exp scores, leaving the global denominator unchanged.
                         e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
-                    if mm8 in ("pv", "both", "botht", "pvo", "botho"):  # INT8 exp weights x INT8 value codes
+                    if has("pvn", "bothn"):  # INT8 weights scaled to [0, 1] per row and tile x INT8 value codes
+                        r = torch.clamp_min(e_.amax(-1, keepdim=True), 1e-4)
+                        pn = e_ * (1 / r)
+                        if P8_STATS is not None:
+                            P8_STATS.append((float(((pn * 127).round() == 0).logical_and(pn > 0).float().mean()),
+                                             float((pn == 0).float().mean())))
+                        ed = dequant8(quant8(pn, self.p8_unit, self.v8_zero), self.p8_unit, self.v8_zero)
+                        num = num + (ed @ dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero)) * r
+                    elif has("pv", "both", "botht", "pvo", "botho"):  # INT8 exp weights x INT8 value codes
                         ed = dequant8(quant8(e_, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
                         pv_ = ed @ dequant8(v_st[:, a:b], self.mm8_cache_unit, self.v8_zero)
-                        if mm8 in ("pvo", "botho"):  # INT8 output boundary
+                        if has("pvo", "botho"):  # INT8 output boundary
                             pv_ = dequant8(quant8(pv_, self.mm8_out_unit, self.v8_zero), self.mm8_out_unit, self.v8_zero)
                         num = num + pv_
-                    elif mm8 == "pvdq":  # control: the same per-tile V dequantize, FP16 exp weights
+                    elif has("pvdq"):  # control: the same per-tile V dequantize, FP16 exp weights
                         num = num + e_ @ dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero)
-                    elif mm8 == "nomm":  # timing only: a partial output of the same shape without the PV multiply-adds
+                    elif has("nomm"):  # timing only: a partial output of the same shape without the PV multiply-adds
                         num = num + e_.sum(-1, keepdim=True) * v_st[:, a:b].sum(1, keepdim=True)
                     else:
-                        num = num + e_ @ v_st[:, a:b]
+                        num = num + e_ @ vtile(a, b)
             o = num / den
         o = o.reshape(nkv, grp, T, hd).permute(2, 0, 1, 3).reshape(T, nh * hd) * torch.sigmoid(gate)
         o = o.transpose(0, 1).reshape(1, nh * hd, 1, T)
@@ -670,8 +792,9 @@ def patch_palettizer():
     wp._qwen38_patched = True
 
 
-def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path) -> float:
-    """entries: (entrypoint name, module, input names, output names). Returns MB on disk."""
+def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path, lut_dtype=None) -> float:
+    """entries: (entrypoint name, module, input names, output names). Returns MB on disk. lut_dtype (research): a
+    coreai_opt DType for the LUT values, e.g. DType.INT8 (quantized LUT: the same indices, INT8 entries and a scale)."""
     import coreai_torch
     from coreai_opt.casting import cast_to_16_bit_precision
     from coreai_opt.coreai_utils.common import CompressionGranularity
@@ -696,7 +819,7 @@ def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path) ->
         return memo[key]
     wp._blockwise_compress = cached
     try:
-        prog = palettize_weights(prog, lut_dtype=None, n_bits=4, granularity=CompressionGranularity.PER_TENSOR,
+        prog = palettize_weights(prog, lut_dtype=lut_dtype, n_bits=4, granularity=CompressionGranularity.PER_TENSOR,
                                  cluster_dim=2, weight_num_threshold=1024, enable_fast_kmeans_mode=False)
     finally:
         wp._blockwise_compress = exact

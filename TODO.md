@@ -1,6 +1,6 @@
 # TODO
 
-Experiments queued for later: what to measure and what would make it worth keeping. Measurements live in the research notes; the compute work is in [M6 compute acceleration, Follow-up, 4 October](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md#follow-up-4-october-measured) (`R` below).
+Experiments queued for later: what to measure and what would make it worth keeping. Measurements live in the research notes; the compute work is in [M6 compute acceleration, Follow-up, 4 October](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md#follow-up-4-october-measured) and [5 October](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md#follow-up-5-october-compiled-ane-programs-and-8-bit-attention-measured) (`R` below).
 
 ## Open
 
@@ -12,9 +12,9 @@ INT8 x INT8 runs on the M6 ANE through Core AI at up to about 53 TOPS against 13
 
 Splitting a constant INT8 weight into two output-channel branches lifted 256-row W8A8 from 34.4 to 43.3 TOPS, and INT8 weights with FP16 activations from 23.0 to 32.2 (R, INT8 compute); a 4096 x 4096 FP16 matmul was unchanged at 256 rows. Our weights are LUT constants of other shapes (MLP 5120 to 17408 and back, head 5120 to 248,320), which the compiler may tile differently. Measure one chunk's MLP projections and the head as TP1 / TP2 / TP4 at 8 and 64 rows (chunk A/B for verify and prefill, head in a standalone package). Keep any split that shortens the verify or prefill call without hurting compile time.
 
-### 3. Fewer bytes in the score tensors (long-context attention)
+### 3. 8-bit softmax: accuracy, then production (long-context attention)
 
-The history matmuls are under a tenth of the attention core; the time is in passes over score-sized tensors (R, INT8 compute). Test 8-bit (INT8 or FP8) score and attention-weight intermediates in one `kv8` layer: timing first (`scripts/m6_long_ctx_attn.py`), then precision against FP32 and KL-512 if it pays. The `ATT_INT8MM` research variants that requantized scores saved 12 to 17%, part of it possibly from zeros.
+Measured in one `kv8` core (R, 5 October): INT8 scores after the key scales (`s8b`) plus UINT8 PV weights (`pvtu`) cut prefill by 21% (M5 and M6); with an FP8 softmax sum (`sm8`, M6 only) by 28%; verify 5 to 7%. On real text the scores need a symmetric step of 1/4 (1.2% attention error), but the `pvtu` weights cost 6.1%, mostly from folding the per-token value scales into them (2.7% without). Next: one value scale per tile (and per tile for keys) so the fold and key-scale passes disappear; host accuracy first (`scripts/m6_attn_logit_stats.py`), then one core. FP8 forms behind a per-chip option.
 
 ### 4. Contexts above 64K: production ladder
 
@@ -32,16 +32,30 @@ A decode cycle is 98% ANE work in sequence (8K: 114 ms = drafter 15.3 + verify 9
 
 One extra cache format compiles about 1.65x longer, and every context adds tiles. Keep the default build to one format; generalize `--kv-cache-dtype` to any list or `all` (selectable manifests with any subset); add a quick-test preset (8K, one format) so a new graph or format builds and compiles in minutes; have the compile guide name these options when the estimate is long.
 
-### 8. Smaller items
+### 8. 8-bit attention on a chunk, then KL-512
+
+Build chunk 0 with `ATT_INT8MM=s8b,pvtu` (`ATT_S8B_UNIT=0.25`) and, on M6, `s8b,sm8,pvtu`; A/B at 8K to 64K (`scripts/m6_chunk_ab.py`), then a full build and KL-512 (estimated model prefill gain about 13% at 64K, 9% at 32K, 4% at 8K; 17%, 12%, 6% with `sm8`). If KL-512 moves, retrain the rank-64 low-rank corrections with the 8-bit attention simulated before giving up on it. Promote the forms that hold to builder options (FP8 per chip).
+
+### 9. Transposed key cache
+
+Every history tile of keys goes through an INT8 transpose pass before QK (the cache stores (token, 256), QK reads (256, token)): 19% of verify cycles and 6% of prefill, through DRAM in prefill (R, 5 October). Store keys as (head, 256, token): one `kv8` core first (the HWX should lose the transpose tasks), then the cache writer (`scripts/qwen38_kv_cache.py`), saved caches and the tests.
+
+### 10. Smaller items
 
 - **16-bit matched pair:** Splash `--kv-format bf16` against our FP16 cache (`fast_b2k` two-format build), same harness.
 - **DFlash2 temperature sampling:** [docs/research/DFLASH2_SAMPLING_PLAN.md](docs/research/DFLASH2_SAMPLING_PLAN.md).
-- **Wrapper tests on `main`:** `tests/test_server_wrapper.py` does not copy `scripts/ane_compile_mode.py` into its temporary checkout, so four tests fail.
+- **Compile mode and the Core AI cache:** the cache does not key on `MPSGRAPH_ANE_BONDED_COMPILE_MODE`, so a package first compiled in another mode keeps that program (2.2x the cycles for one attention core in mode 0). Have the loaders record the mode they compiled with and warn on a mismatch.
+- **Dynamic quantization scales:** `coreai.symmetric_quantization_statistics` computes per-axis scales at run time but has no torch op; try it in hand-written MLIR (a runtime scale written in torch fails ANEC).
 
-## Closed (4 October; details in R)
+## Closed (4 and 5 October; details in R)
 
 - **`kv8` (INT8 keys and values):** quality unchanged against V8 (KL-512, direct KL 6.6e-5), speed within 2%, a third less cache. In the faster graph's 2K tiles INT8 caches save memory, not time.
 - **Softmax forms:** online and split are exact but within about 1% of two-pass on a full chunk (split -3.4% only for 64K prefill). Switches `ATT_SOFTMAX` / `ATT_SOFTMAX_PREFILL` stay, default two-pass.
 - **128-row prefill calls:** 21 to 45% slower per row than 64-row calls.
 - **INT8 matmuls in the history attention:** the matmuls are under a tenth of the core, so INT8 multiply-adds cannot pay there (see item 3 for the score tensors).
 - **Contexts above 64K on the ANE:** the 65,472-row cap is gone for the tiled graph; 80K and 100K attention compiles fully onto the ANE.
+- **INT8 history QK:** the HWX confirms INT8 x INT8 with a query pair, but QK is bound by data movement: a fixed step gains nothing, a per-row step costs a pass (+4 to 5%), a per-row scale inside the pair fails ANEC.
+- **Offset codes for the attention weights:** zero point -128 or `minval` mode does not fuse; both operands get dequantized to FP16 in DRAM (17% slower than no pair).
+- **Native softmax:** `coreai.softmax` compiles to the same program as the hand-written passes.
+- **Per-tile dequantization of the INT8 cache:** the compiler already reads the INT8 tiles directly; the same program either way.
+- **INT8 K/V projection weights:** compile-time INT8 constants are now the builder default (`QCONV_INT8=1`, 10 MB less per attention layer); needs KL-512 with the next full build.

@@ -130,6 +130,24 @@ class Int8CacheAttention(unittest.TestCase):
                     for form in ("online", "split"):
                         torch.testing.assert_close(outs[form], outs["two_pass"], rtol=1e-10, atol=1e-10, msg=form)
 
+    def test_tile_dequant_is_identical(self):
+        """ATT_TILE_DEQUANT (each history tile dequantized next to its matmul) gives the same output as dequantizing the
+        whole history first, for v8 and kv8, every softmax form, verify and prefill widths."""
+        for T, ctx, filled in ((8, 2048, 1500), (64, 3072, 2100)):
+            mix, c = attention(T, T + ctx + 7), self.history(ctx, filled, T + ctx + 7)
+            cos, sin = torch.ones(T, Bld.rot, dtype=f64), torch.zeros(T, Bld.rot, dtype=f64)
+            h = torch.zeros(1, 8, 1, T, dtype=f64)
+            cases = {"v8": (c["kf"], c["vc"], c["vs"], True, None, False), "kv8": (c["kc"], c["vc"], c["vs"], True, c["ks"], True)}
+            for mode, (k, v, vs, v8, ks, k8) in cases.items():
+                for form in ("two_pass", "online", "split"):
+                    with self.subTest(T=T, mode=mode, form=form):
+                        outs = []
+                        for tiled in (False, True):
+                            with Patched(ATT_BLOCK=512, ATT_BLOCK_PREFILL=1024, STABLE_ATTN=True, ATT_SOFTMAX=form,
+                                         ATT_SOFTMAX_PREFILL=form, ATT_TILE_DEQUANT=tiled):
+                                outs.append(mix(h, cos, sin, c["mask"], k, v, ctx, T, vs, v8, ks, k8)[0])
+                        torch.testing.assert_close(outs[1], outs[0], rtol=0, atol=0)
+
     def test_masked_rows_do_not_matter(self):
         T, ctx, filled = 8, 2048, 900
         mix, c = attention(T, 3), self.history(ctx, filled, 3)

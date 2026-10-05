@@ -316,11 +316,181 @@ Applied to the history attention (research switch `ATT_INT8MM`, one `kv8` layer,
 
 Where INT8 x INT8 can matter is the weight matmuls of prefill, which are compute-bound. INT8 weights for the whole model (about 27 GB) do not fit beside the rest on 32 GB, so the candidate is our 2/4-bit LUT weights with INT8 activations, built the way that works here (compile-time weights, shared scales, output splits) and measured at the 64-row prefill size. An earlier LUT x INT8-activation probe that failed ANEC predates these corrections.
 
+## Follow-up, 5 October: compiled ANE programs and 8-bit attention (Measured)
+
+The 4 October INT8 attention variants were judged by timing alone. This round reads the compiled ANE program of each package to see what the hardware actually runs, then rebuilds the 8-bit attention variants with correct scales, one part at a time.
+
+### Reading the compiled program (HWX)
+
+- **Where it is.** A package's Core AI cache manifest names its ANE regions by `ANERegionsHash` (`<a>_<b>` for `h18g`); aned keeps the compiled program at `/Library/Caches/com.apple.aned/<OS build>/ModelAssetsCache/-_unsigned/<a>/<b>/model.hwx` (root-owned; read here through a read ACL granted by the user). The Core AI cache itself holds only the MLIR graph with its ANE regions.
+- **Tools.** `hwx_parsing` from [freedomtan/coreml_to_ane_hwx](https://github.com/freedomtan/coreml_to_ane_hwx) decodes M6 programs (`h18g`, CPU subtype 0xb, ISA v24). [`scripts/m6_hwx_inspect.py`](../../scripts/m6_hwx_inspect.py) maps a package to its HWX and summarizes the tasks: `summary [--ne-dims]` (engine, operand and kernel formats, whether results go to DRAM or stay in L2), `pseudo` (one line per task), `roles` (attention matmuls by role). Each task is a register block for a fixed pipeline (DMA in, the NE multiply-add array or the PE elementwise / reduction engine, L2 or DMA out), so there is no instruction code to decompile. Cycle counts are the compiler's static estimates (`ExeCycles`), not measurements; for `pvtu` below they predicted the measured change within a point (-12.4% against -13%).
+- **MLIR.** `AIModelAsset.load(pkg).program` prints a package's Core AI program as MLIR text (`coreai` dialect). The text parses back (`ir.Module.parse`, then the private `AIProgram._from_mlir_module`) and saves as a package that compiles to a byte-identical HWX, so the graph can be edited or written by hand at this level. The next stage down (MPSGraph's `mps` dialect, where the ANE regions are formed) cannot be printed with Core AI's bindings.
+- **Cache pitfall.** The Core AI cache does not key on `MPSGRAPH_ANE_BONDED_COMPILE_MODE`: a package first loaded in mode 0 keeps that program in later mode-2 loads. For one `kv8` core the mode-0 program had 2.2x the static cycles (25,059 against 11,506). Our scripts and the server set mode 2 on the M6; ad-hoc loads must too, or recompile with `compile --force`.
+
+### What the history attention compiles to
+
+One `kv8` attention core at 32K (verify tiles of 2,048 tokens and 48 score rows per KV head, prefill tiles of 4,096 and 384 rows):
+
+- **The INT8 cache is never converted to FP16.** No task turns INT8 into FP16; the QK and PV multiply-add tasks read the INT8 key and value tiles directly (INT8 input, FP16 query or probability operand). Dequantizing the whole history first or each tile next to its matmul (`ATT_TILE_DEQUANT`) compiles to the identical program (806 tasks), which is why the two timed the same.
+- **Keys are transposed on every tile.** The cache stores keys as (token, 256 dims) and QK needs (256 dims, token), so an INT8 NE pass with an identity kernel and output transpose rewrites each key tile. In prefill it writes the transposed tile to DRAM (43 cycles against 95 for the QK that follows); in verify it stays in L2 but costs more than the QK itself (9 against 5). Values need no transpose. A key cache stored transposed would remove these passes.
+- **Score tensors cross DRAM several times per tile:** written by QK, then read and written again by each softmax pass on the PE.
+
+Where the cycles go (static estimates, the same shares at 32K and 64K):
+
+| Part | Prefill (64 rows) | Verify (8 rows) |
+| --- | ---: | ---: |
+| Softmax elementwise (scale, mask, exp, value-scale fold) | 50% | 22% |
+| Softmax reductions (max, sum) | 15% | 13% |
+| History PV | 14% | 25% |
+| History QK | 14% | 10% |
+| Key transposes | 6% | 19% |
+| New-block attention, other | 0% | 10% |
+
+The measured `nomm` control (both history matmuls replaced by reductions, 7 to 10% of prefill) is smaller than the static matmul share, as matmuls partly overlap with data movement; both say the softmax passes dominate prefill. Verify has no single dominant part.
+
+Two weight findings from the same programs: compile-time INT8 K/V projection weights run as INT8 kernels with no FP16 copy (`QCONV_INT8`, now the builder default: 40 MB instead of 50 MB per attention layer, the 64-row projection task 272 to 152 cycles); the vector-LUT Q/O weights run as a hardware palette with FP16 entries (`Fmt=fp16 Pal=1(4bit)`, about 2 bits per weight in the program), decoded on the fly. A LUT with INT8 entries (`palettize_weights(lut_dtype=INT8)`) fails ANEC for both vector LUT 2x16 and scalar LUT4 weights.
+
+### Quantize / dequantize: the API and when the ANE fuses it
+
+The API, from coreai-torch 0.4.2 (`coreai_torch/_compression/custom_layers.py`, the same on GitHub `main` apart from FP8 handling in `utils.py`):
+
+```
+coreai::quantize(Tensor input, Tensor scale, ScalarType output_dtype, Tensor? zero_point=None, Tensor? minval=None, SymInt axis=0)
+coreai::dequantize(Tensor input, Tensor scale, Tensor? zero_point=None, Tensor? minval=None, SymInt axis=0,
+                   ScalarType? input_dtype=None, ScalarType? output_dtype=None)
+```
+
+- Output types: int8, uint8, int4, uint4, `fp8_e4m3fn`, `fp8_e5m2`. Integer: `clip(round(x / scale) + zero_point)`, or with `minval`, `clip(round((x - minval) / scale) + qmin)`; FP8: `cast(x / scale)`, with neither offset.
+- A scalar scale is per tensor; a vector scale with `axis` is per channel (`scale.numel()` equal to `input.shape[axis]`, and the same rank as the input when it is more than 1-D). `zero_point` and `minval` are mutually exclusive. `ActivationQuantizeModule` / `ActivationDequantizeModule` wrap the pair.
+- Both lower to `coreai.quantize` / `coreai.dequantize` (in the dialect a scale plus two offsets, so zero point and `minval` are one op). Apple's own W8A8 path in coreai-optimization emits exactly this pair: its default is INT8 per-channel weights with INT8 per-tensor symmetric activations, and `finalize(ExportBackend.CoreAI)` replaces the fake quantization with these ops.
+- Apple documents no rule for when the ANE compiler fuses the pair into an 8-bit multiply-add. The rules below come from the HWX of the variants in the next section.
+
+Rule we follow: **every operand of an 8-bit matmul is written as `quantize` then `dequantize` in the graph, FP8 exactly as INT8, and an operand that arrives as INT8 (the cache codes) too** (`dequantize`, `quantize`, `dequantize`; the quantize of `codes / 128` is exact). With coreai-torch 0.4.2 on the M6 the extra pair on an INT8 input compiles to the identical program (same tasks, cycles and formats; `pvtu` timed the same), so it costs nothing, matches the form Apple's W8A8 export emits for every quantized operand, and does not depend on the compiler treating a bare `dequantize` of an input as the second half of a pair. The pair that decides the result is the one on the FP16 operand (the queries for QK, the probabilities for PV):
+
+| Quantize / dequantize pair on the FP16 operand of a history matmul | Compiled program (HWX) | Effect |
+| --- | --- | --- |
+| None (production) | INT8 x FP16; the INT8 cache read directly | baseline |
+| INT8 or UINT8, zero point 0, constant scale | INT8 x INT8 or INT8 x UINT8; the producing task writes the 8-bit codes | fused |
+| INT8 with zero point -128, or `minval` mode | no fusion: explicit dequantize tasks write both operands in FP16 to DRAM (the INT8 value tiles too), then FP16 x FP16 | slower than none |
+| Runtime per-axis (per-row) scale | ANEC rejects the region; it runs on the GPU | unusable |
+| FP8 e4m3, constant scale | INT8 x e4m3 at FP16 multiply-add cycles; the producer writes 1 byte | fused, no MAC gain |
+| FP8 e5m2, constant scale | compiles; the call crashes | unusable |
+
+The scale must fill the code range. The 4 October PV variants quantized the value-scaled exp weights (about 0 to 3) with a step of 0.0625, so most codes were zero: 0.33 output error, and a speedup that came from zeros.
+
+### 8-bit attention, part by part
+
+Correctly scaled forms (`ATT_INT8MM`, research switch, forms combine as a comma list):
+
+- `pvtu`: per tile, `exp(s - m_t)` with `m_t` the tile's row maximum (already computed for the global maximum) times the value scales divided by their tile maximum per head, so the weights lie in [0, 1]; UINT8 codes at step 1/255; the value tiles as `dequantize`, `quantize`, `dequantize` (INT8, step 1/128); the corrections `exp(m_t - m)` and the scale maximum multiply the small PV output. No extra pass over the scores. `pvt` is the same with INT8 at 1/127, `pvf8` with FP8 e4m3.
+- `pvn` reaches [0, 1] by dividing by each row's maximum of the folded weights: an extra pass over the scores.
+- `qkn` quantizes the queries per row to [-1, 1] and rescales the scores per row; `qkf` puts that per-row scale inside the pair instead (per-axis scale).
+
+One `kv8` core, random data (scores of a flat distribution over 32K are near the worst case for 8-bit weights), error of the attention output against an FP32 host evaluation; the device matched a host simulation of the same rounding:
+
+| Form | Prefill 32K | Verify 32K | Prefill 64K | Verify 64K | Error | Zero weight codes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Production (INT8 x FP16) | 7.55 ms | 1.89 | 14.83 | 3.46 to 3.53 | 2e-3 | |
+| `pvtu` (INT8 x UINT8) | **6.53 (-13.5%)** | 1.88 | **12.81 (-13.6%)** | 3.50 | 3.6e-2 to 4.4e-2 | 12 to 16% |
+| `pvf8` (INT8 x FP8 e4m3) | 6.69 to 6.74 (-11%) | 1.88 | 13.04 (-12%) | 3.49 to 3.54 | **2.7e-2** | 0% |
+| `pvt` (INT8 x INT8) | 6.54 (-13%) | 1.87 | 12.69 to 13.00 | 3.48 to 3.50 | 7e-2 to 8.5e-2 | 26 to 33% |
+| `pvn` (extra pass) | +2% | +12% | +10% | +11% | 4.6e-2 to 5.5e-2 | 12 to 16% |
+| `pvta` / `pvtm` (offset codes) | 8.87 (+17%) | 2.67 | 17.27 | 4.95 | 3.6e-2 to 4.4e-2 | |
+
+Half of the `pvtu` gain is not the multiply-adds: the quantize fuses into the PE pass that writes the probabilities, which now writes 1-byte codes (2,064 to 1,456 cycles), while PV drops from 1,600 to 960. `pvf8` keeps the first half only (its multiply-adds run at FP16 cycles) but is the most accurate.
+
+In the real layer 3 (production projections, residual included, which dilutes the error), each part alone and together, with the HWX confirming 8-bit multiply-adds where intended:
+
+| Layer 3 | HWX of the converted part | Verify 8K | Prefill 8K | Verify 64K | Prefill 64K |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Production | QK, PV: INT8 x FP16 | 0.954 ms | 2.510 | 3.777 | 15.075 |
+| K/V projections W8A8 | INT8 x INT8, 278 to 260 cycles | 0.926 | 2.448 | 3.775 | 15.061 |
+| History QK, per-row scale (`qkn`) | INT8 x INT8, 3,776 to 3,688 cycles, plus a rescale pass (+2,170) | 0.936 | 2.610 (+4%) | 3.822 | 15.770 (+4.6%) |
+| History QK, scale inside the pair (`qkf`) | ANEC fails, GPU (about 330 ms) | | | | |
+| History PV (`pvtu`) | INT8 x UINT8, 4,458 to 2,880 cycles | 0.931 | **2.352 (-6.3%)** | 3.740 | **13.653 (-9.4%)** |
+| QK, PV and K/V projections | all three 8-bit | 0.942 | 2.538 | 3.802 | 14.147 |
+
+- **Only PV pays.** QK's multiply-adds barely shrink (2%): it is bound by reading key tiles and writing scores. A fixed query step (4 October `qk`) gained nothing, a per-row step costs a pass, and a per-row scale inside the pair does not compile. The K/V projections are under 1% of the layer.
+- **Gains are prefill only:** about 9% of a full-attention layer's prefill at 64K and 6% at 8K, nothing for verify. A chunk holds one attention layer among four, so the model-level gain is smaller; it needs a chunk A/B and KL-512 (the 3.6% to 4.4% attention error above is on random data).
+
+### Softmax: native op and fused quantization
+
+One prefill tile in isolation (4 KV heads x 384 rows x 4,096 tokens, dense data; [`scripts/m6_softmax_probe.py`](../../scripts/m6_softmax_probe.py)):
+
+| Tile | Time | Tasks | Static cycles |
+| --- | ---: | ---: | ---: |
+| `exp(s - max)` and its sum (our tile pass) | 0.662 ms | 8 | 366 |
+| Hand-written softmax (max, exp, sum, divide) | 0.645 ms | 20 | 740 |
+| `torch.softmax` (lowers to `coreai.softmax`) | 0.647 ms | 20 | 740 |
+| `exp(s - max) @ V` (production PV form) | 0.778 ms | 12 | 716 |
+| UINT8 pair on `exp(s - max)`, then `@ V` | **0.634 ms (-18.5%)** | 12 | 464 |
+| `softmax(s) @ V` | 0.909 ms | 14 | 826 |
+| UINT8 pair on `softmax(s)` rescaled to [0, 1], then `@ V` | 1.006 ms | 30 | 1,169 |
+
+- **`coreai.softmax` is not a hardware softmax.** It compiles to the identical program as the hand-written passes; `torch.softmax` and SDPA both lower to it.
+- **A quantize / dequantize pair fuses into the task that computes the exp:** that task writes UINT8 directly and PV reads it as INT8 x UINT8. This is the `pvtu` mechanism in isolation.
+- At verify size (48 rows x 2,048 tokens) every variant takes 0.21 to 0.23 ms: call overhead.
+- The dialect also has `coreai.symmetric_quantization_statistics` / `asymmetric_quantization_statistics` (per-axis scales computed at run time). No torch op emits them; using them means writing MLIR.
+
+### 8-bit softmax
+
+The softmax passes take 8-bit input and produce 8-bit output when the scores and the weights carry quantize / dequantize pairs: QK writes INT8 or FP8 scores, the max, `s - max` and exp passes read them directly (the dequantize folded into the pass's scale), and the exp pass writes UINT8 or FP8 weights. One prefill history tile in isolation (4 KV heads x 384 rows x 4,096 tokens; [`scripts/m6_softmax_probe.py`](../../scripts/m6_softmax_probe.py), the HWX confirming 8-bit at each step):
+
+| Softmax of one tile | Prefill tile | Verify tile (48 x 2,048) | Error (random data) |
+| --- | ---: | ---: | ---: |
+| FP16 (production) | 0.822 to 0.899 ms | 0.280 to 0.290 ms | 1.8e-3 |
+| INT8 scores in, UINT8 weights out, FP16 inside | -10 to -14% | 0% | 3.3e-2 |
+| INT8 scores, INT8 `s - max`, UINT8 weights, sum over the UINT8 weights | -24 to -28% | -13% | 1.1e-1 |
+| **INT8 scores, INT8 `s - max`, FP8 e4m3 weights, sum over the FP8 weights** | **-22 to -25%** | **-15%** | **3.0e-2** |
+| FP8 e4m3 throughout | -21 to -24% | -12% | 2.1e-1 |
+
+The UINT8 sum is biased (small weights round to zero); FP8 weights do not underflow, so the 8-bit sum stays accurate. FP8 scores are unusable (3 mantissa bits on logits).
+
+In the attention core the per-token key scales multiply the scores and the per-token value scales are folded into the weights, so the forms are placed around those: `s8b` pairs the scores after the key scales and the mask (the tensor the max and exp passes read), `sm8` quantizes the exp output to FP8 and takes the sum from it before the value-scale fold, `t8` pairs `s - m_t`. A pair right after QK (`s8`) only saves the first pass: the key-scale pass reads INT8 but writes FP16 again. One `kv8` core, idle machine, three interleaved runs (medians):
+
+| Attention core | Prefill 32K | Prefill 64K | Verify 32K | Verify 64K | Chips |
+| --- | ---: | ---: | ---: | ---: | --- |
+| FP16 softmax (production) | 7.55 ms | 14.91 | 1.88 | 3.46 | |
+| `pvtu` | -13.4% | -14.6% | +0.5% | +0.9% | M5, M6 |
+| `s8` + `pvtu` | -15.9% | -17.0% | +3.7% | +4.6% | M5, M6 |
+| **`s8b` + `pvtu`** | **-20.7%** | **-21.5%** | **-4.8%** | **-6.1%** | M5, M6 |
+| **`s8b` + `sm8` + `pvtu`** (FP8 softmax sum) | **-27.5%** | **-28.2%** | -6.4% | -6.9% | M6 only |
+| `s8b` + `t8` + `sm8` + `pvtu` | -27.9% | -29.3% | -6.9% | -7.2% | M6 only |
+
+FP8 forms need an option enabled per chip (the M5 ANE has no FP8). The core is about 60% of a chunk's prefill time at 64K, 43% at 32K and 20% at 8K, so the estimated model prefill gain is about 13%, 9% and 4% for `s8b` + `pvtu` and about 17%, 12% and 6% with `sm8`; verify gains about 3% at 64K. Chunk A/B and KL-512 have not been run.
+
+**Real score ranges and 8-bit error** ([`scripts/m6_attn_logit_stats.py`](../../scripts/m6_attn_logit_stats.py), the streamed host reference with the deployed export, 46,640 tokens of KL-trace chats and wikitext up to 16K; error of the attention output against FP32):
+
+- True scores reach 31.8 (p99.99 16.9); 13% of rows have a maximum above 16 (layers 35 to 51 most). The raw QK output before the key scales stays within 6.5, but a constant step there is multiplied by each key's scale (up to 23): 3% error at 1/16, up to 20% at 1/8. So the pair belongs after the key scales (`s8b`).
+- `s8b` at a **symmetric step of 1/4 (+-32): 1.16% overall, 0.55% to 2.64% per layer**, no clipping in practice. A step of 1/8 needs zero point 64 to cover the range (0.64%), which does not fuse; +-16 clips 13% of row maxima (6.3%).
+- FP8 e4m3 scores: 5.1% (2.4% to 11.8% per layer), about 4x worse than INT8 at 1/4.
+- `pvtu` weights: **6.1% overall** (3.7% to 9.2% per layer, more at 4K to 16K); without the value-scale fold 2.7%. The fold, not the UINT8 codes, is most of the 8-bit attention error.
+- `kv8` keys alone: 0.45%.
+
+One value scale per tile (or per layer) instead of per token would remove the fold pass and its error, and the key-scale pass with it; FP8 weights (`sm8`) are the M6 alternative. Accuracy losses here may also be recoverable by retraining the rank-64 low-rank corrections with the 8-bit attention simulated.
+
+### Review of coreai-torch `_compression` for attention
+
+| Item | Use for attention |
+| --- | --- |
+| FP8 activations (`fp8_e4m3fn`, `fp8_e5m2`; upstream adds `e8m0fnu` power-of-two scales) | FP8 softmax weights (`sm8`, `pvf8`, measured above); FP8 scores are too coarse |
+| `minval` mode | Takes the no-fusion path, like zero point -128 |
+| Per-axis scales | Constant scales only; a runtime per-row scale fails ANEC |
+| int4 / uint4 activations | Too coarse for scores or weights |
+| `lut_to_dense`, `constexpr_blockwise_shift_scale` (including FP4 e2m1 block-scaled data), `sparse_to_dense` | Weights only |
+
+### Next
+
+- `s8b` (step 1/4) + `pvtu` on one chunk, and with `sm8` on M6, A/B at 8K to 64K, then a full build and KL-512.
+- Value (and key) scales per tile instead of per token: removes the fold and key-scale passes and most of the `pvtu` error.
+- A transposed key cache: removes the per-tile key transposes (19% of verify).
+- Retrain the rank-64 corrections with the 8-bit attention simulated if KL-512 moves.
+
 ## Rejected or not pursued
 
 - **Kronecker Hadamard** (`H_1024 = H_32 x H_32`, two 32 x 32 grouped convs and a channel transpose): exact but slower than the release 1-bit grouped conv (0.47 versus 0.39 ms for four 17408-channel rotations at T=8).
 - **Core AI composite ops.** `coreai_torch` ships `GatedDeltaUpdate` and `SDPA` composites. The DeltaNet composite is an FP32 while-loop over tokens; Apple's authoring notes place native SDPA on the GPU path and recommend per-head attention on the ANE. Not tested further.
-- **INT8 / FP8 attention MACs.** Not built. The measured breakdown shows the history path is op bound with large elementwise passes over scores (tile width alone moved it 14 to 38%), so a narrower MAC alone would not remove the dominant cost.
+- **INT8 / FP8 attention MACs.** Built and measured on 5 October (above): only the history PV pays, and half of that gain is the 1-byte probability write, not the narrower MAC. The history path stays dominated by elementwise passes over scores.
 - **W8A8 for the MLP.** Closed for this model with the current toolchain (Measured). Four 1x1 convs 5120 to 17408 to 5120 (357M weights), Core AI, idle ANE:
 
   | Weights x activations | Placement | T=8 | T=64 |
@@ -358,6 +528,27 @@ $CAI scripts/m6_long_ctx_attn.py build --variant split --ctx 32768,65472,102400 
 $CAI scripts/m6_long_ctx_attn.py build --int8mm nomm --ctx 32768,65472 --out DIR && $CAI scripts/m6_long_ctx_attn.py time --int8mm nomm --ctx 32768,65472 --out DIR
 # localized INT8 x INT8 probe
 $CAI scripts/m6_int8_probe.py --out DIR --form conv,matmul --variants fp16,xw8,xw8a8 --wscale tensor --n 1024 [--tp 2]
+```
+
+Follow-up, 5 October:
+
+```sh
+# compiled ANE program of a loaded package (aned cache read access, hwx_parsing from freedomtan/coreml_to_ane_hwx)
+HWX_PARSING=<path>/hwx_parsing python scripts/m6_hwx_inspect.py roles <package>.aimodel
+HWX_PARSING=<path>/hwx_parsing python scripts/m6_hwx_inspect.py summary --ne-dims <package>.aimodel
+# 8-bit history PV in one kv8 core: time, error against FP32, host simulation, zero codes
+$CAI scripts/m6_long_ctx_attn.py build --int8mm pvtu --ctx 32768,65472 --out DIR && $CAI scripts/m6_long_ctx_attn.py time --int8mm pvtu --ctx 32768,65472 --out DIR
+# each part in the real layer 3, and together
+EXPORT_DIR=<export> $CAI scripts/m6_attn_layer_int8.py build --variants base,kvw8a8,qkn,pvtu,all8 --out DIR
+EXPORT_DIR=<export> $CAI scripts/m6_attn_layer_int8.py time --variants base,kvw8a8,qkn,pvtu,all8 --out DIR
+# native softmax against the hand-written passes; 8-bit softmax tiles
+$CAI scripts/m6_softmax_probe.py --out DIR --rows 384 --tokens 4096
+$CAI scripts/m6_softmax_probe.py --out DIR --rows 384 --tokens 4096 --variants tile_base,tile_s8p8,tile_i8sm,tile_i8pf8sm
+# 8-bit softmax in one kv8 core (steps for the synthetic data; real data: ATT_S8B_UNIT=0.25)
+ATT_S8B_UNIT=0.0625 $CAI scripts/m6_long_ctx_attn.py build --int8mm s8b,sm8,pvtu --ctx 32768,65472 --out DIR
+ATT_S8B_UNIT=0.0625 $CAI scripts/m6_long_ctx_attn.py time --int8mm s8b,sm8,pvtu --ctx 32768,65472 --out DIR
+# real score ranges and 8-bit error on the host (CPU, streamed layers)
+EXPORT_DIR=<export> MODEL=<Qwen3.8-27B> python scripts/m6_attn_logit_stats.py run --out DIR --pass "kl=4,25" --pass "wiki=4096x1;stride=4"
 ```
 
 Qwen3.8-27B is developed by the Qwen Team (Alibaba Cloud, Apache 2.0). ANEMLL's work here is independent conversion and ANE research.
