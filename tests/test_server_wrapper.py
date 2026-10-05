@@ -27,7 +27,8 @@ class ServerWrapperTests(unittest.TestCase):
         scripts.mkdir()
         source = Path(__file__).resolve().parents[1]
         shutil.copy2(source / "forge.py", self.root / "forge.py")
-        for name in ("qwen38_server.sh", "qwen38_server_process.py", "hf_release.py", "qwen38_kv_cache.py"):
+        for name in ("qwen38_server.sh", "qwen38_server_process.py", "hf_release.py", "qwen38_kv_cache.py",
+                     "ane_compile_mode.py", "coreai_compile_guide.py"):  # forge.py's local imports
             shutil.copy2(source / "scripts" / name, scripts / name)
         bridge = self.root / "coreai/swift_bridge"
         bridge.mkdir(parents=True)
