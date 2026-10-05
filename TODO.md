@@ -74,7 +74,11 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
 - Server, opt-in: no thinking for requests whose system prompt is Pi's summarizer (`--summary-no-think`; Pi's
   `SUMMARIZATION_SYSTEM_PROMPT` is a fixed string, so detection is reliable): about 215 s per compaction here
   (5,870 thinking tokens at 27 tok/s). Qwen's guidance is to switch thinking off rather than give it a tiny
-  budget. Workaround today: set Pi's thinking off before `/compact`.
+  budget. Workaround today: set Pi's thinking off before `/compact`. Implementation: switch thinking off before
+  the sampling defaults are picked (request handling sets temperature and top_p from `enable_thinking`), so the
+  summary gets the non-thinking 0.7 / 0.8, not 1.0 / 0.95. The card's non-thinking `presence_penalty` 1.5 stays
+  off by default (it hurts code and lowers acceptance, since the drafter does not apply it; docs/SERVER.md); prose
+  summaries could try it, measured, like any other sampling change.
 - Thinking level for long tool loops: max (xhigh, 12,288) adds 9K to 16K tokens per reply; medium (6,144) or low
   (2,048) is the largest lever on compaction frequency. Server option: a smaller budget for replies that follow a
   tool result, the full budget for the first reply to a user message. At max, the 12,288 thinking budget leaves
