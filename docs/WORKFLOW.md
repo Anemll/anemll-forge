@@ -73,9 +73,10 @@ The `chat` command remains the plain Core ML research interface. The example ser
 The port preserves the latest Core AI build/runtime and Swift bridge. Use a separate compatible Core AI environment. Build the bridge with `bash coreai/swift_bridge/build.sh` using the selected Xcode (`DEVELOPER_DIR` if needed). No prebuilt dylib is included. Rebuild after pulling the September 29 buffer-lifetime fix: it changes both Python view ownership and native IOSurface creation; an older dylib retains the native leak even with the updated Python wrapper. See [context-switch memory diagnosis](SPECULATIVE_DECODING.md#eviction-memory-pressure-and-stalled-calls).
 
 ```sh
+python forge.py compile --follow --build /path/to/coreai-builds/qwen38-27b-vq2_kvv8 &   # compile each chunk as it is built
 MODEL="$MODEL" EXPORT_DIR="$RUNS/export/qwen38-27b-vq2" OUT=/path/to/coreai-builds \
   python coreai/qwen38_coreai_build.py all --ctx 8192,16384 --pctx 8192,16384
-python forge.py compile --build /path/to/coreai-builds/qwen38-27b-vq2_kvv8      # optional: first-start ANE compile now
+wait   # the follow compile finishes the head and drafter after the build
 python forge.py serve --runtime coreai --model "$MODEL" --build /path/to/coreai-builds/qwen38-27b-vq2_kvv8 --ctx 16384 \
   --draft /path/to/matching-drafter/dflash2_lut4_gptq.aimodel --drafter /path/to/matching-drafter
 ```

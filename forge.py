@@ -34,6 +34,8 @@ def parser():
                    "next to the build, when present")
     c.add_argument("--force", action="store_true", help="drop this Python's cached ANE specializations of the build "
                    "(and drafter) first, so every package recompiles")
+    c.add_argument("--follow", action="store_true", help="run alongside a build: compile each chunk as soon as the "
+                   "builder lists it, then the head and drafter when it finishes")
     c.add_argument("--dry-run", action="store_true", help="print command only")
     hf_release.add_commands(sub)
     for name in ("quantize", "convert", "chat", "serve"):
@@ -180,7 +182,7 @@ def main(argv=None):
         except (ValueError, OSError, RuntimeError) as e:
             p.error(str(e))
     if a.command == "compile":
-        if not (a.build / "manifest.json").is_file():
+        if not (a.build / "manifest.json").is_file() and not a.follow:
             p.error(f"Missing build manifest: {a.build / 'manifest.json'}")
         draft = a.draft
         if draft is None:
@@ -191,6 +193,7 @@ def main(argv=None):
         command = [sys.executable, str(ROOT / "scripts" / "coreai_compile.py"), "--build", str(a.build)]
         command += ["--draft", str(draft)] if draft else []
         command += ["--force"] if a.force else []
+        command += ["--follow"] if a.follow else []
         if a.dry_run:
             print(json.dumps(dict(argv=command), indent=2))
             return 0
