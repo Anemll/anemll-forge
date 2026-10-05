@@ -15,7 +15,8 @@ class TargetGraphTests(unittest.TestCase):
     def test_recorded_fast_build(self):
         man = manifest({"GDN_FAST": True, "ATT_BLOCK": 2048}, {"GDN_FAST": True, "ATT_BLOCK": 2048})
         self.assertEqual(runtime.target_graph(man), {"gdn_fast": True, "att_block": 2048, "att_block_prefill": 2048,
-                                                     "recorded": True})
+                                                     "recorded": True, "att_int8mm": "", "att_int8mm_by_layer": {},
+                                                     "att_pf8_unit": None})
         line = runtime.graph_line(man, Path("/b"))
         self.assertIn("GDN_FAST=1 ATT_BLOCK=2048 | build /b", line)
         self.assertNotIn("not recorded", line)
@@ -23,7 +24,8 @@ class TargetGraphTests(unittest.TestCase):
     def test_older_manifest_reports_release_defaults(self):
         man = manifest({"SILU": "tanh"})
         self.assertEqual(runtime.target_graph(man), {"gdn_fast": False, "att_block": 16384,
-                                                     "att_block_prefill": 16384, "recorded": False})
+                                                     "att_block_prefill": 16384, "recorded": False, "att_int8mm": "",
+                                                     "att_int8mm_by_layer": {}, "att_pf8_unit": None})
         self.assertIn("GDN_FAST=0 ATT_BLOCK=16384 (not recorded in manifest: release defaults)",
                       runtime.graph_line(man, Path("/b")))
 
@@ -31,6 +33,16 @@ class TargetGraphTests(unittest.TestCase):
         man = manifest({"GDN_FAST": True, "ATT_BLOCK": 2048, "ATT_BLOCK_PREFILL": 4096})
         self.assertEqual(runtime.target_graph(man)["att_block_prefill"], 4096)
         self.assertIn("ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 |", runtime.graph_line(man, Path("/b")))
+
+    def test_8bit_attention_forms_are_reported(self):
+        n = {"GDN_FAST": True, "ATT_BLOCK": 2048, "ATT_INT8MM": "s8,s8b,sm8,pvf8", "ATT_PF8_UNIT": 0.015625}
+        man = manifest(n, {**n, "ATT_INT8MM_BY_LAYER": {"63": "s8,s8b"}})
+        g = runtime.target_graph(man)
+        self.assertEqual(g["att_int8mm"], "s8,s8b,sm8,pvf8")
+        self.assertEqual(g["att_int8mm_by_layer"], {"63": "s8,s8b"})
+        line = runtime.graph_line(man, Path("/b"))
+        self.assertIn("| 8-bit attention ATT_INT8MM=s8,s8b,sm8,pvf8 (FP8 scale 0.015625) per-layer 63:s8,s8b |", line)
+        self.assertNotIn("8-bit attention", runtime.graph_line(manifest({"GDN_FAST": True, "ATT_BLOCK": 2048}), Path("/b")))
 
     def test_mixed_chunks_are_not_hidden(self):
         man = manifest({"GDN_FAST": True, "ATT_BLOCK": 2048}, {"GDN_FAST": False, "ATT_BLOCK": 16384})

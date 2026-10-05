@@ -194,7 +194,11 @@ def target_graph(man: dict) -> dict:
     att = sorted({int(n.get("ATT_BLOCK", 16384)) for n in nums}) or [16384]
     attp = sorted({int(n.get("ATT_BLOCK_PREFILL", n.get("ATT_BLOCK", 16384))) for n in nums}) or [16384]
     one = lambda v: v[0] if len(v) == 1 else v  # noqa: E731
-    return {"gdn_fast": one(gdn), "att_block": one(att), "att_block_prefill": one(attp), "recorded": recorded}
+    att8 = sorted({n.get("ATT_INT8MM", "") for n in nums}) or [""]  # 8-bit attention forms (research builds)
+    by_layer = {k: v for n in nums for k, v in (n.get("ATT_INT8MM_BY_LAYER") or {}).items()}
+    pf8 = sorted({n["ATT_PF8_UNIT"] for n in nums if "ATT_PF8_UNIT" in n})
+    return {"gdn_fast": one(gdn), "att_block": one(att), "att_block_prefill": one(attp), "recorded": recorded,
+            "att_int8mm": one(att8), "att_int8mm_by_layer": by_layer, "att_pf8_unit": one(pf8) if pf8 else None}
 
 
 def graph_line(man: dict, root: Path) -> str:
@@ -202,7 +206,14 @@ def graph_line(man: dict, root: Path) -> str:
     fast = g["gdn_fast"] if isinstance(g["gdn_fast"], list) else int(g["gdn_fast"])
     note = "" if g["recorded"] else " (not recorded in manifest: release defaults)"
     pre = "" if g["att_block_prefill"] == g["att_block"] else f" ATT_BLOCK_PREFILL={g['att_block_prefill']}"
-    return f"target graph: GDN_FAST={fast} ATT_BLOCK={g['att_block']}{pre}{note} | build {root}"
+    att8 = ""
+    if g["att_int8mm"]:
+        att8 = f" | 8-bit attention ATT_INT8MM={g['att_int8mm']}"
+        if g["att_pf8_unit"] is not None:
+            att8 += f" (FP8 scale {g['att_pf8_unit']})"
+        if g["att_int8mm_by_layer"]:
+            att8 += " per-layer " + ";".join(f"{k}:{v}" for k, v in sorted(g["att_int8mm_by_layer"].items()))
+    return f"target graph: GDN_FAST={fast} ATT_BLOCK={g['att_block']}{pre}{note}{att8} | build {root}"
 
 
 class CoreAIQwen:
