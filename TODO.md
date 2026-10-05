@@ -98,9 +98,11 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
 
 - 64K server benchmark with energy for C2 and V8 (`bench_64k.sh` in the session scratchpad; swap was the cause of
   today's 64K failures: reboot first so swap starts near zero).
-- Windowed drafter ingestion (`DRAFT_INGEST`, server default since 5 October): the same cold prompt with
-  `DRAFT_INGEST=all` and with the default, prefill time and acceptance (expected: about 100 to about 40 drafter calls
-  at 6.5K tokens, about 1,000 to about 65 at 64K).
+- Done 5 October: windowed drafter ingestion (`DRAFT_INGEST`, server default) against `DRAFT_INGEST=all`, C2 64K
+  server, cold prompts of repo source, greedy, thinking off: 6K 20.3 s both, 16K 55.2 against 56.6 s (2.5%), 30K
+  112.7 against 115.4 s (2.3%); replies identical and tok/verify and acceptance identical at every length. A
+  skipped drafter block costs about 6 ms, so ingestion explains only about 2.5 points of the gap between Pi's
+  prefill and the 8K eval. Raw: `/Volumes/SSD4TB/anemll-forge-research/ingest_ab/`.
 
 ### 12. Smaller ladder entries (2K, 4K) for the first prefill: measured, not worth it
 
