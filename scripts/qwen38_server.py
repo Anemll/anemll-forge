@@ -47,7 +47,7 @@ def parse(argv=None):
     p.add_argument("--model-dir", required=True, help="Core AI target package directory")
     p.add_argument("--hf", required=True, help="checkpoint/bundle dir: tokenizer, chat template, embedding")
     p.add_argument("--runtime", choices=("coreai", "coreml"), default="coreai")
-    p.add_argument("--kv-cache-dtype", choices=("auto", "fp16", "v8"), default="auto",
+    p.add_argument("--kv-cache-dtype", choices=("auto", "fp16", "v8", "kv8"), default="auto",
                    help="require matching model cache inputs; auto reads manifest.json")
     p.add_argument("--ctx", type=int, default=8192, help="context length the chunks were built for")
     p.add_argument("--think", action="store_true", help="enable thinking by default (clients can override)")
@@ -72,7 +72,7 @@ def parse(argv=None):
         p.error("--drafter cannot be combined with --plain")
     if args.runtime != "coreai" and not args.plain:
         p.error("Core ML is a plain diagnostic path; supply --plain")
-    if args.runtime != "coreai" and args.kv_cache_dtype == "v8":
+    if args.runtime != "coreai" and args.kv_cache_dtype in ("v8", "kv8"):
         p.error("V8 KV cache requires the Core AI Swift bridge runtime")
     return args
 

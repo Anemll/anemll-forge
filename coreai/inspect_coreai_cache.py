@@ -114,7 +114,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model-dir', required=True, type=Path)
     parser.add_argument('--drafter', type=Path)
-    parser.add_argument('--kv-cache-dtype', choices=('auto', 'fp16', 'v8'), default='auto',
+    parser.add_argument('--kv-cache-dtype', choices=('auto', 'fp16', 'v8', 'kv8'), default='auto',
                         help='inspect selected functions in a shared-weight selectable export')
     parser.add_argument('--cache-root', type=Path, default=Path.home() / 'Library/Caches/coreai-cache')
     parser.add_argument('--os-build', help='defaults to sw_vers -buildVersion')

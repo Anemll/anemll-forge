@@ -12,7 +12,7 @@
 #   FORGE_BUNDLE  bundle with model/ + coreai/ + drafter/ (default: ~/Models/anemll-forge-qwen3.8-27B)
 #   MODEL, BUILD  override the checkpoint / Core AI build separately
 #   CTX           context cap; a number or 8K / 16K / 24K / 32K / 48K / 64K (default: 16384)
-#   KV_CACHE_DTYPE auto (manifest), fp16 or v8; requires the matching BUILD export
+#   KV_CACHE_DTYPE auto (manifest), fp16, v8 or kv8; requires the matching BUILD export
 #   PORT          listen port (default: 8765)
 #   BIND_HOST     listen address (default: 127.0.0.1; set 0.0.0.0 to expose)
 #   DRAFT         on (default, sibling drafter/), off/--plain, or a path to a *.aimodel package

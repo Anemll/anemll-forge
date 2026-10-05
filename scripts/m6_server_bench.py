@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--build", type=Path, required=True)
     ap.add_argument("--bundle", type=Path, required=True, help="bundle with model/ and drafter/")
     ap.add_argument("--ctx", type=int, required=True)
-    ap.add_argument("--format", default="v8", choices=("fp16", "v8"))
+    ap.add_argument("--format", default="v8", choices=("fp16", "v8", "kv8"))
     ap.add_argument("--port", type=int, default=8788)
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--startup-timeout", type=float, default=3 * 3600)

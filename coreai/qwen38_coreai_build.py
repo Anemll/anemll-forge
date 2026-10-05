@@ -13,7 +13,7 @@ before optimize(). Weights come straight from the checkpoint + export (qwen38_an
 Env: EXPORT_DIR (default ~/Models/vq27b/export/full_mix25_mixer4_head4), OUT (default ~/Models/vq27b/coreai);
 SILU, MLP_SILU (tanh | native), GDN_SQ, GDN_SV, MLP_DS_TABLE: ANE fp16 numerics fixes (see silu()); GDN_FAST (default 1):
 faster exact DeltaNet core; ATT_BLOCK / ATT_BLOCK_PREFILL (default 2048 / 4096): attention history tile width of the
-verify / prefill entries; KV_CACHE_DTYPE / --kv-cache-dtype (default v8). The release graph: GDN_FAST=0
+verify / prefill entries; KV_CACHE_DTYPE / --kv-cache-dtype (default v8; kv8 also stores keys as INT8). The release graph: GDN_FAST=0
 ATT_BLOCK=16384. DBG_O=1 debug outputs."""
 from __future__ import annotations
 
@@ -48,8 +48,26 @@ TPS = [int(x) for x in os.environ.get("TPS", "64").split(",")]  # prefill entry 
 # narrow slices cost ANE compile time, so it defaults to max(ATT_BLOCK, 4096). Release graph: ATT_BLOCK=16384.
 ATT_BLOCK = int(os.environ.get("ATT_BLOCK", "2048"))
 ATT_BLOCK_PREFILL = int(os.environ.get("ATT_BLOCK_PREFILL", str(max(ATT_BLOCK, 4096))))
-KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "v8")  # v8 | fp16 | both (selectable, about 1.5x the compile)
+KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "v8")  # v8 | kv8 | fp16 | both (selectable, about 1.5x the compile)
+# cache inputs per attention layer: v8 = FP16 keys + INT8 values; kv8 = INT8 keys and values (scales per token/head)
+KV_INPUTS = {"fp16": ("k", "v"), "v8": ("k", "v", "vs"), "kv8": ("k", "v", "ks", "vs")}
 STABLE_ATTN = os.environ.get("ATT_STABLE", "0") == "1"
+# research switch for the history softmax: two_pass (global max over all tiles first, the default), online (running max
+# from tile to tile, flash attention), split (each tile with its own max, sum and output, combined at the end: flash
+# decoding), recompute (timing control: the second pass recomputes the scores). ONLINE_SOFTMAX=1 is the older spelling of online.
+ATT_SOFTMAX = os.environ.get("ATT_SOFTMAX", "online" if os.environ.get("ONLINE_SOFTMAX", "0") == "1" else "two_pass")
+ATT_SOFTMAX_PREFILL = os.environ.get("ATT_SOFTMAX_PREFILL", ATT_SOFTMAX)  # the prefill entries' form (hybrid: split)
+# timing research only (wrong numerics): INT8 x INT8 history matmuls on kv8 caches. qk quantizes the queries, pv the
+# exp weights, each with a fixed scale, as quantize -> dequantize next to the matmul so the ANE compiler can fuse them
+# variants: qk | qkt (keys untransposed) | pv | both | botht | pvdq (control: V dequantized per tile, FP16 weights); the
+# *o forms (qkto | pvo | botho) also requantize the matmul output, as W8A8 graphs do (activation scales in and out);
+# nomm (timing only) replaces the history QK and PV matmuls by reductions that still read every key / value of a tile
+ATT_INT8MM = os.environ.get("ATT_INT8MM", "")
+ATT_INT8MM_UNITS = [float(u) for u in os.environ.get("ATT_INT8MM_UNITS", "0.0625,0.0078125,0.25").split(",")]  # act, cache, out
+
+
+def quant8(x, unit, zero):
+    return torch.ops.coreai.quantize(x, unit, torch.int8, zero_point=zero)
 TAPS = M.TAPS
 nk, nv = CFG["linear_num_key_heads"], CFG["linear_num_value_heads"]
 dk, dv = CFG["linear_key_head_dim"], CFG["linear_value_head_dim"]
@@ -345,6 +363,11 @@ class GDNW(nn.Module):
         return self.finish(torch.cat(outs, 1), z, T), conv_out, s, pend * 0
 
 
+def dequant8(codes, unit, zero):
+    """INT8 cache codes to FP16 codes * unit with the native op (host tests substitute a torch version)."""
+    return torch.ops.coreai.dequantize(codes, unit, zero_point=zero, output_dtype=torch.float16)
+
+
 class AttnW(nn.Module):
     def __init__(self, W: dict, i: int) -> None:
         super().__init__()
@@ -352,14 +375,19 @@ class AttnW(nn.Module):
         self.q, self.k, self.v, self.o = (QConv(W, p + f"{m}_proj.weight") for m in "qkvo")
         self.register_buffer("qn", torch.from_numpy((1 + W[p + "q_norm.weight"]).astype(np.float16)))
         self.register_buffer("kn", torch.from_numpy((1 + W[p + "k_norm.weight"]).astype(np.float16)))
-        self.cache_v8 = KV_CACHE_DTYPE == "v8"
-        if KV_CACHE_DTYPE in ("v8", "both"):
+        self.cache_v8, self.cache_k8 = KV_CACHE_DTYPE in ("v8", "kv8"), KV_CACHE_DTYPE == "kv8"
+        if KV_CACHE_DTYPE in ("v8", "kv8", "both"):
             import coreai_torch._compression.custom_layers  # registers native quantize/dequantize
             self.register_buffer("v8_unit", torch.tensor(1 / 128, dtype=torch.float16))
             self.register_buffer("v8_zero", torch.tensor(0, dtype=torch.int8))
+            self.register_buffer("mm8_unit", torch.tensor(ATT_INT8MM_UNITS[0], dtype=torch.float16))  # ATT_INT8MM operands
+            self.register_buffer("mm8_cache_unit", torch.tensor(ATT_INT8MM_UNITS[1], dtype=torch.float16))
+            self.register_buffer("mm8_out_unit", torch.tensor(ATT_INT8MM_UNITS[2], dtype=torch.float16))
 
-    def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None):
+    def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None, kscale=None,
+                cache_k8=None):
         cache_v8 = self.cache_v8 if cache_v8 is None else cache_v8
+        cache_k8 = self.cache_k8 if cache_k8 is None else cache_k8
         def tmajor(x, c):
             return x.reshape(c, T).transpose(0, 1)
         qg = tmajor(self.q(h), 2 * nh * hd).reshape(T, nh, 2 * hd)
@@ -376,11 +404,14 @@ class AttnW(nn.Module):
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
         sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
-        if cache_v8:
-            v_st = torch.ops.coreai.dequantize(v_st, self.v8_unit, zero_point=self.v8_zero,
-                                              output_dtype=torch.float16)
+        mm8 = ATT_INT8MM if cache_k8 and cache_v8 else ""
+        if cache_v8 and mm8 not in ("pv", "both", "botht", "pvdq", "pvo", "botho"):
+            v_st = dequant8(v_st, self.v8_unit, self.v8_zero)
+        if cache_k8 and mm8 not in ("qk", "both", "qkt", "botht", "qkto", "botho"):
+            k_st = dequant8(k_st, self.v8_unit, self.v8_zero)
         blk = ATT_BLOCK_PREFILL if T > P else ATT_BLOCK
-        if ctx <= blk and not cache_v8 and not STABLE_ATTN:
+        form = ATT_SOFTMAX_PREFILL if T > P else ATT_SOFTMAX
+        if ctx <= blk and not cache_v8 and not cache_k8 and not STABLE_ATTN:
             sc_h = ((qg4 @ k_st.transpose(1, 2)) * hd ** -0.5) + mask.reshape(1, 1, ctx)
             pr = torch.softmax(torch.cat([sc_h, sc_b], -1), -1)
             o = pr[:, :, :ctx] @ v_st + pr[:, :, ctx:] @ vt
@@ -389,19 +420,88 @@ class AttnW(nn.Module):
             # blocks, then exp(s - m) per block - exactly softmax over [history | block], no tensor wider than a block
             edges = list(range(0, ctx, blk)) + [ctx]
             spans = list(zip(edges[:-1], edges[1:]))
-            scs = [((qg4 @ k_st[:, a:b].transpose(1, 2)) * hd ** -0.5) + mask[:, a:b].reshape(1, 1, b - a) for a, b in spans]
-            m = sc_b.amax(-1, keepdim=True)
-            for s_ in scs:
-                m = torch.maximum(m, s_.amax(-1, keepdim=True))
-            e_b = torch.exp(sc_b - m)
-            den, num = e_b.sum(-1, keepdim=True), e_b @ vt
-            for s_, (a, b) in zip(scs, spans):
-                e_ = torch.exp(s_ - m)
-                den = den + e_.sum(-1, keepdim=True)
-                if cache_v8:
-                    # Move dynamic V scales onto exp scores, leaving the global denominator unchanged.
-                    e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
-                num = num + e_ @ v_st[:, a:b]
+            def hist(a, b):
+                if mm8 in ("qk", "both"):  # INT8 queries x INT8 key codes (timing research)
+                    qd = dequant8(quant8(qg4, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
+                    s_ = (qd @ dequant8(k_st[:, a:b], self.mm8_cache_unit, self.v8_zero).transpose(1, 2)) * hd ** -0.5
+                elif mm8 == "nomm":  # timing only: scores of the same shape without the QK multiply-adds
+                    s_ = qg4.sum(-1, keepdim=True) * k_st[:, a:b].sum(-1).reshape(nkv, 1, b - a) * hd ** -0.5
+                elif mm8 in ("qkt", "botht", "qkto", "botho"):  # keys as the untransposed operand: (K Q^T)^T
+                    qd = dequant8(quant8(qg4, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
+                    raw = dequant8(k_st[:, a:b], self.mm8_cache_unit, self.v8_zero) @ qd.transpose(1, 2)
+                    if mm8 in ("qkto", "botho"):  # INT8 output boundary
+                        raw = dequant8(quant8(raw, self.mm8_out_unit, self.v8_zero), self.mm8_out_unit, self.v8_zero)
+                    s_ = raw.transpose(1, 2) * hd ** -0.5
+                else:
+                    s_ = (qg4 @ k_st[:, a:b].transpose(1, 2)) * hd ** -0.5
+                if cache_k8:  # key scales per token on the scores: q . (codes / 128) * (scale * 128) = q . k
+                    s_ = s_ * (kscale[:, a:b].reshape(nkv, 1, b - a) * 128)
+                return s_ + mask[:, a:b].reshape(1, 1, b - a)
+            if form == "online":
+                # running max over [block | tiles]: partial sums rescale when it grows, so each tile's scores are
+                # used as soon as they exist instead of staying live until the global max is known
+                m = sc_b.amax(-1, keepdim=True)
+                e_b = torch.exp(sc_b - m)
+                den, num = e_b.sum(-1, keepdim=True), e_b @ vt
+                for a, b in spans:
+                    s_ = hist(a, b)
+                    m_new = torch.maximum(m, s_.amax(-1, keepdim=True))
+                    alpha = torch.exp(m - m_new)
+                    e_ = torch.exp(s_ - m_new)
+                    den = den * alpha + e_.sum(-1, keepdim=True)
+                    if cache_v8:
+                        e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
+                    num = num * alpha + e_ @ v_st[:, a:b]
+                    m = m_new
+            elif form == "split":
+                # every tile independent (its own max, sum and output); only these small partials are combined, so
+                # no tile waits for another and no tile's scores outlive it
+                m_b = sc_b.amax(-1, keepdim=True)
+                e_b = torch.exp(sc_b - m_b)
+                parts = [(m_b, e_b.sum(-1, keepdim=True), e_b @ vt)]
+                for a, b in spans:
+                    s_ = hist(a, b)
+                    m_i = s_.amax(-1, keepdim=True)
+                    e_ = torch.exp(s_ - m_i)
+                    d_i = e_.sum(-1, keepdim=True)
+                    if cache_v8:
+                        e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
+                    parts.append((m_i, d_i, e_ @ v_st[:, a:b]))
+                m = parts[0][0]
+                for m_i, _, _ in parts[1:]:
+                    m = torch.maximum(m, m_i)
+                den = num = None
+                for m_i, d_i, n_i in parts:
+                    w = torch.exp(m_i - m)
+                    den = d_i * w if den is None else den + d_i * w
+                    num = n_i * w if num is None else num + n_i * w
+            else:
+                scs = [hist(a, b) for a, b in spans]
+                m = sc_b.amax(-1, keepdim=True)
+                for s_ in scs:
+                    m = torch.maximum(m, s_.amax(-1, keepdim=True))
+                e_b = torch.exp(sc_b - m)
+                den, num = e_b.sum(-1, keepdim=True), e_b @ vt
+                for s_, (a, b) in zip(scs, spans):
+                    if form == "recompute":  # timing control only: a true second pass that recomputes the scores
+                        s_ = hist(a, b)
+                    e_ = torch.exp(s_ - m)
+                    den = den + e_.sum(-1, keepdim=True)
+                    if cache_v8:
+                        # Move dynamic V scales onto exp scores, leaving the global denominator unchanged.
+                        e_ = e_ * (vscale[:, a:b].reshape(nkv, 1, b - a) * 128)
+                    if mm8 in ("pv", "both", "botht", "pvo", "botho"):  # INT8 exp weights x INT8 value codes
+                        ed = dequant8(quant8(e_, self.mm8_unit, self.v8_zero), self.mm8_unit, self.v8_zero)
+                        pv_ = ed @ dequant8(v_st[:, a:b], self.mm8_cache_unit, self.v8_zero)
+                        if mm8 in ("pvo", "botho"):  # INT8 output boundary
+                            pv_ = dequant8(quant8(pv_, self.mm8_out_unit, self.v8_zero), self.mm8_out_unit, self.v8_zero)
+                        num = num + pv_
+                    elif mm8 == "pvdq":  # control: the same per-tile V dequantize, FP16 exp weights
+                        num = num + e_ @ dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero)
+                    elif mm8 == "nomm":  # timing only: a partial output of the same shape without the PV multiply-adds
+                        num = num + e_.sum(-1, keepdim=True) * v_st[:, a:b].sum(1, keepdim=True)
+                    else:
+                        num = num + e_ @ v_st[:, a:b]
             o = num / den
         o = o.reshape(nkv, grp, T, hd).permute(2, 0, 1, 3).reshape(T, nh * hd) * torch.sigmoid(gate)
         o = o.transpose(0, 1).reshape(1, nh * hd, 1, T)
@@ -437,10 +537,14 @@ ANE_MAX_DIM = 65536
 
 
 def kv_len(ctx: int, T: int) -> int:
-    """KV history rows of every entry at context ctx: the attention concatenates [history | block] along one axis,
-    which the ANE caps at 65536 (64K + 8 failed ANEC for the whole package). The runtime binds the verify and prefill
-    entries of a context to the same KV buffers, so the cap uses the largest block of any entry (T is only checked)."""
+    """KV history rows of every entry at context ctx. The single-softmax graph concatenated [history | block] along one
+    axis, which the ANE caps at 65536 (64K + 8 failed ANEC for the whole package), so entries up to 64K keep
+    65536 - the largest block (the runtime binds the verify and prefill entries of a context to the same KV buffers;
+    T is only checked). Longer entries always take the tiled history path, which never forms that tensor: 80K and
+    100K attention cores compile fully onto the ANE (scripts/m6_long_ctx_attn.py), so they hold their whole context."""
     assert T == P or T in TPS, T
+    if ctx > ANE_MAX_DIM:
+        return ctx
     return min(ctx, ANE_MAX_DIM - max([P] + TPS))
 
 
@@ -451,9 +555,9 @@ class Entry(nn.Module):
         super().__init__()
         self.layers, self.T, self.prefill = layers, T, T > P
         mode = kv_cache_dtype or ("fp16" if KV_CACHE_DTYPE == "both" else KV_CACHE_DTYPE)
-        if mode not in ("fp16", "v8"):
-            raise ValueError("Entry KV format must be fp16 or v8")
-        self.cache_v8 = mode == "v8"
+        if mode not in KV_INPUTS:
+            raise ValueError("Entry KV format must be fp16, v8 or kv8")
+        self.kv_mode, self.cache_v8, self.cache_k8 = mode, mode in ("v8", "kv8"), mode == "kv8"
         self.ctx = kv_len(ctx, T)
         self.gdn_j = [j for j, l in enumerate(layers) if l.kind == "linear_attention"]
         self.att_j = [j for j, l in enumerate(layers) if l.kind != "linear_attention"]
@@ -464,7 +568,7 @@ class Entry(nn.Module):
         return (["x", "cos", "sin", "mask", "conv_sel", "commit", "commit_last"]
                 + (["conv_sel_out", "valid"] if self.prefill else [])
                 + [f"{s}{j}" for j in self.gdn_j for s in ("conv", "rec", "pend")]
-                + [f"{s}{j}" for j in self.att_j for s in (("k", "v", "vs") if self.cache_v8 else ("k", "v"))])
+                + [f"{s}{j}" for j in self.att_j for s in KV_INPUTS[self.kv_mode]])
 
     def output_names(self):
         return (["y"] + [f"tap{l}" for l in self.taps]
@@ -478,7 +582,7 @@ class Entry(nn.Module):
         if self.prefill:
             conv_sel_out, valid = next(it), next(it)
         gdn_in = {j: (next(it), next(it), next(it)) for j in self.gdn_j}
-        att_in = {j: tuple(next(it) for _ in range(3 if self.cache_v8 else 2)) for j in self.att_j}
+        att_in = {j: {s: next(it) for s in KV_INPUTS[self.kv_mode]} for j in self.att_j}
         taps, gdn_out, att_out = [], [], []
         for j, layer in enumerate(self.layers):
             h = rms_hidden(x, layer.ln1)
@@ -491,9 +595,9 @@ class Entry(nn.Module):
                     y, rows, s1, pend_out = layer.mix.verify(h, cr, conv_sel, rc, pd, commit, commit_last, self.T)
                 gdn_out += [rows, s1, pend_out]
             else:
-                values = att_in[j]
-                y, kt, vt = layer.mix(h, cos, sin, mask, values[0], values[1], self.ctx, self.T,
-                                     values[2] if self.cache_v8 else None, self.cache_v8)
+                c = att_in[j]
+                y, kt, vt = layer.mix(h, cos, sin, mask, c["k"], c["v"], self.ctx, self.T, c.get("vs"), self.cache_v8,
+                                      c.get("ks"), self.cache_k8)
                 att_out += [kt, vt]
             x = layer.mlp(x + y)
             if layer.i in self.taps:
@@ -509,11 +613,11 @@ class Entry(nn.Module):
             ex += [torch.zeros(3, T + 3, dtype=f), torch.ones(1, T, 1, dtype=f)]
         for _ in self.gdn_j:
             ex += [torch.zeros(P + 3, cdim, dtype=f), torch.zeros(nv, dk, dv, dtype=f), torch.zeros(nv, 3 * P + 1, dv, dtype=f)]
+        int8 = {"k": self.cache_k8, "v": self.cache_v8}
         for _ in self.att_j:
-            ex += [torch.zeros(nkv, self.ctx, hd, dtype=f),
-                   torch.zeros(nkv, self.ctx, hd, dtype=torch.int8 if self.cache_v8 else f)]
-            if self.cache_v8:
-                ex += [torch.ones(nkv, self.ctx, dtype=f) / 128]
+            for s in KV_INPUTS[self.kv_mode]:
+                ex.append(torch.ones(nkv, self.ctx, dtype=f) / 128 if s in ("ks", "vs") else
+                          torch.zeros(nkv, self.ctx, hd, dtype=torch.int8 if int8[s] else f))
         return tuple(ex)
 
 
@@ -662,7 +766,9 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
             "gdn_j": e0.gdn_j, "att_j": e0.att_j, "taps": e0.taps, "mb": round(mb),
             "numerics": {"SILU": SILU, "MLP_SILU": MLP_SILU, "GDN_SQ": GDN_SQ, "GDN_SV": GDN_SV,   # fp16 fixes built in
                          "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS, "GDN_FAST": GDN_FAST,
-                         "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL}}
+                         "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL,
+                         **({"ATT_SOFTMAX": ATT_SOFTMAX} if ATT_SOFTMAX != "two_pass" else {}),
+                         **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {})}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
     print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)
@@ -692,7 +798,7 @@ def main():
     ap.add_argument("--pctx", default="2048")
     ap.add_argument("--plan", default=",".join(f"{i}-{i + 3}" for i in range(0, 64, 4)))
     ap.add_argument("--name", default=None)
-    ap.add_argument("--kv-cache-dtype", choices=("fp16", "v8", "both"), default=KV_CACHE_DTYPE)
+    ap.add_argument("--kv-cache-dtype", choices=("fp16", "v8", "kv8", "both"), default=KV_CACHE_DTYPE)
     ap.add_argument("--kv-cache-default", choices=("fp16", "v8"), default="v8",
                     help="startup default for a shared-weight --kv-cache-dtype both export (default: v8)")
     ap.add_argument("--stable-attention", action="store_true", default=STABLE_ATTN,
@@ -700,11 +806,11 @@ def main():
     ap.add_argument("--compile", action="store_true", help="precompile each package to .aimodelc")
     ap.add_argument("--drop-src", action="store_true", help="with --compile: delete the source .aimodel")
     a = ap.parse_args()
-    if a.kv_cache_dtype not in ("fp16", "v8", "both"):
-        ap.error("KV_CACHE_DTYPE for conversion must be fp16, v8 or both (auto is a serving option)")
-    KV_CACHE_DTYPE, STABLE_ATTN = a.kv_cache_dtype, a.stable_attention or a.kv_cache_dtype == "v8"
-    if KV_CACHE_DTYPE == "v8":
-        OUT = OUT.with_name(OUT.name + "_kvv8")
+    if a.kv_cache_dtype not in ("fp16", "v8", "kv8", "both"):
+        ap.error("KV_CACHE_DTYPE for conversion must be fp16, v8, kv8 or both (auto is a serving option)")
+    KV_CACHE_DTYPE, STABLE_ATTN = a.kv_cache_dtype, a.stable_attention or a.kv_cache_dtype in ("v8", "kv8")
+    if KV_CACHE_DTYPE in ("v8", "kv8"):
+        OUT = OUT.with_name(OUT.name + ("_kvv8" if KV_CACHE_DTYPE == "v8" else "_kv8"))
     elif KV_CACHE_DTYPE == "both":
         OUT = OUT.with_name(OUT.name + "_kvselect" + ("_stable" if STABLE_ATTN else ""))
     elif STABLE_ATTN:
@@ -727,10 +833,10 @@ def main():
                     "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
                     "pkv_len": {str(c): kv_len(c, 64) for c in pctxs}, "export": str(M.EXPORT_DIR)})
         def layout(mode):
-            return {"format": mode, "keys": "float16", "values": "int8" if mode == "v8" else "float16",
-                    "scales": "float16" if mode == "v8" else None,
-                    "scale_granularity": "token_head" if mode == "v8" else None,
-                    "stable_attention": STABLE_ATTN or mode == "v8"}
+            q8 = mode in ("v8", "kv8")
+            return {"format": mode, "keys": "int8" if mode == "kv8" else "float16",
+                    "values": "int8" if q8 else "float16", "scales": "float16" if q8 else None,
+                    "scale_granularity": "token_head" if q8 else None, "stable_attention": STABLE_ATTN or q8}
         man["kv_cache"] = ({"format": "selectable", "default": a.kv_cache_default,
                             "formats": {mode: layout(mode) for mode in ("fp16", "v8")}}
                            if KV_CACHE_DTYPE == "both" else layout(KV_CACHE_DTYPE))

@@ -57,9 +57,9 @@ def fill(fn, rng, visible: float, x=None) -> dict:
             a[np.arange(3), np.arange(3)] = 1
         elif n in ("commit", "commit_last", "valid"):
             a[:] = 1 if n != "commit_last" else 0
-        elif re.fullmatch(r"v\d+", n) and a.dtype == np.int8:
+        elif re.fullmatch(r"[kv]\d+", n) and a.dtype == np.int8:
             a[:] = rng.integers(-127, 128, a.shape, dtype=np.int8)
-        elif re.fullmatch(r"vs\d+", n):
+        elif re.fullmatch(r"[kv]s\d+", n):
             a[:] = rng.uniform(0.005, 0.05, a.shape).astype(np.float16)
         elif re.fullmatch(r"[kv]\d+", n):
             a[:] = rng.standard_normal(a.shape, dtype=np.float32).astype(np.float16)
@@ -102,7 +102,7 @@ def fit(points: list[tuple[int, float]]) -> dict:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", required=True, type=Path)
-    ap.add_argument("--format", default="v8", choices=("fp16", "v8"))
+    ap.add_argument("--format", default="v8", choices=("fp16", "v8", "kv8"))
     ap.add_argument("--chunks", default="0", help="comma list of chunk indices, or 'all'")
     ap.add_argument("--entries", default="", help="prefix filter: v8, p64 or comma list of canonical names")
     ap.add_argument("--chain", action="store_true", help="run the selected chunks + head as one plan")

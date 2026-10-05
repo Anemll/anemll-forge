@@ -54,6 +54,43 @@ class CacheTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cache_format({"kv_cache": {"format": "unknown"}})
 
+    def test_kv8_metadata_requires_int8_keys_and_values(self):
+        layout = {"format": "kv8", "keys": "int8", "values": "int8", "scales": "float16",
+                  "scale_granularity": "token_head"}
+        self.assertEqual(cache_format({"kv_cache": layout}), "kv8")
+        self.assertEqual(cache_format({"kv_cache": layout}, "kv8"), "kv8")
+        with self.assertRaisesRegex(ValueError, "Requested v8"):
+            cache_format({"kv_cache": layout}, "v8")
+        for key, bad in (("keys", "float16"), ("values", "float16"), ("scales", "float32"), ("scale_granularity", "token")):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "KV8 INT8 keys"):
+                cache_format({"kv_cache": {**layout, key: bad}})
+        with self.assertRaisesRegex(ValueError, "KV8 INT8 keys"):  # a v8 layout cannot claim INT8 keys
+            cache_format({"kv_cache": {**layout, "format": "v8"}})
+
+    def test_kv8_accepted_prefix_quantizes_keys_and_values(self):
+        rng = np.random.default_rng(20261004)
+        keys = rng.normal(size=(4, 64, 256)).astype(np.float16)
+        values = rng.normal(size=keys.shape).astype(np.float16)
+        keys[1, :, 3] *= 9  # per-token/head scale must cope with a channel outlier
+        for count in (0, 1, 7, 8, 64):
+            with self.subTest(count=count):
+                k = np.full((4, 96, 256), 5, np.int8)
+                v = np.full(k.shape, 7, np.int8)
+                ks, vs = np.ones((4, 96), np.float16), np.ones((4, 96), np.float16)
+                kv = {"k3": (None, k), "v3": (None, v), "ks3": (None, ks), "vs3": (None, vs)}
+                append_rows(kv, {"k3_new": keys, "v3_new": values}, [3], 16, count, "kv8")
+                for codes, scale, fill in ((k, ks, 5), (v, vs, 7)):
+                    self.assertTrue(np.all(codes[:, :16] == fill) and np.all(codes[:, 16 + count:] == fill))
+                    self.assertTrue(np.all(scale[:, :16] == 1) and np.all(scale[:, 16 + count:] == 1))
+                for codes, scale, source in ((k, ks, keys), (v, vs, values)):
+                    if count:
+                        expect_codes, expect_scales = quantize_values(source[:, :count])
+                        np.testing.assert_array_equal(codes[:, 16:16 + count], expect_codes)
+                        np.testing.assert_array_equal(scale[:, 16:16 + count], expect_scales)
+                        restored = codes[:, 16:16 + count].astype(np.float32) * scale[:, 16:16 + count, None].astype(np.float32)
+                        error = np.abs(restored - source[:, :count].astype(np.float32))
+                        self.assertTrue(np.all(error <= scale[:, 16:16 + count, None].astype(np.float32) * 0.55))
+
     def test_zero_values_have_finite_nonzero_stored_scales(self):
         codes, scales = quantize_values(np.zeros((4, 8, 256), np.float16))
         self.assertTrue(np.all(codes == 0))

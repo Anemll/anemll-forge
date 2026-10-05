@@ -157,7 +157,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("run", "compare"))
     ap.add_argument("--build", type=Path)
-    ap.add_argument("--format", default="v8", choices=("fp16", "v8"))
+    ap.add_argument("--format", default="v8", choices=("fp16", "v8", "kv8"))
     ap.add_argument("--ref-dir", type=Path)
     ap.add_argument("--out", type=Path)
     ap.add_argument("--ctx", type=int, default=8192)

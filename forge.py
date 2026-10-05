@@ -54,7 +54,7 @@ def parser():
             q.add_argument("--ctx", type=int, default=16384)
             if name == "serve":
                 q.add_argument("--runtime", choices=("coreml", "coreai"), default="coreai")
-                q.add_argument("--kv-cache-dtype", choices=("auto", "fp16", "v8"), default="auto",
+                q.add_argument("--kv-cache-dtype", choices=("auto", "fp16", "v8", "kv8"), default="auto",
                                help="require a matching cache export; auto reads its manifest")
                 modes = q.add_mutually_exclusive_group()
                 modes.add_argument("--draft", type=path, help="Core AI DFlash2 package; default: bundle/drafter/dflash2_lut4_gptq.aimodel")
@@ -125,7 +125,7 @@ def prepare(a):
             raise ValueError("This launcher validates v4 builds; a competing v5 manifest would take precedence. "
                              "Use a dedicated v4 build directory or the research runtime directly.")
         env["RUNTIME"] = runtime
-        if runtime != "coreai" and getattr(a, "kv_cache_dtype", "auto") == "v8":
+        if runtime != "coreai" and getattr(a, "kv_cache_dtype", "auto") in ("v8", "kv8"):
             raise ValueError("V8 KV cache requires the Core AI Swift bridge runtime")
         script = "qwen38_server.py" if a.command == "serve" else "qwen38_chat.py"
         args = ["--hf", str(a.model), "--model-dir", str(a.build), "--ctx", str(a.ctx)]

@@ -35,7 +35,7 @@ from pathlib import Path
 
 import numpy as np
 import coreai_compile_guide as G
-from qwen38_kv_cache import append_rows, cache_format, cache_formats, cache_entries
+from qwen38_kv_cache import KV_INPUTS, append_rows, cache_format, cache_formats, cache_entries
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -216,8 +216,8 @@ class CoreAIQwen:
         self.kv_cache_formats = cache_formats(man)
         self.graph = target_graph(man)
         self.log(graph_line(man, root))
-        if self.kv_cache_dtype == "v8" or len(self.kv_cache_formats) > 1:
-            raise ValueError("V8/selectable KV cache requires the Swift bridge; set COREAI_BRIDGE=1")
+        if self.kv_cache_dtype in ("v8", "kv8") or len(self.kv_cache_formats) > 1:
+            raise ValueError("V8/KV8/selectable KV cache requires the Swift bridge; set COREAI_BRIDGE=1")
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
         self.TP = man.get("TP", 0)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
@@ -534,7 +534,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.kv_cache_formats = cache_formats(man)
         self.graph = target_graph(man)
         self.log(graph_line(man, root))
-        self.log(f"KV cache: FP16 K / {'INT8 V + FP16 token/head scales' if self.kv_cache_dtype == 'v8' else 'FP16 V'}")
+        self.log("KV cache: " + {"fp16": "FP16 K / FP16 V", "v8": "FP16 K / INT8 V + FP16 token/head scales",
+                                 "kv8": "INT8 K / INT8 V + FP16 token/head scales"}[self.kv_cache_dtype])
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
         self.TP = man.get("TP", 0)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
@@ -624,14 +625,16 @@ class CoreAIQwenBridge(CoreAIQwen):
             f = ch["fns"][entry]
             d = {}
             for j in ch["att_j"]:
-                for s in (("k", "v", "vs") if self.kv_cache_dtype == "v8" else ("k", "v")):
+                mode = self.kv_cache_dtype
+                for s in KV_INPUTS[mode]:
                     b = f.buffer("input", f"{s}{j}")
-                    expected = (self.nkv, L) if s == "vs" else (self.nkv, L, self.hd)
-                    dtype = np.int8 if s == "v" and self.kv_cache_dtype == "v8" else f16
+                    expected = (self.nkv, L) if s in ("ks", "vs") else (self.nkv, L, self.hd)
+                    int8 = (s == "v" and mode in ("v8", "kv8")) or (s == "k" and mode == "kv8")
+                    dtype = np.int8 if int8 else f16
                     if b.shape != expected or b.dtype != np.dtype(dtype):
                         raise ValueError(f"KV metadata/layout mismatch for {s}{j}: {b.shape}/{b.dtype}; "
                                          f"expected {expected}/{np.dtype(dtype)}")
-                    if s == "vs":
+                    if s in ("ks", "vs"):
                         b.np[:] = 1
                     if old is not None and keep:
                         b.np[:, :keep] = old[i][f"{s}{j}"][1][:, :keep]

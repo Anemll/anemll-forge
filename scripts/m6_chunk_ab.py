@@ -35,7 +35,7 @@ def main():
     ap.add_argument("--a", type=Path, required=True)
     ap.add_argument("--b", type=Path, required=True)
     ap.add_argument("--manifest", type=Path, required=True, help="manifest holding the chunk's entry aliases")
-    ap.add_argument("--format", default="v8", choices=("fp16", "v8"))
+    ap.add_argument("--format", default="v8", choices=("fp16", "v8", "kv8"))
     ap.add_argument("--entries", default="")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--rounds", type=int, default=5)

@@ -1,5 +1,9 @@
 """KV representation metadata and accepted-row writes (no model imports)."""
 
+# cache inputs per attention layer: v8 = FP16 keys + INT8 values; kv8 = INT8 keys and values (scales per token/head)
+KV_INPUTS = {"fp16": ("k", "v"), "v8": ("k", "v", "vs"), "kv8": ("k", "v", "ks", "vs")}
+INT8_LAYOUTS = {"v8": ("float16", "int8"), "kv8": ("int8", "int8")}  # (keys, values)
+
 
 def cache_formats(manifest):
     """Validate cache layouts without importing model or array dependencies."""
@@ -23,11 +27,13 @@ def cache_formats(manifest):
             for name in layouts:
                 cache_entries(manifest, chunk, name)
         return ("fp16", "v8")
-    if actual not in ("fp16", "v8"):
-        raise ValueError("KV cache format must be auto, fp16 or v8")
-    if actual == "v8" and (metadata.get("keys") != "float16" or metadata.get("values") != "int8"
-                           or metadata.get("scales") != "float16" or metadata.get("scale_granularity") != "token_head"):
-        raise ValueError("V8 requires FP16 keys, INT8 values and FP16 scales per token/head")
+    if actual not in KV_INPUTS:
+        raise ValueError("KV cache format must be auto, fp16, v8 or kv8")
+    if actual in INT8_LAYOUTS and ((metadata.get("keys"), metadata.get("values")) != INT8_LAYOUTS[actual]
+                                   or metadata.get("scales") != "float16"
+                                   or metadata.get("scale_granularity") != "token_head"):
+        raise ValueError("V8 requires FP16 keys and INT8 values, KV8 INT8 keys and values, both with FP16 scales "
+                         "per token/head")
     return (actual,)
 
 
@@ -53,8 +59,8 @@ def cache_entries(manifest, chunk, mode):
 def cache_format(manifest, requested="auto"):
     """Legacy manifests are FP16; selectable exports share weights for both modes."""
     formats = cache_formats(manifest)
-    if requested not in ("auto", "fp16", "v8"):
-        raise ValueError("KV cache format must be auto, fp16 or v8")
+    if requested != "auto" and requested not in KV_INPUTS:
+        raise ValueError("KV cache format must be auto, fp16, v8 or kv8")
     actual = manifest.get("kv_cache", {}).get("default", formats[0]) if len(formats) > 1 else formats[0]
     if requested != "auto" and requested not in formats:
         raise ValueError(f"Requested {requested} KV cache, but this bundle contains {actual}. "
@@ -72,15 +78,21 @@ def quantize_values(values):
 
 
 def append_rows(kv, outputs, attention_indices, position, count, mode):
-    """Write accepted rows only. Keys/local outputs always remain FP16."""
+    """Write accepted rows only. New rows arrive as FP16; v8 stores values and kv8 keys and values as INT8 codes
+    with FP16 scales per token/head (quantize_values)."""
     if not count:
         return
     end = position + count
     for j in attention_indices:
         keys = outputs[f"k{j}_new"][:, :count]
         values = outputs[f"v{j}_new"][:, :count]
-        kv[f"k{j}"][1][:, position:end] = keys
-        if mode == "v8":
+        if mode == "kv8":
+            codes, scales = quantize_values(keys)
+            kv[f"k{j}"][1][:, position:end] = codes
+            kv[f"ks{j}"][1][:, position:end] = scales
+        else:
+            kv[f"k{j}"][1][:, position:end] = keys
+        if mode in INT8_LAYOUTS:
             codes, scales = quantize_values(values)
             kv[f"v{j}"][1][:, position:end] = codes
             kv[f"vs{j}"][1][:, position:end] = scales
