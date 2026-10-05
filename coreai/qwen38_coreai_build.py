@@ -83,6 +83,9 @@ ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
 # shift-invariant), so the fixed INT8 range covers [m_b - 32 + shift, m_b + 32 + shift] per row instead of +-32
 # absolute (long contexts reach scores above 32). Forms combine as a comma-separated list (e.g. s8r,s8,s8b,sm8,pvf8)
 ATT_INT8MM = os.environ.get("ATT_INT8MM", "")
+# per-layer override of ATT_INT8MM, "layer:forms;layer:forms" (forms may be empty: production attention), e.g.
+# "63:s8,s8b" keeps INT8 scores but FP16 PV in layer 63
+ATT_INT8MM_BY_LAYER = {int(k): v for k, v in (x.split(":", 1) for x in os.environ.get("ATT_INT8MM_BY_LAYER", "").split(";") if x)}
 P8_STATS = None  # host research only: a list collects (rounded-to-zero, masked) fractions of the pvn weight codes
 S8_STATS = None  # host research only: a list collects max |raw QK score| per tile (s8 step choice)
 ATT_S8_UNIT = float(os.environ.get("ATT_S8_UNIT", "0.125"))
@@ -414,6 +417,7 @@ class AttnW(nn.Module):
     def __init__(self, W: dict, i: int) -> None:
         super().__init__()
         p = f"{i}/self_attn."
+        self.layer_index = i
         self.q, self.k, self.v, self.o = (QConv(W, p + f"{m}_proj.weight") for m in "qkvo")
         self.register_buffer("qn", torch.from_numpy((1 + W[p + "q_norm.weight"]).astype(np.float16)))
         self.register_buffer("kn", torch.from_numpy((1 + W[p + "k_norm.weight"]).astype(np.float16)))
@@ -459,7 +463,8 @@ class AttnW(nn.Module):
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
         sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
-        mm8 = set(filter(None, ATT_INT8MM.split(","))) if cache_v8 else set()  # INT8 values: v8 and kv8
+        forms = ATT_INT8MM_BY_LAYER.get(getattr(self, "layer_index", -1), ATT_INT8MM)
+        mm8 = set(filter(None, forms.split(","))) if cache_v8 else set()  # INT8 values: v8 and kv8
 
         def has(*forms):
             return any(f in mm8 for f in forms)
@@ -913,6 +918,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                              **({"ATT_PF8_UNIT": float(os.environ.get("ATT_PF8_UNIT", 1 / 64))}
                                 if "sm8" in ATT_INT8MM or "pvf8" in ATT_INT8MM else {})}
                             if ATT_INT8MM else {}),
+                         **({"ATT_INT8MM_BY_LAYER": {str(k): v for k, v in ATT_INT8MM_BY_LAYER.items() if k in layers}}
+                            if any(k in layers for k in ATT_INT8MM_BY_LAYER) else {}),
                          **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
                          **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {})}}
     if len(modes) > 1:
