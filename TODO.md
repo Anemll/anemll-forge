@@ -40,26 +40,12 @@ Splash at 8K to 64K: prefill 1 to 6% slower at 25 to 29% less energy per prompt 
 energy per token. Next: make the forms a builder option (FP8 enabled per chip, off on M5), add a host exactness test
 for the forms without quantization, record the setting in the release manifest, and update the model card numbers.
 
-### 9. Transposed key cache (the next FP16 DRAM traffic after form C2): chunk measured, runtime next
+### 9. Transposed key cache: done (C2T), production next
 
-V8 keys are FP16 and stored (token, 256) while QK reads (256, token), so C2's program transposes every key tile
-before its QK. The builder option `KV_KEYS_T=1` stores keys as (KV head, 256, token); the new key rows are still
-returned as (KV head, T, 256) for the runtime to write transposed. Host: identical output, new keys and new values
-in both layouts for fp16, V8 and kv8, every softmax form, verify and prefill, and the C2 forms
-(`tests/test_kv8_attention.py`). Chunk 0 of C2 with and without it, idle M6, two interleaved rounds, median ms:
-
-| entry | 8K | 32K | 64K |
-| --- | --- | --- | --- |
-| verify | 4.37 to 4.34 (-0.8%) | 5.24 to 5.14 (-1.9%) | 6.49 to 6.21 (-4.2%) |
-| prefill | 12.11 to 11.92 (-1.6%) | 15.91 to 15.20 (-4.5%) | 21.14 to 19.63 (-7.1%) |
-
-HWX: C2's output-transpose cycles grow with the context (436 to 1,065 per verify stream, 1,239 to 2,639 per
-prefill stream from 8K to 64K, 13.7% of the program's cycles); with `KV_KEYS_T` they are flat (364 to 491 and
-1,067 to 1,265: the new-block and projection transposes). For the 16-chunk model: about 24 ms less per 64-row call
-at the 64K entry (about 8% of the call), 11 ms at 32K, 3 ms at 8K; about 4.4 ms per verify at 64K.
-Next: the runtime writes key rows transposed (`scripts/qwen38_coreai_model.py` cache buffers and context resizes,
-`scripts/qwen38_kv_cache.py`, saved caches), the layout recorded in the manifest's `kv_cache` and checked at load,
-then a full C2 + `KV_KEYS_T` build, the long-context evals against C2 (same math) and the server benchmark.
+`KV_KEYS_T=1` (builder, runtime, manifest `key_layout`, tests) removes the per-tile key transposes. Full C2T build:
+logits identical to C2; prefill 3.1 to 5.5% faster than C2 at the same power, within -1.4% to +3.6% of Splash at
+31 to 33% less energy per prompt token (research note, "Transposed key cache (C2T)"). Next: make C2T the release
+build (with item 8), rerun KL-512 for the record, and serve it as the usual server.
 
 ### 10. Pi compaction latency (8.3 minutes to the first output after a compaction)
 

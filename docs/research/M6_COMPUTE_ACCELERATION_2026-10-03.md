@@ -540,6 +540,35 @@ C2 quality against V8: verify path (64 + 4,096) KL 0.00028, top-1 99.3%, perplex
 
 C2 prefills 1 to 6% slower than Splash at 25 to 29% less energy per prompt token (about 32 W against 46 W for the whole machine). Decode is within -7% to +13% (one fixture, three requests; the sign changes with the context, so most of it is acceptance noise) at 32 to 45% less energy per generated token (about 29 W against 46.5 W). Net of idle (9 to 10 W): prefill 0.073 to 0.103 J per token against 0.119 to 0.165, decode 0.31 to 0.40 against 0.67 to 0.78. Raw: `compare/ane_c2_window.json`, `ane_64k_C2.json`, `splash_ud_iq3xxs.json`, summary `c2_vs_splash_total_power.json` (research volume).
 
+### Transposed key cache (C2T)
+
+V8 keys are FP16 and stored (token, 256) while QK reads (256, token), so C2's program transposes every key tile before its QK; in chunk 0's HWX those output-transpose tasks are 13.7% of the cycles and grow with the context. `KV_KEYS_T=1` stores keys as (KV head, 256, token): the builder records `kv_cache.key_layout = dim_token`, the runtime writes accepted and prefill key rows transposed and checks the bound buffer shapes. In the HWX the transpose cycles stop growing with the context (only the new-block and projection transposes remain). Chunk 0, interleaved: verify -0.8 / -1.9 / -4.2% and prefill -1.6 / -4.5 / -7.1% at 8K / 32K / 64K.
+
+Full C2T build (C2 plus `KV_KEYS_T`, full ladder; the export and the ANE compile overlapped, 27.5 min for both): logits identical to C2 (KL 0.0, same perplexity at 8K and 64K). Whole server against C2 and Splash (same benchmark and whole-machine power as the table above):
+
+| Context | Prefill tok/s, C2T / C2 / Splash | J per prompt token, C2T / C2 / Splash | Decode tok/s, C2T / C2 / Splash | J per generated token, C2T / C2 / Splash |
+| --- | --- | --- | --- | --- |
+| 8K | 306.3 / 297.0 / 310.7 | 0.102 / 0.107 / 0.148 | 60.8 / 61.2 / 54.2 | 0.458 / 0.474 / 0.857 |
+| 16K | 296.6 / 283.9 / 286.5 | 0.108 / 0.118 / 0.157 | 60.3 / 51.7 / 55.7 | 0.465 / 0.567 / 0.831 |
+| 32K | 274.7 / 263.8 / 272.4 | 0.120 / 0.126 / 0.169 | 54.5 / 55.7 / 52.0 | 0.519 / 0.516 / 0.901 |
+| 48K | 253.2 / 241.8 / 256.5 | 0.130 / 0.135 / 0.182 | 46.1 / 48.8 / 48.4 | 0.590 / 0.580 / 0.960 |
+| 64K | 236.6 / 224.3 / 231.1 | 0.136 / 0.143 / 0.203 | 47.9 / 47.8 / 48.7 | 0.569 / 0.587 / 0.960 |
+
+C2T prefills 3.1 to 5.5% faster than C2 at the same power, within -1.4% to +3.6% of Splash, at 31 to 33% less energy per prompt token. Decode stays within the fixture's acceptance noise. Raw: `compare/ane_c2t_window.json`, `ane_64k_C2T.json`, summary `c2t_c2_splash_total_power.json`.
+
+### Model-file quality: Splash's GGUF on the same KL-512
+
+Splash's API returns no logits, so its model file was scored through llama.cpp (llama-cpp-python 0.3.36, M5 Max) with `scripts/kl512_gguf.py`: the same 64 sequences, 40,023 positions and metric as `m6_kl512_eval.py`. Splash reports 99.3 to 99.45% same top token as llama.cpp on this model. Mean KL to the BF16 teacher (reference perplexity 2.1355):
+
+| Model file | Stored bits per layer weight | Mean KL | Top-1 agreement | Perplexity |
+| --- | ---: | ---: | ---: | ---: |
+| UD-Q5_K_XL, FP16 / q8_0 cache | | 0.00328 / 0.00329 | 97.70 / 97.78% | 2.1437 / 2.1428 |
+| UD-IQ3_XXS (Splash's), FP16 / q8_0 cache | 3.16 | 0.16253 / 0.16232 | 89.40 / 89.41% | 2.2531 / 2.2533 |
+| C2 (ANE) | about 3.2 (package size, with FP16 corrections) | 0.18376 | 86.02% | 2.4144 |
+| V8 (ANE) | | 0.18417 | 86.03% | 2.4131 |
+
+(Flash attention on in both runs of each pair: llama.cpp needs it for a quantized V cache.) The 8-bit KV cache costs nothing measurable even on the near-lossless Q5_K_XL. Splash's own INT8 cache uses one scale per token and head (256 values) where q8_0 uses one per 32; our `kv8` has Splash's granularity and measured a direct KL of 0.00007 against V8. UD-IQ3_XXS is a mix (layers: 31.5% IQ3_XXS, 24.4% IQ3_S, 10.9% IQ4_XS, 22% IQ2 types, small shares from IQ1_S to Q8_0; LM head Q4_K, embeddings Q2_K). At about the same stored size per layer weight, it is closer to BF16 than the VQ builds (KL 0.163 against 0.184; direct KL between it and C2 0.29, same top token 84.5%). Raw: `kl512_splash/` on the research volume.
+
 ### Review of coreai-torch `_compression` for attention
 
 | Item | Use for attention |
