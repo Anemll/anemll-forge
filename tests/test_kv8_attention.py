@@ -148,6 +148,22 @@ class Int8CacheAttention(unittest.TestCase):
                                 outs.append(mix(h, cos, sin, c["mask"], k, v, ctx, T, vs, v8, ks, k8)[0])
                         torch.testing.assert_close(outs[1], outs[0], rtol=0, atol=0)
 
+    def test_relative_scores_are_exact(self):
+        """ATT_INT8MM=s8r (scores shifted by the row's block maximum before any 8-bit pair) leaves the attention
+        unchanged without quantization, on v8 and kv8, verify and prefill widths: softmax is shift-invariant."""
+        for T, ctx, filled in ((8, 2048, 1500), (64, 3072, 2100)):
+            mix, c = attention(T, T + ctx + 11), self.history(ctx, filled, T + ctx + 11)
+            cos, sin = torch.ones(T, Bld.rot, dtype=f64), torch.zeros(T, Bld.rot, dtype=f64)
+            h = torch.zeros(1, 8, 1, T, dtype=f64)
+            cases = {"v8": (c["kf"], c["vc"], c["vs"], True, None, False), "kv8": (c["kc"], c["vc"], c["vs"], True, c["ks"], True)}
+            for mode, (k, v, vs, v8, ks, k8) in cases.items():
+                with self.subTest(T=T, mode=mode):
+                    outs = []
+                    for forms in ("", "s8r"):
+                        with Patched(ATT_BLOCK=512, ATT_BLOCK_PREFILL=1024, STABLE_ATTN=True, ATT_INT8MM=forms):
+                            outs.append(mix(h, cos, sin, c["mask"], k, v, ctx, T, vs, v8, ks, k8)[0])
+                    torch.testing.assert_close(outs[1], outs[0], rtol=1e-10, atol=1e-10)
+
     def test_masked_rows_do_not_matter(self):
         T, ctx, filled = 8, 2048, 900
         mix, c = attention(T, 3), self.history(ctx, filled, 3)

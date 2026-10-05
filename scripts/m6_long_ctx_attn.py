@@ -182,7 +182,7 @@ def main():
     ap.add_argument("--units", default="", help="ATT_INT8MM_UNITS act,cache (package name gets _u)")
     a = ap.parse_args()
     forms = {"qk", "qkt", "pv", "both", "botht", "pvdq", "qkto", "pvo", "botho", "nomm", "pvn", "bothn", "pvt", "pvta", "pvtu",
-             "qkn", "qkf", "pvtm", "pvf8", "pvf5", "s8", "t8", "s8b", "sm8"}
+             "qkn", "qkf", "pvtm", "pvf8", "pvf5", "s8", "t8", "s8b", "sm8", "s8r"}
     if a.int8mm and not set(a.int8mm.split(",")) <= forms:
         ap.error(f"--int8mm: comma-separated forms from {sorted(forms)}")
     a.ctxs = [int(c) for c in a.ctx.split(",")]

@@ -79,12 +79,15 @@ ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
 # t8 an INT8 pair (step 1/8) on s - m_t before the exp of the pvt forms;
 # sm8 (FP8, M6 only) quantizes the exp output of the pvt forms to FP8 e4m3 (scale 1/256) and takes the softmax sum
 # from it, an 8-bit sum without the UINT8 underflow bias; the PV weights are then those FP8 weights times the value
-# scales. Forms combine as a comma-separated list (e.g. s8b,t8,sm8,pvtu)
+# scales; s8r subtracts each row's block maximum plus ATT_S8R_SHIFT from all scores before the pairs (softmax is
+# shift-invariant), so the fixed INT8 range covers [m_b - 32 + shift, m_b + 32 + shift] per row instead of +-32
+# absolute (long contexts reach scores above 32). Forms combine as a comma-separated list (e.g. s8r,s8,s8b,sm8,pvf8)
 ATT_INT8MM = os.environ.get("ATT_INT8MM", "")
 P8_STATS = None  # host research only: a list collects (rounded-to-zero, masked) fractions of the pvn weight codes
 S8_STATS = None  # host research only: a list collects max |raw QK score| per tile (s8 step choice)
 ATT_S8_UNIT = float(os.environ.get("ATT_S8_UNIT", "0.125"))
 ATT_S8B_UNIT = float(os.environ.get("ATT_S8B_UNIT", "0.125"))
+ATT_S8R_SHIFT = float(os.environ.get("ATT_S8R_SHIFT", "8"))
 S8B_STATS = None  # host research only: max |score| per tile after the key scales, masked entries excluded
 ATT_INT8MM_UNITS = [float(u) for u in os.environ.get("ATT_INT8MM_UNITS", "0.0625,0.0078125,0.25").split(",")]  # act, cache, out
 
@@ -483,6 +486,9 @@ class AttnW(nn.Module):
             # blocks, then exp(s - m) per block - exactly softmax over [history | block], no tensor wider than a block
             edges = list(range(0, ctx, blk)) + [ctx]
             spans = list(zip(edges[:-1], edges[1:]))
+            if has("s8r"):  # scores relative to the row's block maximum (exact: softmax is shift-invariant)
+                shift = sc_b.amax(-1, keepdim=True) + ATT_S8R_SHIFT
+                sc_b = sc_b - shift
             if has("qkn"):  # INT8 queries per row in [-1, 1] x INT8 key codes; scores rescaled per row
                 rq = torch.clamp_min(qg4.abs().amax(-1, keepdim=True), 1e-4)
                 qn8 = dequant8(quant8(qg4 * (1 / rq), self.p8_unit, self.v8_zero), self.p8_unit, self.v8_zero)
@@ -510,12 +516,16 @@ class AttnW(nn.Module):
                     s_ = raw.transpose(1, 2) * hd ** -0.5
                 else:
                     s_ = (qg4 @ ktile(a, b).transpose(1, 2)) * hd ** -0.5
+                if has("s8r") and not cache_k8:  # v8: QK gives the true scores
+                    s_ = s_ - shift
                 if S8_STATS is not None:
                     S8_STATS.append(float(s_.abs().max()))
                 if has("s8"):  # INT8 raw scores: QK writes 8-bit, the softmax passes read 8-bit
                     s_ = dequant8(quant8(s_, self.s8_unit, self.v8_zero), self.s8_unit, self.v8_zero)
                 if cache_k8:  # key scales per token on the scores: q . (codes / 128) * (scale * 128) = q . k
                     s_ = s_ * (kscale[:, a:b].reshape(nkv, 1, b - a) * 128)
+                    if has("s8r"):
+                        s_ = s_ - shift
                 mk = mask[:, a:b].reshape(1, 1, b - a)
                 if S8B_STATS is not None:
                     S8B_STATS.append(float((s_ * (mk > -1)).abs().max()))
@@ -895,7 +905,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL,
                          **({"ATT_SOFTMAX": ATT_SOFTMAX} if ATT_SOFTMAX != "two_pass" else {}),
                          **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {}),
-                         **({"ATT_INT8MM": ATT_INT8MM, "ATT_S8_UNIT": ATT_S8_UNIT, "ATT_S8B_UNIT": ATT_S8B_UNIT}
+                         **({"ATT_INT8MM": ATT_INT8MM, "ATT_S8_UNIT": ATT_S8_UNIT, "ATT_S8B_UNIT": ATT_S8B_UNIT,
+                             **({"ATT_S8R_SHIFT": ATT_S8R_SHIFT} if "s8r" in ATT_INT8MM else {})}
                             if ATT_INT8MM else {}),
                          **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
                          **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {})}}
