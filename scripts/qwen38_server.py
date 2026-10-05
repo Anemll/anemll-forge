@@ -123,6 +123,30 @@ def loop_period(out, reps, min_period=4, max_period=256):
     return 0
 
 
+class DraftIngestWindows:
+    """Drafter context ingestion during prefill limited to the rows a draft or a snapshot can see: the last W + R
+    positions before each snapshot cut and before the end of the prompt. DFlash2 keeps a ring of W slots (slot =
+    position % W) behind a W-token sliding window, the last R rows stay pending until the next draft call, and a
+    context row's K / V depend only on that row's features, so every other row would be overwritten before any
+    draft or snapshot used it: the drafter state (ring, slot positions, pending rows) is the same as when every row
+    is ingested, at a fraction of the drafter calls and feature copies. DRAFT_INGEST=all ingests everything."""
+
+    def __init__(self, drafter, ends):
+        self.drafter, back = drafter, drafter.W + getattr(drafter, "R", 0)
+        self.ranges = [(max(0, e - back), e) for e in sorted(set(ends))]
+
+    def wants(self, p0, n):
+        return any(a < p0 + n and p0 < b for a, b in self.ranges)
+
+    def __call__(self, feats, positions):
+        positions = np.asarray(positions)
+        keep = np.zeros(len(positions), bool)
+        for a, b in self.ranges:
+            keep |= (positions >= a) & (positions < b)
+        if keep.any():
+            self.drafter.add_context(np.asarray(feats)[keep], positions[keep])
+
+
 class Engine:
     def __init__(self, a):
         mdir = Path(os.path.expanduser(a.model_dir))
@@ -267,11 +291,11 @@ class Engine:
             self.model.half = snap.get("half", 0)
         self.fed = list(snap["ids"])
 
-    def _feed(self, ids):
+    def _feed(self, ids, ingest=None):
         """Tokens into the model; logits after the last one (v2+: batched prefill; with the drafter, the tap
-        features of every token also go into the drafter's context)."""
+        features go into the drafter's context: every token, or only the rows `ingest` keeps)."""
         if self.drafter is not None:
-            return self.model.feed(ids, on_features=self.drafter.add_context)
+            return self.model.feed(ids, on_features=ingest or self.drafter.add_context)
         if self.v2:
             return self.model.feed(ids)
         logits = None
@@ -315,9 +339,12 @@ class Engine:
         if turn_cut > reused:
             cuts.append((turn_cut, "turn"))
         logits, i = None, reused
+        ingest = None
+        if self.drafter is not None and os.environ.get("DRAFT_INGEST", "window") != "all":
+            ingest = DraftIngestWindows(self.drafter, [c for c, _ in cuts] + [len(ids)])
         for cut, key in sorted(cuts) + [(len(ids), None)]:
             if cut > i:  # feed up to the snapshot point, then snapshot
-                logits = self._feed(ids[i:cut])
+                logits = self._feed(ids[i:cut], ingest)
                 self.fed.extend(ids[i:cut])
                 i = cut
             if key:

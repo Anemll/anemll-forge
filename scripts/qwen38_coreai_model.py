@@ -537,12 +537,12 @@ class CoreAIQwen:
                 blk = ids[i:i + min(r, self.TP)]
                 p0 = self.pos
                 logits = self.prefill_block(blk)
-                if on_features:
+                if on_features and getattr(on_features, "wants", lambda a, n: True)(p0, len(blk)):
                     on_features(self.features_prefill(len(blk)), np.arange(p0, p0 + len(blk)))
             else:
                 blk = ids[i:i + self.T]
                 logits = self.call(blk)[len(blk) - 1]
-                if on_features:
+                if on_features and getattr(on_features, "wants", lambda a, n: True)(self.pos, len(blk)):
                     on_features(self.features(len(blk)), np.arange(self.pos, self.pos + len(blk)))
                 self.accept(len(blk))
             i += len(blk)
