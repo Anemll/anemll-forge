@@ -511,7 +511,34 @@ C matches V8 (for scale, `kv8` against V8 measured 0.00007). A and B move the mo
 | B | -3.2% | -9.9 to -11.3% | -14.7 to -15.4% | -1.5 to -1.8% | -3.9 to -4.6% | -5.9 to -6.3% |
 | **C** | **-2.5 to -2.8%** | **-8.1 to -8.8%** | **-13.9 to -14.1%** | **-1.5%** | **-3.8%** | **-6.2%** |
 
-C is the M6 candidate: about 14% off a chunk's 64K prefill and 6% off its 64K verify at V8 quality. A full build of C with the server benchmark and a 64K long-context check follows.
+C is the M6 candidate: about 14% off a chunk's 64K prefill and 6% off its 64K verify at V8 quality. The full build is in the next section.
+
+### Form C at long context: the FP8 range fault, and C2
+
+The full build of C matched V8 on KL-512 but failed the long-context evals, which KL-512 cannot see (its sequences fit in one history tile). Long-context evals (`scripts/m6_long_ctx_eval.py`, target only), against the V8 build:
+
+| Build | 8K (7,600 + 512): KL vs V8, top-1, perplexity | 64K (64,000 + 1,024): KL vs V8, top-1, perplexity |
+| --- | --- | --- |
+| V8 | perplexity 8.0952 | perplexity 5.0673 |
+| C (FP8 scale 1/256) | 0.0345, 93.6%, 8.3335 | 0.0626, 92.2%, 5.3652 |
+| Cr (C plus `s8r`, shift 8) | 0.0451, 92.8%, 8.4143 | 0.0676, 92.6%, 5.3995 |
+| **C2 (FP8 scale 1/64)** | **0.00021, 98.8%, 8.0957** | **0.00048, 98.9%, 5.0685** |
+
+Cr tested whether the fixed INT8 score range clipped (`s8r` re-centres each row before the pairs); it was no better. Bisection with hybrid builds (`scripts/m6_hybrid_build.py`: the forms in some chunks, V8 in the rest) and real captured attention inputs (`scripts/m6_capture_attn_inputs.py`, `scripts/m6_attn_core_check.py`: device against host simulation, per head) found one head, layer 63 head 19, whose FP8 PV operand reached about 200 at scale 1/256. The M6 ANE computed that INT8 x FP8 PV wrongly, although e4m3 holds 448, and matched the host at 100 and below. C2 is C with FP8 scale 1/64 (`ATT_PF8_UNIT`, now the default): softmax weights in [0, 1] become at most 64.
+
+C2 quality against V8: verify path (64 + 4,096) KL 0.00028, top-1 99.3%, perplexity 6.6452 against 6.6441; KL-512 0.183763 to BF16 (V8 0.184168), top-1 86.02%, perplexity 2.4144, direct KL to V8 0.00039, same top token 99.3%. Prefill in the long-context evals (target only, no drafter): 8K 292.5 to 310.8 tok/s (+6.3%), 64K 199.6 to 223.9 tok/s (+12.2%).
+
+**Whole server against Splash** (`scripts/m6_compare_bench.py`: greedy, thinking off, 256-token cap, one cold prompt filling each context to capacity - 512, decode the median of three requests). C2 on 5 October with current code (windowed drafter ingestion: 2.3 to 2.5% of a cold prefill above 16K, identical output); Splash (UD IQ3_XXS on the GPU) recorded on 4 October. Energy is whole-machine (mactop `total_power`) for both: the Splash record's stored joules per token use `system_power`, which excludes the SoC (at 64K prefill 21.0 W against 46.9 W total), so every value here is recomputed.
+
+| Context | Prompt | Prefill tok/s, C2 / Splash | J per prompt token | Decode tok/s, C2 / Splash | J per generated token |
+| --- | ---: | --- | --- | --- | --- |
+| 8K | 7,673 | 297.0 / 310.7 | 0.107 / 0.148 | 61.2 / 54.2 | 0.474 / 0.857 |
+| 16K | 15,865 | 283.9 / 286.5 | 0.118 / 0.157 | 51.7 / 55.7 | 0.567 / 0.831 |
+| 32K | 32,249 | 263.8 / 272.4 | 0.126 / 0.169 | 55.7 / 52.0 | 0.516 / 0.901 |
+| 48K | 48,633 | 241.8 / 256.5 | 0.135 / 0.182 | 48.8 / 48.4 | 0.580 / 0.960 |
+| 64K | 64,953 | 224.3 / 231.1 | 0.143 / 0.203 | 47.8 / 48.7 | 0.587 / 0.960 |
+
+C2 prefills 1 to 6% slower than Splash at 25 to 29% less energy per prompt token (about 32 W against 46 W for the whole machine). Decode is within -7% to +13% (one fixture, three requests; the sign changes with the context, so most of it is acceptance noise) at 32 to 45% less energy per generated token (about 29 W against 46.5 W). Net of idle (9 to 10 W): prefill 0.073 to 0.103 J per token against 0.119 to 0.165, decode 0.31 to 0.40 against 0.67 to 0.78. Raw: `compare/ane_c2_window.json`, `ane_64k_C2.json`, `splash_ud_iq3xxs.json`, summary `c2_vs_splash_total_power.json` (research volume).
 
 ### Review of coreai-torch `_compression` for attention
 

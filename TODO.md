@@ -32,9 +32,13 @@ A decode cycle is 98% ANE work in sequence (8K: 114 ms = drafter 15.3 + verify 9
 
 One extra cache format compiles about 1.65x longer, and every context adds tiles. Keep the default build to one format; generalize `--kv-cache-dtype` to any list or `all` (selectable manifests with any subset); add a quick-test preset (8K, one format) so a new graph or format builds and compiles in minutes; have the compile guide name these options when the estimate is long.
 
-### 8. Form C in production (M6)
+### 8. Form C2 in production (M6)
 
-Full 8K to 64K build of form C (`ATT_INT8MM=s8,s8b,sm8,pvf8`, `ATT_S8_UNIT=ATT_S8B_UNIT=0.25`, V8): server benchmark against V8 and the 64K long-context check are running (R, 5 October). If they hold: make the forms a builder option (FP8 enabled per chip, off on M5), add a host exactness test for the forms without quantization, record the setting in the release manifest, and update the model card numbers.
+C2 (`ATT_INT8MM=s8,s8b,sm8,pvf8`, `ATT_S8_UNIT=ATT_S8B_UNIT=0.25`, FP8 scale `ATT_PF8_UNIT=1/64`, V8) is validated
+(research note, "Form C at long context"): V8 quality at 8K, 64K and KL-512; 64K prefill +12% (eval); server against
+Splash at 8K to 64K: prefill 1 to 6% slower at 25 to 29% less energy per prompt token, decode on par at 32 to 45% less
+energy per token. Next: make the forms a builder option (FP8 enabled per chip, off on M5), add a host exactness test
+for the forms without quantization, record the setting in the release manifest, and update the model card numbers.
 
 ### 9. Transposed key cache (the next FP16 DRAM traffic after form C2)
 
@@ -96,8 +100,8 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
 
 ### 11. Measurements waiting for an idle server
 
-- 64K server benchmark with energy for C2 and V8 (`bench_64k.sh` in the session scratchpad; swap was the cause of
-  today's 64K failures: reboot first so swap starts near zero).
+- Done 5 October: C2 server benchmark with whole-machine energy at 8K to 64K, current code, against the 4 October
+  Splash record (table in the research note). V8 not rerun (not needed); its 64K attempt today hit the swap guard.
 - Done 5 October: windowed drafter ingestion (`DRAFT_INGEST`, server default) against `DRAFT_INGEST=all`, C2 64K
   server, cold prompts of repo source, greedy, thinking off: 6K 20.3 s both, 16K 55.2 against 56.6 s (2.5%), 30K
   112.7 against 115.4 s (2.3%); replies identical and tok/verify and acceptance identical at every length. A
