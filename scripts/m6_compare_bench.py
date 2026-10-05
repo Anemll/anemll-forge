@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
+import shutil
 import statistics
 import subprocess
 import threading
@@ -30,7 +32,9 @@ from transformers import AutoTokenizer
 
 from m6_server_bench import NOTES, SYSTEM, TASK
 
-MACTOP = Path.home() / "homebrew/bin/mactop"
+MACTOP = Path(os.environ.get("MACTOP") or shutil.which("mactop")  # PATH, else the usual Homebrew prefixes
+              or next((str(p) for p in (Path.home() / "homebrew/bin/mactop", Path("/opt/homebrew/bin/mactop"))
+                       if p.exists()), "mactop"))
 FIELDS = ("system_power", "total_power", "cpu_power", "gpu_power", "ane_power", "dram_power")
 
 
