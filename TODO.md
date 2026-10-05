@@ -102,21 +102,30 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
   `DRAFT_INGEST=all` and with the default, prefill time and acceptance (expected: about 100 to about 40 drafter calls
   at 6.5K tokens, about 1,000 to about 65 at 64K).
 
-### 12. Smaller ladder entries (2K, 4K) for the first prefill
+### 12. Smaller ladder entries (2K, 4K) for the first prefill: measured, not worth it
 
 The C2 and V8 packages have verify and prefill entries at 8K, 16K, 32K, 48K and 64K (manifest `ctxs` / `pctxs`),
-so a cold prompt's first 8K rows run on the 8K entry, whose attention reads the full 8K history tile set on every
-64-row call. Smaller entries would cut that for the first rows. The 5 October server log tempers the expectation:
-on two cold prompts (17.9K and 31.1K tokens) the 8K and 16K entries prefilled at the same rate (263 and 264 tok/s)
-and the 32K entry at 228, which suggests unused history is a small share of a prefill call below 16K. A 2K or 4K
-entry would also serve only the first 4K rows (about 15 s at 8K), and Pi's prompts start at about 6.5K.
+so a cold prompt's first 8K rows run on the 8K entry. Measured on 5 October (idle M6, server stopped): chunk 0 of
+C2 (layers 0 to 3, one attention layer; numerics identical to the production chunk) built with verify entries
+2K / 4K / 8K and prefill entries 2K to 32K, `scripts/m6_entry_sweep.py`, 30 calls each, median ms per call:
 
-- First, one chunk (idle machine): build one chunk with prefill entries 2K, 4K and 8K (`--pctx 2048,4096,8192`),
-  time a 64-row prefill call on each (`scripts/m6_chunk_ab.py --entries`), times 16 chunks for the whole model.
-- If 2K / 4K save more than a few percent: prefill-only entries (`--pctx`; 2K / 4K verify entries would rarely run
-  under Pi), then the full model: cold prefills of 2K, 4K, 8K and 17.9K tokens with and without them, the resize
-  cost (KV rows moved: 38 to 366 ms in the log), compile time and wired memory (about 0.75 GB per entry in
-  COREAI_PORT_NOTES; the 64K server is already close to swapping).
+| entry | 2K | 4K | 8K | 16K | 32K | 48K | 64K |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| prefill (64 rows) | 11.15 | 11.48 | 12.07 | 13.39 | 15.87 | 18.49 | 21.08 |
+| verify (8 rows) | 4.12 | 4.22 | 4.35 | | | | |
+
+Prefill fits 10.8 ms + 0.157 ms per 1K of history per chunk (context share 3% at 2K, 10% at 8K, 49% at 64K); the
+production chunk gives the same 8K / 16K / 32K times. For the 16-chunk model, a 2K entry saves 14.7 ms and a 4K
+entry 9.4 ms per 64-row call against the 8K entry: about 0.8 s per cold prefill in all (32 calls each), about 1% of
+a 17.9K Pi prefill and 6 to 7% of a prompt under 4K. Verify: 3.7 ms (2K) and 2.1 ms (4K) per call, only below 4K
+of context, which Pi never reaches (its prompts start at about 6.5K). Not worth the compile time and the wired
+memory of two more entries on a 64K server that is already close to swapping. (The server log's equal 8K and 16K
+prefill rates hid the 11% per-call difference behind other per-call costs.)
+
+The gaps at the top of the ladder matter more: rows between two entries run on the larger one, about 2.6 ms per
+call per 1K of unused history for the whole model. Rows 16K to 32K average 8K unused (about 20 ms of about 267 ms
+per call); a 24K entry would save about 2.6 s on a 32K cold prefill, for the same memory cost per entry.
+Raw: `/Volumes/SSD4TB/anemll-forge-research/ladder_small_sweep.json`, `ladder_C2_sweep.json`.
 
 ### 13. Smaller items
 
