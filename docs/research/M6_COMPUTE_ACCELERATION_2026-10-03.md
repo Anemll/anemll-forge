@@ -17,6 +17,8 @@ With the builder defaults (V8 cache only, 2048-wide verify tiles, 4096-wide pref
 
 The first full candidate (both KV formats, 2048-wide tiles everywhere) carried the server and quality measurements: with DFlash2, cold prefill **+26% (8K) to +41% (64K)** tokens/s and decode **+21 to +25% at 32K to 64K**, with identical replies and acceptance at 48K and 64K; compiled KL-512 against BF16 unchanged (mean 0.18427 to 0.18417), direct KL between release and candidate 3.4e-5 nats. Its narrow prefill tiles made the cold compile 5 times longer, which `ATT_BLOCK_PREFILL=4096` removed without losing speed. Neither change is a 2x end-to-end. Details in [Full model](#full-model).
 
+Follow-up measurements from 4 October (INT8 keys, contexts above 64K, softmax forms, larger prefill calls, INT8 compute on the ANE, and a comparison with a GPU engine) are in [Follow-up, 4 October](#follow-up-4-october-measured).
+
 ## Where the time goes (Measured)
 
 ### Context sweep of the release target
@@ -226,6 +228,94 @@ Fits: verify `85.8 ms + 0.710 ms/K`, prefill `176 ms + 3.40 ms/K`. These beat th
 
 Compile cost grows faster than linearly with the size of one program. The history attention has no weights, so a single shared attention program could serve all 16 attention layers: compiled alone, the complete 2048-tile history attention for all five contexts and both row counts took 21.0 s (3.5 s with 16384-wide tiles), against roughly 325 s per chunk when embedded. Splitting each chunk around a shared attention program would cost about 16 extra calls per forward (about 0.25 ms each) and a runtime restructure; it is not implemented. Writing the tiles as one batched op does not help: the ANE compiler expands it into the same per-tile work (16.4 s versus 16.2 s for one 64K layer) and it ran slower.
 
+## Follow-up, 4 October (Measured)
+
+Same M6 and OS. Every long run had a swap watchdog (stop the job if swap grows more than 1 GB). Timings of single cores and chunks come from idle, same-session runs unless noted; whole-machine power is mactop's `total_power` (the SMC's system total, not its `system_power` field, which excludes the SoC).
+
+### Against a GPU engine: Splash on the same model
+
+[Splash](https://github.com/incoai/splash) 1.2.0 (Apache-2.0) serving Unsloth's `Qwen3.8-27B-GGUF:UD-IQ3_XXS` with its DFlash2 drafter on the Metal GPU, against our default build (faster graph, V8 cache, DFlash2), each server alone on the machine. Same harness ([`scripts/m6_compare_bench.py`](../../scripts/m6_compare_bench.py)): one cold prompt filling the context entry minus 512 tokens (a per-run nonce defeats prefix caching), then three identical greedy requests with thinking off and 256 tokens; client-side stream timing; power sampled once a second.
+
+| Context | Splash prefill | Ours prefill | Splash decode | Ours decode |
+| --- | --- | --- | --- | --- |
+| 8K | 311 tok/s, 45.9 W, 0.148 J/tok | 288 tok/s, 31.1 W, 0.108 J/tok | 54.2 tok/s, 46.5 W, 0.86 J/tok | 63.6 tok/s, 27.2 W, 0.43 J/tok |
+| 16K | 286, 45.0 W, 0.157 | 270, 32.4 W, 0.120 | 55.7, 46.2 W, 0.83 | 57.8, 28.1 W, 0.49 |
+| 32K | 272, 46.2 W, 0.169 | 240, 32.2 W, 0.134 | 52.0, 47.1 W, 0.91 | 52.7, 27.6 W, 0.52 |
+| 48K | 257, 46.8 W, 0.182 | 215, 31.3 W, 0.146 | 48.4, 46.2 W, 0.96 | 49.4, 26.9 W, 0.55 |
+| 64K | 231, 46.9 W, 0.203 | 195, 31.1 W, 0.160 | 48.7, 46.7 W, 0.96 | 45.7, 27.7 W, 0.61 |
+
+The machine idles at 8.8 to 9.1 W with either model loaded. Splash prefills 6 to 16% faster; the ANE uses 20 to 27% less energy per prompt token and 37 to 50% less per generated token, with decode level from 16K to 48K. Not matched: Splash's cache stores INT8 keys and values (ours FP16 keys, INT8 values), the models differ (10.9 GB target and 3.85 GB drafter against 9.9 GB and 1.8 GB), and the synthetic coding prompt gives both drafters very high acceptance.
+
+From Splash's source and compiled kernels: weight matmuls dequantize the GGUF codes to FP16 tiles in threadgroup memory and run Metal `matmul2d` tensor ops (the GPU neural accelerators) on BF16 activations with FP32 accumulation, prefill in 128-row tiles; attention over the INT8 cache feeds the INT8 operand directly to the tensor op (BF16 x INT8) with key scales on the scores and value scales on the probabilities (the algebra of our V8), in one pass with an online softmax; the DeltaNet prefill is a token-by-token FP32 scan, verify a fused 8-row kernel with a separate commit. No kernel multiplies INT8 by INT8.
+
+### INT8 keys (`kv8`)
+
+New cache format `kv8` (builder `--kv-cache-dtype kv8`, server `--kv-cache-dtype kv8`): INT8 keys and values with FP16 scales per token and KV head. Key scales multiply the scores of each history tile, so the graph computes `q . (codes x scale)` exactly; 32.25 KiB per history position against 48.125 for V8 (2.0 GiB against 3.0 at 64K).
+
+- **Exactness:** host FP64 test equal to the FP16 graph fed the dequantized cache to 1e-15 ([`tests/test_kv8_attention.py`](../../tests/test_kv8_attention.py)); compiled chunk 0 against the V8 chunk fed the same dequantized keys: everything before attention bit-identical, chunk output within 2.3 to 2.7e-4 (8K and 64K, verify and prefill).
+- **Build:** 16 chunks, all 17 packages fully on the ANE, cold compile 29 min 23 s (V8 22 min 48 s; seven chunks took about 2.5 instead of 1.4 minutes).
+- **Quality (KL-512, 64 sequences, 40,023 positions):** mean KL to BF16 0.183815 (V8 0.184168), top-1 agreement 86.008% (86.028%), trace perplexity 2.4135 (2.4131); direct KL between V8 and `kv8` mean 6.6e-5 nats, top token the same at 99.75% of positions. Four greedy smoke replies identical to V8.
+- **Speed (server, same harness as above):** prefill 288 to 283, 240 to 236, 195 to 194 tok/s and decode 63.6 to 60.2, 52.7 to 51.7, 45.7 to 45.3 tok/s at 8K, 32K, 64K. Same speed within 2%, a third less cache.
+
+Why INT8 caches stopped paying (chunk 0 A/B, 3 October): in the release graph's 16K-wide tiles V8 cut a 64K call against FP16 by 13% (verify, 11.33 to 9.83 ms) and 18% (prefill, 47.86 to 39.22 ms); in the faster graph's 2K tiles by 0% (7.50 to 7.56 ms) and 7% (31.57 to 29.22 ms). Small tiles removed most of the memory traffic INT8 saved.
+
+### Contexts above 64K
+
+The 65,472-row cap came from the old single-softmax graph, which concatenated `[history | block]` along one axis. The tiled graph never forms that tensor, so `kv_len` now keeps the whole context for entries above 65,536 rows (64K stays at 65,472). One `kv8` attention core of the production graph ([`scripts/m6_long_ctx_attn.py`](../../scripts/m6_long_ctx_attn.py)):
+
+| Context | Cold compile | Verify (8 rows) | Prefill (64 rows) | Error against FP32 |
+| --- | ---: | ---: | ---: | ---: |
+| 32K | 5.5 s | 1.88 ms | 7.52 ms | 2.1e-3 |
+| 64K (65,472) | 16.8 s | 3.44 ms | 14.79 ms | 2.2e-3 |
+| 80K | 34.8 s | 4.32 ms | 18.47 ms | 2.2e-3 |
+| 100K | 33.3 s | 5.30 ms | 23.56 ms | 2.3e-3 |
+
+All fully on the ANE, no layout change needed. Memory decides what runs on 32 GB. The cache allocation was checked (one generation per context, dense, verify and prefill entries sharing identical layouts); the difference is what each package wires on first use:
+
+| One chunk, first call | Wired |
+| --- | ---: |
+| 8K to 64K package | +0.35 GB |
+| 80K-only package | +0.39 GB |
+| 80K + 100K package | +0.67 GB |
+
+- **80K + 100K build:** 28.5 GB wired at the 80K entry; swap grew and the watchdog stopped the server twice.
+- **80K-only build:** cold compile 27 min 44 s, 25.7 GB wired, no swap growth; four smoke replies correct; an 81,401-token cold prefill at 135 tok/s and 27.3 W (pessimistic: the whole prompt runs in the 80K entry) and decode 41.6 to 41.9 tok/s at about 26 W.
+- **100K** did not fit next to 80K in the same packages; a 100K-only package is untested.
+
+### Softmax forms
+
+Builder switches `ATT_SOFTMAX` / `ATT_SOFTMAX_PREFILL` (default `two_pass`: global max over all tiles first), all exact against the default in FP64 for the three cache formats. `online` keeps a running max from tile to tile; `split` gives every tile its own max, sum and output and combines them at the end (flash decoding).
+
+| One `kv8` layer | Two-pass prefill / verify | Online | Split |
+| --- | --- | --- | --- |
+| 32K | 7.53 / 1.87 ms | -7% / +3% | -10% / +3% |
+| 64K | 14.86 / 3.46 ms | -7% / +2% | -10% / +4% |
+| 100K | 22.67 / 5.29 ms | -4% / +1% | -10% / +6% |
+
+On a full chunk (chunk 0, `kv8`, interleaved A/B) the gain mostly disappears: `split` for prefill only gives +0.7%, +0.4% and -3.4% at 8K, 32K and 64K with verify bit-identical; `split` everywhere adds +0.2 to +1.5% to verify; `online` everywhere is within about 1% both ways. A control that recomputes the scores timed the same as two-pass: the compiler merges the duplicate. With 128-row prefill calls the forms still differ by about 1%. The two-pass softmax is not a bottleneck.
+
+### Larger prefill calls
+
+Chunk 0, `kv8`, 128-row prefill entries (`TPS=128`): 36.3, 46.1 and 60.1 ms at 8K, 32K and 64K against 12.5, 17.7 and 24.8 ms for 64 rows, so 45%, 30% and 21% slower per row. The 64-row call is already the efficient size on the ANE.
+
+### INT8 compute on the ANE
+
+Localized probe ([`scripts/m6_int8_probe.py`](../../scripts/m6_int8_probe.py)): one op type, 8 layers with distinct weights, 4096 x 4096, dense random data that neither clips nor contains runs of zeros, native `coreai.quantize` / `dequantize` with scales on both operands and the output. Everything below ran fully on the ANE.
+
+| Rows per call | FP16 | W8A8, per-channel weight scale | W8A8, shared weight scale | A8A8, runtime INT8 operand |
+| ---: | ---: | ---: | ---: | ---: |
+| 256 | 13.3 TOPS | 34.2 (conv) / 31.3 (matmul) | 34.4 (conv) | 53.2 (matmul) |
+| 1,024 | 18.6 (conv) | 38.4 (conv) | **52.8 (conv)** | 53.2 (matmul) |
+
+- **INT8 x INT8 engages in Core AI on the M6 ANE**, for constant weights and for a runtime second operand. The ceiling is about **53 TOPS**: A8A8 stays there from 256 to 1,024 rows (a compute limit, not bandwidth), the FP8 peak measured earlier. Constant-weight W8A8 reaches it with a **shared weight scale** (2.8x FP16 at 1,024 rows); per-channel scales cost about 28%.
+- **Weights must be compile-time INT8 constants:** the `quantize_weights` pass, or `coreai.constexpr_blockwise_shift_scale` written in torch, both lowering to `coreai.blockwise_shift_scale` on a constant that feeds the conv or matmul directly (a reshape in between makes the pass skip it). A runtime `coreai.dequantize` of a constant is rejected by ANEC for conv. INT8 weights with FP16 activations: 23.0 TOPS.
+- **Output-channel splits** with separate constants per branch help at 256 rows (shared scale: 34.4 to 43.3 TOPS with TP2, 40.7 with TP4) and not at 1,024 (already at the ceiling); FP16 is unchanged. The 1 MiB-per-core weight window (K 4096 against 4032) moved matmul about 9% and conv not at all.
+- **Zeros:** 90% zeros in the inputs ran 2 to 13% faster, so timing data must be dense. mactop's per-cluster ANE fields read 100% even at idle, so cluster use could not be observed; ANE bandwidth during these runs was 113 to 128 GB/s.
+
+Applied to the history attention (research switch `ATT_INT8MM`, one `kv8` layer, wrong numerics accepted): INT8 QK with the keys as the untransposed operand and a requantized output cut verify by 13 to 15%; INT8 QK and PV with requantized outputs cut the core by 12 to 17%. A timing control that replaces both history matmuls with reductions reading every key and value (`nomm`) removes only 7 to 10% of prefill and nothing from verify: **the matmuls are under a tenth of the attention core**. The INT8 variants saved more than that because requantized scores and weights shrink the score-sized intermediates (and the PV variants zeroed many small weights). The long-context lever is the bytes and passes over the score tensors (scaling, mask, max, exp, sum), not multiply-add speed.
+
+Where INT8 x INT8 can matter is the weight matmuls of prefill, which are compute-bound. INT8 weights for the whole model (about 27 GB) do not fit beside the rest on 32 GB, so the candidate is our 2/4-bit LUT weights with INT8 activations, built the way that works here (compile-time weights, shared scales, output splits) and measured at the 64-row prefill size. An earlier LUT x INT8-activation probe that failed ANEC predates these corrections.
+
 ## Rejected or not pursued
 
 - **Kronecker Hadamard** (`H_1024 = H_32 x H_32`, two 32 x 32 grouped convs and a channel transpose): exact but slower than the release 1-bit grouped conv (0.47 versus 0.39 ms for four 17408-channel rotations at T=8).
@@ -252,6 +342,22 @@ $CAI scripts/m6_gdn_bench.py build --variants ref,fast_b --out DIR && $CAI scrip
 $CAI scripts/m6_attn_bench.py build --variants ref,b2k --ctx 65472 --out DIR && $CAI scripts/m6_attn_bench.py time --variants ref,b2k --ctx 65472 --out DIR
 EXPORT_DIR=<export> GDN_FAST=1 ATT_BLOCK=2048 $CAI coreai/qwen38_coreai_build.py all --kv-cache-dtype both \
   --ctx 8192,16384,32768,49152,65536 --pctx 8192,16384,32768,49152,65536
+```
+
+Follow-up, 4 October:
+
+```sh
+# kv8 build (8K to 64K) and an 80K-only build; contexts above 64K keep their whole history
+EXPORT_DIR=<export> $CAI coreai/qwen38_coreai_build.py all --kv-cache-dtype kv8 --ctx 8192,16384,32768,49152,65536 --pctx 8192,16384,32768,49152,65536
+EXPORT_DIR=<export> $CAI coreai/qwen38_coreai_build.py all --kv-cache-dtype kv8 --ctx 81920 --pctx 81920
+python scripts/m6_kl512_eval.py run --build <kv8 build> --format kv8 --ref-dir <reference> --out DIR
+# any OpenAI-compatible server, with whole-machine power (mactop)
+python scripts/m6_compare_bench.py --url http://127.0.0.1:8765/v1 --model <id> --tokenizer <model dir> --ctx 8192,32768,65536 --label L --out L.json
+# one kv8 attention core: softmax forms and INT8 matmul research variants
+$CAI scripts/m6_long_ctx_attn.py build --variant split --ctx 32768,65472,102400 --out DIR && $CAI scripts/m6_long_ctx_attn.py time --variant split --ctx 32768,65472,102400 --out DIR
+$CAI scripts/m6_long_ctx_attn.py build --int8mm nomm --ctx 32768,65472 --out DIR && $CAI scripts/m6_long_ctx_attn.py time --int8mm nomm --ctx 32768,65472 --out DIR
+# localized INT8 x INT8 probe
+$CAI scripts/m6_int8_probe.py --out DIR --form conv,matmul --variants fp16,xw8,xw8a8 --wscale tensor --n 1024 [--tp 2]
 ```
 
 Qwen3.8-27B is developed by the Qwen Team (Alibaba Cloud, Apache 2.0). ANEMLL's work here is independent conversion and ANE research.
