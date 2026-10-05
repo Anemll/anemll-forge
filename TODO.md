@@ -42,7 +42,36 @@ In C2's compiled program (V8, 8-bit softmax) every score-sized tensor that cross
 
 The softmax itself stays an algebraic chain of tasks (scale / mask, max, exp, sum, value-scale fold, PV), now with 8-bit operand types; the ANE has no fused softmax (`coreai.softmax` compiles to the same chain), so further attention gains come from fewer passes or fewer bytes per pass, not from a native op.
 
-### 10. Smaller items
+### 10. Pi compaction latency (8.3 minutes to the first output after a compaction)
+
+Measured on 5 October (C2 server, 64K): at 46K tokens Pi compacted. Its summary request is a new conversation (the
+`SUMMARIZATION_SYSTEM_PROMPT` and the transcript as text, 17,885 tokens) that matches the server state for 41
+tokens, so the 46K state is discarded: cold prefill 70 s, summary generation 298 s (8,092 tokens at 27 tok/s,
+acceptance 17 to 37%), then Pi's normal prompt (tools system prompt, summary, recent turns: 31,149 tokens) is cold
+again because the summary request overwrote the server's `system` snapshot and its KV rows: 127 s. Pi
+(`pi-agent-core` 0.87.1, `harness/compaction/compaction.js`) caps the summary at `min(0.8 * reserveTokens,
+model.maxTokens)` (16,384 with our 20,480 reserve) and passes the session's thinking level to it; 8,092 tokens
+looks like a medium thinking budget (6,144) plus about 1,900 summary tokens, but the server does not log it.
+
+- Server: keep Pi's main system prompt across detours: a snapshot that copies its KV rows (about 6K tokens, about
+  0.3 GB) as well as the DeltaNet state, restored after the summary request (about 25 s per compaction).
+- Server: log the thinking setting (enable_thinking, reasoning_effort, budget) in the request line.
+- Server, opt-in: no thinking for requests whose system prompt is Pi's summarizer (`--summary-no-think`); up to
+  about 225 s per compaction if the 8,092 tokens were mostly reasoning. Or set Pi's thinking off for long sessions.
+- Pi settings: `keepRecentTokens` 8,192 and the 16K summary cap make the post-compaction prompt 31K (from 46K);
+  a smaller keep or reserve shortens it.
+- Pi's design re-renders the transcript under a new system prompt, which discards the KV cache; appending a
+  summarize instruction to the live conversation would need a short prefill instead of 70 s (Pi's side).
+
+### 11. Measurements waiting for an idle server
+
+- 64K server benchmark with energy for C2 and V8 (`bench_64k.sh` in the session scratchpad; swap was the cause of
+  today's 64K failures: reboot first so swap starts near zero).
+- Windowed drafter ingestion (`DRAFT_INGEST`, server default since 5 October): the same cold prompt with
+  `DRAFT_INGEST=all` and with the default, prefill time and acceptance (expected: about 100 to about 40 drafter calls
+  at 6.5K tokens, about 1,000 to about 65 at 64K).
+
+### 12. Smaller items
 
 - **16-bit matched pair:** Splash `--kv-format bf16` against our FP16 cache (`fast_b2k` two-format build), same harness.
 - **DFlash2 temperature sampling:** [docs/research/DFLASH2_SAMPLING_PLAN.md](docs/research/DFLASH2_SAMPLING_PLAN.md).
