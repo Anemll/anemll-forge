@@ -14,7 +14,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "scripts"))
 sys.path.insert(0, str(HERE / "swift_bridge"))
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+import ane_compile_mode  # noqa: E402
+ane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly
 import dflash2_coreai_build as CB  # noqa: E402
 from dflash2_drafter_ref import rope_cos_sin  # noqa: E402
 

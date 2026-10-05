@@ -10,7 +10,7 @@ the last quarter of the history like a partly filled cache. Timing only: outputs
 
     python scripts/m6_entry_sweep.py --build <build dir> --format v8 --chunks 0           # one chunk, every entry
     python scripts/m6_entry_sweep.py --build <build dir> --format v8 --chain --entries v8  # 16 chunks + head
-Env: MPSGRAPH_ANE_BONDED_COMPILE_MODE (default 2, as the server)."""
+Env: MPSGRAPH_ANE_BONDED_COMPILE_MODE (default: the SoC policy, as the server: 2 on M6, 1 on M5)."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +23,9 @@ from pathlib import Path
 
 import numpy as np
 
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+import ane_compile_mode  # noqa: E402
+ane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai" / "swift_bridge"))
 import coreai_bridge as B  # noqa: E402

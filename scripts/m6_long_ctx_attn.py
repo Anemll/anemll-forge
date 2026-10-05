@@ -11,7 +11,7 @@ evaluation of the same inputs, and timed.
     <coreai venv>/bin/python scripts/m6_long_ctx_attn.py time  --ctx 81920,102400 --out DIR
 `--variant online | split` builds the same core with ATT_SOFTMAX online (running max over the tiles) or split
 (per-tile partials combined at the end) instead of the global max first.
-Env: MODEL, MPSGRAPH_ANE_BONDED_COMPILE_MODE (default 2)."""
+Env: MODEL, MPSGRAPH_ANE_BONDED_COMPILE_MODE (default: the SoC policy, 2 on M6, 1 on M5)."""
 from __future__ import annotations
 
 import argparse

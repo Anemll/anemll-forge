@@ -1,7 +1,7 @@
 """One owned whole-server case on one target build and context entry: tiny warmup, one cold prompt (its prefill is
 the prefill measurement), then three identical cached requests (median decode tok/s). Same fixture and settings as
 the V8 study's decode matrix: public synthetic testing notes plus a small Python task, greedy, thinking off, 256-token
-cap, DFlash2 with a 3 ms draft gap, bonded compile mode 2. Timers are the server's own (/health prefill / decode).
+cap, DFlash2 with a 3 ms draft gap, the SoC's bonded compile mode (2 on M6). Timers are the server's own (/health prefill / decode).
 
     python scripts/m6_server_bench.py --build <target dir> --bundle <bundle> --ctx 16384 --format v8 --out case.json
 The server is started and stopped by this script (port --port); an existing record is never overwritten."""
@@ -92,7 +92,7 @@ def main():
     cmd = [a.python, str(ROOT / "forge.py"), "serve", "--runtime", "coreai", "--model", str(a.bundle / "model"),
            "--build", str(a.build), "--kv-cache-dtype", a.format, "--ctx", str(a.ctx), "--port", str(a.port),
            "--draft", str(draft)]
-    env = {**os.environ, "MPSGRAPH_ANE_BONDED_COMPILE_MODE": "2", "COREAI_DRAFTER_COMPUTE": "ane", "DRAFT_GAP_MS": "3"}
+    env = {**os.environ, "COREAI_DRAFTER_COMPUTE": "ane", "DRAFT_GAP_MS": "3"}  # compile mode: SoC policy
     env.pop("USE_LOCAL_COREAI", None)
     log = a.out.with_suffix(".server.log")
     stop, peak = threading.Event(), [0]

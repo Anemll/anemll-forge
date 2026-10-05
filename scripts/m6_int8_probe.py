@@ -18,7 +18,7 @@ Each package reports which INT8 ops survived conversion (optimize() can fold a c
 placement, and the multiply-add rate from the median call time.
 
     <coreai venv>/bin/python scripts/m6_int8_probe.py --out DIR [--form conv,matmul] [--n 256] [--k 4096] [--stack 8]
-Env: MPSGRAPH_ANE_BONDED_COMPILE_MODE (default 2)."""
+Env: MPSGRAPH_ANE_BONDED_COMPILE_MODE (default: the SoC policy, 2 on M6, 1 on M5)."""
 from __future__ import annotations
 
 import argparse
@@ -30,7 +30,9 @@ import sys
 import time
 from pathlib import Path
 
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+import ane_compile_mode  # noqa: E402
+ane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
 sys.path.insert(0, str(ROOT / "coreai" / "swift_bridge"))

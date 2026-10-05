@@ -16,7 +16,9 @@ import torch
 
 E = os.path.expanduser
 os.environ.setdefault("DRAFT_EXPORT", E("~/Models/dflash2/export/drafter_lut4_gptq_q7_cal"))
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+import ane_compile_mode  # noqa: E402
+ane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 OUT = Path(E("~/Models/vq27b/tests/head_analysis"))
 COREML_PKG = Path(E("~/Models/dflash2/ane/gptq_q7_cal/dflash2_lut4_gptq.mlpackage"))

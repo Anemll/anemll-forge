@@ -10,7 +10,7 @@ Every variant's ANE output is compared with an FP32 host evaluation of the same 
     <coreai venv>/bin/python scripts/m6_attn_bench.py check --variants ref,qscale
     <coreai venv>/bin/python scripts/m6_attn_bench.py build --variants ref,qscale --ctx 65472 --out DIR
     <coreai venv>/bin/python scripts/m6_attn_bench.py time  --variants ref,qscale --out DIR
-Env: MODEL, MPSGRAPH_ANE_BONDED_COMPILE_MODE (default 2)."""
+Env: MODEL, MPSGRAPH_ANE_BONDED_COMPILE_MODE (default: the SoC policy, 2 on M6, 1 on M5)."""
 from __future__ import annotations
 
 import argparse
@@ -28,7 +28,9 @@ import torch
 import torch.nn as nn
 from safetensors import safe_open
 
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+import ane_compile_mode  # noqa: E402
+ane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly
 os.environ.setdefault("KV_CACHE_DTYPE", "v8")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))

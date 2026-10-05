@@ -10,7 +10,7 @@ compared with the FP32 reference.
     <coreai venv>/bin/python scripts/m6_gdn_bench.py build  --variants ref,fast --out DIR
     <coreai venv>/bin/python scripts/m6_gdn_bench.py time   --out DIR                   # ANE ms + error vs FP32
     <coremltools venv>/bin/python scripts/m6_gdn_bench.py coreml --out DIR              # .mlpackage for anemll-profile
-Env: MODEL (checkpoint with the GDN small tensors), MPSGRAPH_ANE_BONDED_COMPILE_MODE (default 2)."""
+Env: MODEL (checkpoint with the GDN small tensors), MPSGRAPH_ANE_BONDED_COMPILE_MODE (default: the SoC policy, 2 on M6, 1 on M5)."""
 from __future__ import annotations
 
 import argparse
@@ -28,7 +28,9 @@ import torch
 import torch.nn as nn
 from safetensors import safe_open
 
-os.environ.setdefault("MPSGRAPH_ANE_BONDED_COMPILE_MODE", "2")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+import ane_compile_mode  # noqa: E402
+ane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
 sys.path.insert(0, str(ROOT / "coreai" / "swift_bridge"))
