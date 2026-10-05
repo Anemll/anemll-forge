@@ -554,7 +554,7 @@ Full C2T build (C2 plus `KV_KEYS_T`, full ladder; the export and the ANE compile
 | 48K | 253.2 / 241.8 / 256.5 | 0.130 / 0.135 / 0.182 | 46.1 / 48.8 / 48.4 | 0.590 / 0.580 / 0.960 |
 | 64K | 236.6 / 224.3 / 231.1 | 0.136 / 0.143 / 0.203 | 47.9 / 47.8 / 48.7 | 0.569 / 0.587 / 0.960 |
 
-C2T prefills 3.1 to 5.5% faster than C2 at the same power, within -1.4% to +3.6% of Splash, at 31 to 33% less energy per prompt token. Decode stays within the fixture's acceptance noise. Raw: `compare/ane_c2t_window.json`, `ane_64k_C2T.json`, summary `c2t_c2_splash_total_power.json`.
+C2T prefills 3.1 to 5.5% faster than C2 at the same power, within -1.4% to +3.6% of Splash, at 31 to 33% less energy per prompt token. Decode stays within the fixture's acceptance noise. Each run first measures its idle floor (whole machine: ANEMLL 8.3 to 8.7 W, Splash 8.8 W). The joules above include it; net of the floor, ANEMLL (C2T) uses 36 to 39% less energy than Splash per prompt token (0.073 to 0.100 J against 0.119 to 0.165) and 48 to 55% less per generated token (0.315 to 0.400 J against 0.673 to 0.778); gross, 29 to 33% and 39 to 47% less. The floor is about a third of ANEMLL's 27 to 33 W and a fifth of Splash's 46 W, so the net savings are larger. Raw: `compare/ane_c2t_window.json`, `ane_64k_C2T.json`, summary `c2t_c2_splash_total_power.json`.
 
 ### Model-file quality: Splash's GGUF on the same KL-512
 
