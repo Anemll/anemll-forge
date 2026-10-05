@@ -102,7 +102,23 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
   `DRAFT_INGEST=all` and with the default, prefill time and acceptance (expected: about 100 to about 40 drafter calls
   at 6.5K tokens, about 1,000 to about 65 at 64K).
 
-### 12. Smaller items
+### 12. Smaller ladder entries (2K, 4K) for the first prefill
+
+The C2 and V8 packages have verify and prefill entries at 8K, 16K, 32K, 48K and 64K (manifest `ctxs` / `pctxs`),
+so a cold prompt's first 8K rows run on the 8K entry, whose attention reads the full 8K history tile set on every
+64-row call. Smaller entries would cut that for the first rows. The 5 October server log tempers the expectation:
+on two cold prompts (17.9K and 31.1K tokens) the 8K and 16K entries prefilled at the same rate (263 and 264 tok/s)
+and the 32K entry at 228, which suggests unused history is a small share of a prefill call below 16K. A 2K or 4K
+entry would also serve only the first 4K rows (about 15 s at 8K), and Pi's prompts start at about 6.5K.
+
+- First, one chunk (idle machine): build one chunk with prefill entries 2K, 4K and 8K (`--pctx 2048,4096,8192`),
+  time a 64-row prefill call on each (`scripts/m6_chunk_ab.py --entries`), times 16 chunks for the whole model.
+- If 2K / 4K save more than a few percent: prefill-only entries (`--pctx`; 2K / 4K verify entries would rarely run
+  under Pi), then the full model: cold prefills of 2K, 4K, 8K and 17.9K tokens with and without them, the resize
+  cost (KV rows moved: 38 to 366 ms in the log), compile time and wired memory (about 0.75 GB per entry in
+  COREAI_PORT_NOTES; the 64K server is already close to swapping).
+
+### 13. Smaller items
 
 - **16-bit matched pair:** Splash `--kv-format bf16` against our FP16 cache (`fast_b2k` two-format build), same harness.
 - **DFlash2 temperature sampling:** [docs/research/DFLASH2_SAMPLING_PLAN.md](docs/research/DFLASH2_SAMPLING_PLAN.md).
