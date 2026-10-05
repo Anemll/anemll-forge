@@ -214,6 +214,7 @@ KL divergence is the current distributional-fidelity evaluation; it does not est
 - [DFlash2 integration and correctness](docs/SPECULATIVE_DECODING.md)
 - [V8 cache setup and conversion](docs/KV_CACHE_V8.md) and [KV-cache quantization research trace](docs/research/KV_CACHE_QUANTIZATION_2026-10-02.md)
 - [M6 compute acceleration](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md) (faster DeltaNet and attention graph, compile cost), [verifier block length](docs/verifier_len.md) and the [DFlash2 sampling plan](docs/research/DFLASH2_SAMPLING_PLAN.md)
+- [ANE HWX and MLIR analysis](docs/ANE_HWX_MLIR_ANALYSIS.md): reading the compiled ANE program, 8-bit (INT8 / FP8) fusion rules, validating quantized or fused graphs
 - [Techniques and limitations](docs/TECHNIQUES.md)
 - [Session lessons and troubleshooting](docs/SESSION_LESSONS.md)
 - [Quality benchmark plan](docs/BENCHMARK_PLAN.md)

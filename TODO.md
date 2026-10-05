@@ -36,9 +36,11 @@ One extra cache format compiles about 1.65x longer, and every context adds tiles
 
 Full 8K to 64K build of form C (`ATT_INT8MM=s8,s8b,sm8,pvf8`, `ATT_S8_UNIT=ATT_S8B_UNIT=0.25`, V8): server benchmark against V8 and the 64K long-context check are running (R, 5 October). If they hold: make the forms a builder option (FP8 enabled per chip, off on M5), add a host exactness test for the forms without quantization, record the setting in the release manifest, and update the model card numbers.
 
-### 9. Transposed key cache
+### 9. Transposed key cache (the next FP16 DRAM traffic after form C2)
 
-Every history tile of keys goes through an INT8 transpose pass before QK (the cache stores (token, 256), QK reads (256, token)): 19% of verify cycles and 6% of prefill, through DRAM in prefill (R, 5 October). Store keys as (head, 256, token): one `kv8` core first (the HWX should lose the transpose tasks), then the cache writer (`scripts/qwen38_kv_cache.py`), saved caches and the tests.
+In C2's compiled program (V8, 8-bit softmax) every score-sized tensor that crosses DRAM is 8-bit: INT8 scores (QK output, mask pass, max input) and FP8 weights (exp output, sum input, value-scale fold, PV operand); `s - max` stays FP16 but on chip (L2). What still goes to DRAM in FP16: small vectors (tile maxima, sums) and the **key-tile transpose**, an FP16 pass before every QK because V8 keys are FP16 and stored (token, 256) while QK reads (256, token) (chunk 0 verify: task t11071, 9 cycles per 2,048-token tile, more than the QK itself at 4; on `kv8` the same pass was 19% of verify cycles). Store keys as (head, 256, token) so QK reads them directly: one V8 core first (the HWX should lose the transpose tasks; time verify and prefill), then the cache writer (`scripts/qwen38_kv_cache.py`), saved caches and the tests.
+
+The softmax itself stays an algebraic chain of tasks (scale / mask, max, exp, sum, value-scale fold, PV), now with 8-bit operand types; the ANE has no fused softmax (`coreai.softmax` compiles to the same chain), so further attention gains come from fewer passes or fewer bytes per pass, not from a native op.
 
 ### 10. Smaller items
 

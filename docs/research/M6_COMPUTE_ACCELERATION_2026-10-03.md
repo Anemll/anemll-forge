@@ -318,7 +318,7 @@ Where INT8 x INT8 can matter is the weight matmuls of prefill, which are compute
 
 ## Follow-up, 5 October: compiled ANE programs and 8-bit attention (Measured)
 
-The 4 October INT8 attention variants were judged by timing alone. This round reads the compiled ANE program of each package to see what the hardware actually runs, then rebuilds the 8-bit attention variants with correct scales, one part at a time.
+Workflow and tools from this round are written up for reuse in [ANE HWX and MLIR analysis](../ANE_HWX_MLIR_ANALYSIS.md). The 4 October INT8 attention variants were judged by timing alone. This round reads the compiled ANE program of each package to see what the hardware actually runs, then rebuilds the 8-bit attention variants with correct scales, one part at a time.
 
 ### Reading the compiled program (HWX)
 

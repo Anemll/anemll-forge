@@ -88,8 +88,10 @@ ATT_INT8MM = os.environ.get("ATT_INT8MM", "")
 ATT_INT8MM_BY_LAYER = {int(k): v for k, v in (x.split(":", 1) for x in os.environ.get("ATT_INT8MM_BY_LAYER", "").split(";") if x)}
 P8_STATS = None  # host research only: a list collects (rounded-to-zero, masked) fractions of the pvn weight codes
 S8_STATS = None  # host research only: a list collects max |raw QK score| per tile (s8 step choice)
-ATT_S8_UNIT = float(os.environ.get("ATT_S8_UNIT", "0.125"))
-ATT_S8B_UNIT = float(os.environ.get("ATT_S8B_UNIT", "0.125"))
+# score steps: 1/4 covers real Qwen3.8 scores (up to about 32) at 1.2% attention error (v8: true scores); kv8 raw
+# scores before the key scales need a finer step (set ATT_S8_UNIT)
+ATT_S8_UNIT = float(os.environ.get("ATT_S8_UNIT", "0.25"))
+ATT_S8B_UNIT = float(os.environ.get("ATT_S8B_UNIT", "0.25"))
 ATT_S8R_SHIFT = float(os.environ.get("ATT_S8R_SHIFT", "8"))
 S8B_STATS = None  # host research only: max |score| per tile after the key scales, masked entries excluded
 ATT_INT8MM_UNITS = [float(u) for u in os.environ.get("ATT_INT8MM_UNITS", "0.0625,0.0078125,0.25").split(",")]  # act, cache, out
