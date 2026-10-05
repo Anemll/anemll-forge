@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from qwen38_kv_cache import append_rows, cache_format, cache_entries, quantize_values
+from qwen38_kv_cache import append_rows, cache_format, cache_entries, keep_rows, key_layout, quantize_values
 
 
 class CacheTests(unittest.TestCase):
@@ -122,6 +122,47 @@ class CacheTests(unittest.TestCase):
                         self.assertTrue(np.all(error <= scale[:, 16:16 + count, None].astype(np.float32) * 0.55))
                     elif count:
                         np.testing.assert_array_equal(v[:, 16:16 + count], values[:, :count])
+
+
+    def test_key_layout_from_manifest_and_chunks(self):
+        v8 = {"format": "v8", "keys": "float16", "values": "int8", "scales": "float16",
+              "scale_granularity": "token_head"}
+        self.assertEqual(key_layout({"kv_cache": dict(v8), "chunks": [{"numerics": {}}]}), "token_dim")
+        man = {"kv_cache": {**v8, "key_layout": "dim_token"}, "chunks": [{"numerics": {"KV_KEYS_T": True}}]}
+        self.assertEqual(key_layout(man), "dim_token")
+        sel = self.selectable()
+        self.assertEqual(key_layout(sel), "token_dim")
+        for bad in ({"kv_cache": dict(v8), "chunks": [{"numerics": {"KV_KEYS_T": True}}]},
+                    {"kv_cache": {**v8, "key_layout": "dim_token"}, "chunks": [{"numerics": {}}]},
+                    {"kv_cache": {**v8, "key_layout": "sideways"}, "chunks": []}):
+            with self.subTest(bad=bad["kv_cache"].get("key_layout")), self.assertRaises(ValueError):
+                key_layout(bad)
+
+    def test_transposed_keys_hold_the_same_rows(self):
+        """A dim_token key cache (KV head, head dim, token) holds exactly the transpose of the token_dim cache after
+        accepted-row writes (fp16, v8, kv8) and after a context resize that keeps a prefix."""
+        rng = np.random.default_rng(20261005)
+        keys = rng.normal(size=(4, 64, 256)).astype(np.float16)
+        values = rng.normal(size=keys.shape).astype(np.float16)
+        for mode in ("fp16", "v8", "kv8"):
+            for count in (1, 8, 64):
+                with self.subTest(mode=mode, count=count):
+                    caches = []
+                    for keys_t in (False, True):
+                        kshape = (4, 256, 96) if keys_t else (4, 96, 256)
+                        kv = {"k3": (None, np.full(kshape, 5, np.int8 if mode == "kv8" else np.float16)),
+                              "v3": (None, np.zeros((4, 96, 256), np.int8 if mode != "fp16" else np.float16)),
+                              "ks3": (None, np.ones((4, 96), np.float16)), "vs3": (None, np.ones((4, 96), np.float16))}
+                        append_rows(kv, {"k3_new": keys, "v3_new": values}, [3], 16, count, mode, keys_t)
+                        caches.append(kv)
+                    a, b = caches
+                    np.testing.assert_array_equal(b["k3"][1], a["k3"][1].transpose(0, 2, 1))
+                    for n in ("v3", "ks3", "vs3"):
+                        np.testing.assert_array_equal(b[n][1], a[n][1])
+                    small = [np.zeros((4, 40, 256), np.float16), np.zeros((4, 256, 40), np.float16)]
+                    keep_rows(small[0], a["k3"][1].astype(np.float16), 30)
+                    keep_rows(small[1], b["k3"][1].astype(np.float16), 30, True)
+                    np.testing.assert_array_equal(small[1], small[0].transpose(0, 2, 1))
 
 
 if __name__ == "__main__":

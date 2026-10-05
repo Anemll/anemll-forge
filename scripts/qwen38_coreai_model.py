@@ -35,7 +35,8 @@ from pathlib import Path
 
 import numpy as np
 import coreai_compile_guide as G
-from qwen38_kv_cache import KV_INPUTS, append_rows, cache_format, cache_formats, cache_entries
+from qwen38_kv_cache import (KV_INPUTS, append_rows, cache_format, cache_formats, cache_entries, keep_rows, key_layout,
+                              put_rows)
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -245,6 +246,7 @@ def graph_line(man: dict, root: Path) -> str:
 
 class CoreAIQwen:
     """Qwen3.8-27B on the ANE through Core AI; the AneQwen3 interface (T = 8 rows per call, TP = 64-row prefill)."""
+    keys_t = False  # dim_token key cache (KV head, head dim, token); set from the manifest's key_layout
 
     def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto",
                  extra_packages=()):
@@ -252,6 +254,7 @@ class CoreAIQwen:
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
+        self.keys_t = key_layout(man) == "dim_token"
         self.graph = target_graph(man)
         self.log(graph_line(man, root))
         if self.kv_cache_dtype in ("v8", "kv8") or len(self.kv_cache_formats) > 1:
@@ -329,9 +332,10 @@ class CoreAIQwen:
             d = {}
             for j in ch["att_j"]:
                 for s in ("k", "v"):
-                    nd, w = buffer((self.nkv, L, self.hd))
+                    t = s == "k" and self.keys_t
+                    nd, w = buffer((self.nkv, self.hd, L) if t else (self.nkv, L, self.hd))
                     if old is not None and keep:
-                        w[:, :keep] = old[i][f"{s}{j}"][1][:, :keep]
+                        keep_rows(w, old[i][f"{s}{j}"][1], keep, t)
                     d[f"{s}{j}"] = (nd, w)
             self.kv.append(d)
         self.mask = buffer((1, L))
@@ -461,7 +465,7 @@ class CoreAIQwen:
             for i, ch in enumerate(self.chunks):
                 out = ch["last_out"]
                 for n_, (_, w) in self.kv[i].items():
-                    w[:, self.pos:self.pos + k] = out[f"{n_}_new"].numpy()[:, :k]
+                    put_rows(w, out[f"{n_}_new"].numpy()[:, :k], self.pos, k, n_[0] == "k" and self.keys_t)
         self.pending, self.pos = k, self.pos + k
         self.hi = max(self.hi, self.pos)
 
@@ -505,7 +509,7 @@ class CoreAIQwen:
         for i, ch in enumerate(self.chunks):
             o = ch["last_out"]
             for n_, (_, w) in self.kv[i].items():
-                w[:, p0:p0 + n] = o[f"{n_}_new"].numpy()[:, :n]
+                put_rows(w, o[f"{n_}_new"].numpy()[:, :n], p0, n, n_[0] == "k" and self.keys_t)
         self.pending, self.pos, self._nP = 0, p0 + n, n
         self.hi = max(self.hi, self.pos)
         self.stats["calls"] += 1
@@ -570,10 +574,12 @@ class CoreAIQwenBridge(CoreAIQwen):
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)
+        self.keys_t = key_layout(man) == "dim_token"
         self.graph = target_graph(man)
         self.log(graph_line(man, root))
         self.log("KV cache: " + {"fp16": "FP16 K / FP16 V", "v8": "FP16 K / INT8 V + FP16 token/head scales",
-                                 "kv8": "INT8 K / INT8 V + FP16 token/head scales"}[self.kv_cache_dtype])
+                                 "kv8": "INT8 K / INT8 V + FP16 token/head scales"}[self.kv_cache_dtype]
+                 + (" | keys stored transposed (head dim x token: no key transposes in attention)" if self.keys_t else ""))
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
         self.TP = man.get("TP", 0)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
@@ -666,7 +672,8 @@ class CoreAIQwenBridge(CoreAIQwen):
                 mode = self.kv_cache_dtype
                 for s in KV_INPUTS[mode]:
                     b = f.buffer("input", f"{s}{j}")
-                    expected = (self.nkv, L) if s in ("ks", "vs") else (self.nkv, L, self.hd)
+                    expected = ((self.nkv, L) if s in ("ks", "vs") else
+                                (self.nkv, self.hd, L) if s == "k" and self.keys_t else (self.nkv, L, self.hd))
                     int8 = (s == "v" and mode in ("v8", "kv8")) or (s == "k" and mode == "kv8")
                     dtype = np.int8 if int8 else f16
                     if b.shape != expected or b.dtype != np.dtype(dtype):
@@ -675,7 +682,7 @@ class CoreAIQwenBridge(CoreAIQwen):
                     if s in ("ks", "vs"):  # unfilled positions (masked); KV_UNUSED_SCALE research override
                         b.np[:] = float(os.environ.get("KV_UNUSED_SCALE", "1"))
                     if old is not None and keep:
-                        b.np[:, :keep] = old[i][f"{s}{j}"][1][:, :keep]
+                        keep_rows(b.np, old[i][f"{s}{j}"][1], keep, s == "k" and self.keys_t)
                     d[f"{s}{j}"] = (b, b.np)
             self.kv.append(d)
         mb = self.chunks[0]["fns"][entry].buffer("input", "mask")
@@ -740,7 +747,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         if k:
             for i, ch in enumerate(self.chunks):
                 ow = ch["ow"][self._last]
-                append_rows(self.kv[i], ow, ch["att_j"], self.pos, k, self.kv_cache_dtype)
+                append_rows(self.kv[i], ow, ch["att_j"], self.pos, k, self.kv_cache_dtype, self.keys_t)
         self.pending, self.pos = k, self.pos + k
         self.hi = max(self.hi, self.pos)
 
@@ -771,7 +778,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         head.run()
         for i, ch in enumerate(self.chunks):
             ow = ch["ow"][entry]
-            append_rows(self.kv[i], ow, ch["att_j"], p0, n, self.kv_cache_dtype)
+            append_rows(self.kv[i], ow, ch["att_j"], p0, n, self.kv_cache_dtype, self.keys_t)
         self._last = entry
         self.pending, self.pos, self._nP = 0, p0 + n, n
         self.hi = max(self.hi, self.pos)

@@ -1003,7 +1003,8 @@ def main():
             q8 = mode in ("v8", "kv8")
             return {"format": mode, "keys": "int8" if mode == "kv8" else "float16",
                     "values": "int8" if q8 else "float16", "scales": "float16" if q8 else None,
-                    "scale_granularity": "token_head" if q8 else None, "stable_attention": STABLE_ATTN or q8}
+                    "scale_granularity": "token_head" if q8 else None, "stable_attention": STABLE_ATTN or q8,
+                    **({"key_layout": "dim_token"} if KV_KEYS_T else {})}
         man["kv_cache"] = ({"format": "selectable", "default": a.kv_cache_default,
                             "formats": {mode: layout(mode) for mode in ("fp16", "v8")}}
                            if KV_CACHE_DTYPE == "both" else layout(KV_CACHE_DTYPE))
