@@ -48,11 +48,13 @@ Measured on 5 October (C2 server, 64K): at 46K tokens Pi compacted. Its summary 
 `SUMMARIZATION_SYSTEM_PROMPT` and the transcript as text, 17,885 tokens) that matches the server state for 41
 tokens, so the 46K state is discarded: cold prefill 70 s, summary generation 298 s (8,092 tokens at 27 tok/s,
 acceptance 17 to 37%), then Pi's normal prompt (tools system prompt, summary, recent turns: 31,149 tokens) is cold
-again because the summary request overwrote the server's `system` snapshot and its KV rows: 127 s. Pi
-(`pi-agent-core` 0.87.1, `harness/compaction/compaction.js`) caps the summary at `min(0.8 * reserveTokens,
-model.maxTokens)` (16,384 with our 20,480 reserve) and passes the session's thinking level to it (this session:
-max, which the server maps to xhigh, budget 12,288); the summary Pi kept was 7,348 characters (about 1,840
-tokens), so about 6,200 of the 8,092 generated tokens were thinking.
+again because the summary request overwrote the server's `system` snapshot and its KV rows: 127 s. Pi 1.0.2
+(`pi-coding-agent/dist/core/compaction/compaction.js`, `createSummarizationOptions`) caps the summary at
+`min(0.8 * reserveTokens, model.maxTokens)` (16,384 with our 20,480 reserve), sets `cacheRetention: "none"` and
+passes the session's thinking level as `reasoning` unless it is off (this session: max, which the server maps to
+xhigh, budget 12,288). The summary Pi kept is 2,221 tokens (Qwen tokenizer), so about 5,870 of the 8,092
+generated tokens were thinking; the log has no `[think] reasoning budget ... thinking closed` line for the
+request, so the thinking ended on its own, not at a budget.
 
 Why compaction recurs quickly: the session is one user message followed by a tool loop at thinking level max.
 Replies of 12.4K, 12.4K, 16.4K (Pi's maxTokens cap), 13.1K and 9.3K tokens, mostly thinking, all stay in the
@@ -60,21 +62,33 @@ prompt: Qwen3.8's template keeps the thinking of every reply after the last user
 `preserve_thinking` says (Pi's models.json also sets it true, which keeps prefix reuse across user turns). The
 recent turns Pi keeps were mostly thinking (7.7K of 10.3K and 6.9K of 13.4K, Pi's chars / 4 estimate), so the
 post-compaction prompt starts at 24K to 31K against the 45K trigger, and one or two max-thinking replies compact
-again. The summary itself is small (830 and 1,840 tokens).
+again. The summary itself is small (954, 2,221 and 2,513 tokens for the session's three compactions).
 
 - Server: keep Pi's main system prompt across detours: a snapshot that copies its KV rows (about 6K tokens, about
   0.3 GB) as well as the DeltaNet state, restored after the summary request (about 25 s per compaction).
-- Server: log the thinking setting (enable_thinking, reasoning_effort, budget) in the request line.
-- Server, opt-in: no thinking for requests whose system prompt is Pi's summarizer (`--summary-no-think`); about
-  230 s per compaction (about 6,200 thinking tokens at 27 tok/s). Or set Pi's thinking off for long sessions.
+  It helps only the post-compaction prefill: the summary request has its own system prompt (about 100 tokens to
+  snapshot, not worth it).
+- Server: log enable_thinking, reasoning_effort and the budget applied at request start, and the thinking and
+  answer tokens separately on the final line (completion tokens count thinking, the forced close phrase and the
+  answer together).
+- Server, opt-in: no thinking for requests whose system prompt is Pi's summarizer (`--summary-no-think`; Pi's
+  `SUMMARIZATION_SYSTEM_PROMPT` is a fixed string, so detection is reliable): about 215 s per compaction here
+  (5,870 thinking tokens at 27 tok/s). Qwen's guidance is to switch thinking off rather than give it a tiny
+  budget. Workaround today: set Pi's thinking off before `/compact`.
 - Thinking level for long tool loops: max (xhigh, 12,288) adds 9K to 16K tokens per reply; medium (6,144) or low
   (2,048) is the largest lever on compaction frequency. Server option: a smaller budget for replies that follow a
   tool result, the full budget for the first reply to a user message. At max, the 12,288 thinking budget leaves
   about 4K of Pi's 16,384 output cap for the answer, so a large tool call can be truncated.
 - Pi settings: `keepRecentTokens` 8,192 and the 16K summary cap make the post-compaction prompt 31K (from 46K);
   a smaller keep or reserve shortens it.
-- Pi's design re-renders the transcript under a new system prompt, which discards the KV cache; appending a
-  summarize instruction to the live conversation would need a short prefill instead of 70 s (Pi's side).
+- Pi re-renders the transcript under a new system prompt, which discards the KV cache; appending a summarize
+  instruction to the live conversation would need a short prefill instead of 70 s. Changeable from our side: Pi's
+  `session_before_compact` extension hook can replace the summary call (`examples/extensions/custom-compaction.ts`
+  uses a different model), so an extension in `~/.pi/agent/extensions` could summarize in the live conversation
+  with thinking off. Upstream (from an external review, not checked here): Pi issues #7553 (separate thinking
+  level or model for compaction), #9075 / #9512 / #9602 (reasoning eating the summary cap, one with Qwen3.8-27B on
+  llama.cpp), #9773 (151K prompt: 0 cached and 176.5 s to first token, against 99.77% cached and 1.55 s when
+  appending).
 
 ### 11. Measurements waiting for an idle server
 
