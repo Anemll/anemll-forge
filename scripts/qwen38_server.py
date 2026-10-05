@@ -505,7 +505,7 @@ class Engine:
                 next_log = time.time() + 10
                 el = time.time() - t_gen
                 log(f"decode: {len(out)} tok, {el:.0f}s, {len(out) / max(el, 1e-9):.1f} tok/s"
-                    + (f", {len(out) / max(1, self.cycles):.2f} tok/call, accept {self.accept_rate():.0f}%, {self.cycle_ms()}"
+                    + (f", {len(out) / max(1, self.cycles):.2f} tok/verify, accept {self.accept_rate():.0f}%, {self.cycle_ms()}"
                        if self.drafter is not None else ""))
             if not done and len(out) >= next_check:  # loop guard: the tail repeats with a fixed period
                 next_check = len(out) + 32
@@ -842,7 +842,7 @@ def make_handler(engine):
                 t_pre = time.time() - t0 - dt
                 print(f"[{time.strftime('%H:%M:%S')}] prompt {len(ids)} (cached {reused}, prefill "
                       f"{len(ids) - reused} in {t_pre:.1f}s) | gen {n} in {dt:.1f}s ({n / max(dt, 1e-9):.1f} tok/s"
-                      + (f", {n / max(1, engine.cycles):.2f} tok/call, accept {engine.accept_rate():.0f}% "
+                      + (f", {n / max(1, engine.cycles):.2f} tok/verify, accept {engine.accept_rate():.0f}% "
                          f"(accepted/7 per cycle: {engine.accept_hist()}), {engine.cycle_ms()}" if engine.drafter is not None else "")
                       + ") | "
                       + (f"LOOP period {engine.loop} stopped | " if engine.loop else "")

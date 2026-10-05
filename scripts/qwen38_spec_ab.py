@@ -108,7 +108,7 @@ def main():
             rows.append(r)
             (OUTD / f"{mode}_s{seed}.txt").write_text(text)
             print(f"seed {seed} {mode:5s}: {n:5d} tok {finish:6s} loop {eng.loop:3d}  rep4 {r['rep4']:.3f}  "
-                  f"{r['tok_s']:.1f} tok/s  {r['tok_call']:.2f} tok/call  </think> {r['done_think']}  "
+                  f"{r['tok_s']:.1f} tok/s  {r['tok_call']:.2f} tok/verify  </think> {r['done_think']}  "
                   f"</html> {r['html_end']}", flush=True)
             if seed == SEEDS[0] and mode == "plain":
                 plain_first = eng.tok.encode(text, add_special_tokens=False)

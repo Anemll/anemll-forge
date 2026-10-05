@@ -173,7 +173,7 @@ def main():
         dt = time.perf_counter() - t0
         tot_tok, tot_dt, hists = tot_tok + len(out), tot_dt + dt, hists + hist
         line = f"[{i}] {len(ids)} prompt tok | DFlash {len(out)} tok in {dt:.1f}s = {len(out) / dt:.1f} tok/s, " \
-               f"{len(out) / max(1, len(hist)):.2f} tok/call"
+               f"{len(out) / max(1, len(hist)):.2f} tok/verify"
         if PLAIN:
             t0 = time.perf_counter()
             ref = eng.plain(ids, len(out))
