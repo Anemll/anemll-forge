@@ -134,9 +134,12 @@ def layer_quant(ck, i, w):
         q["mlp.rotation"] = (int(meta["seed_in"]), int(meta["seed_mid"]))
     mixer = EXPORT_DIR / f"layer_{i:02d}_mixer.safetensors"
     tm = load_file(mixer) if mixer.exists() else {}
-    for name in MIXERS:
-        if f"{name}.weight" in w:
-            q[f"{name}.weight"] = as_quant(tm, name) or ("dense", w[f"{name}.weight"].numpy())
+    for name in MIXERS:  # the export's quantized matrix; the checkpoint's dense one only where the export has none
+        quant = as_quant(tm, name)
+        if quant is not None:
+            q[f"{name}.weight"] = quant
+        elif f"{name}.weight" in w:
+            q[f"{name}.weight"] = ("dense", w[f"{name}.weight"].numpy())
     return q
 
 

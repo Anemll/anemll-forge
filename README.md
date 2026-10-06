@@ -247,6 +247,10 @@ Start with a small edit and check its diff/tests. The profile declares **16,384 
 
 For Droid, see the [ANE Qwen reasoning configuration example](docs/DROID_CODING.md). Its fixed High preset targets a 64K server and must be merged with existing Droid settings.
 
+## Rebuild the Core AI packages from the quantized weights
+
+The quantized export behind the published packages is on Hugging Face: **[anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI)** (18 GB). It holds the quantized `mix25in_mixr_lr64mix` layers and LM head, plus the 449 small BF16 tensors, configuration and tokenizer the converter also reads, so a rebuild does not need the 52 GB original checkpoint. Its [EXPORT.md](release/huggingface-export/EXPORT.md) gives the conversion environment (`requirements-conversion.txt`), the export command for the published packages and variants, and a check that the converter receives the published weights exactly (`scripts/qwen38_weights_digest.py`). `scripts/qwen38_small_checkpoint.py` extracts those small tensors from an original checkpoint.
+
 ## Research, evaluation, and limitations
 
 The repository includes mixed-bit GPTQ, scalar/vector LUT quantization, per-channel scaling, online rotations, low-rank corrections, calibration and KL evaluation, Core ML/Core AI conversion, and the speculative runtime. It also preserves failed experiments and compiler/ANE findings from the original research, with source provenance recorded in [docs/provenance.json](docs/provenance.json).
