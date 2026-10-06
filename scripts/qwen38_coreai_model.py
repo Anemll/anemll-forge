@@ -567,10 +567,12 @@ class CoreAIQwenBridge(CoreAIQwen):
         sys.path.insert(0, str(BRIDGE_DIR))
         import coreai_bridge as B
         self.B = B
-        self.root, self.log = root, log
         soc = SOC.detect_soc()
-        self.bonded_compile_mode = SOC.apply(strict=True, log=self.log, soc=soc)
+        self.bonded_compile_mode = SOC.apply(strict=True, log=log, soc=soc)
         self.soc = soc
+        import soc_variant  # a build with per-chip function sets: this chip's set (derived once on an M5)
+        root = soc_variant.prepare(root, soc.klass, log)
+        self.root, self.log = root, log
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)
         self.kv_cache_formats = cache_formats(man)

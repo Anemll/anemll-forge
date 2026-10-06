@@ -48,6 +48,8 @@ def main(argv=None):
         return 2
     if a.follow:
         return follow(a)
+    import soc_variant  # a build with per-chip function sets: compile this chip's set (derived once on an M5)
+    a.build = soc_variant.prepare(a.build, SOC.detect_soc().klass, stamp)
     man = json.loads((a.build / "manifest.json").read_text())
     stamp(graph_line(man, a.build))
     if a.force:
