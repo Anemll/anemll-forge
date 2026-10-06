@@ -556,6 +556,29 @@ Full C2T build (C2 plus `KV_KEYS_T`, full ladder; the export and the ANE compile
 
 C2T prefills 3.1 to 5.5% faster than C2 at the same power, within -1.4% to +3.6% of Splash, at 31 to 33% less energy per prompt token. Decode stays within the fixture's acceptance noise. Each run first measures its idle floor (whole machine: ANEMLL 8.3 to 8.7 W, Splash 8.8 W). The joules above include it; net of the floor, ANEMLL (C2T) uses 36 to 39% less energy than Splash per prompt token (0.073 to 0.100 J against 0.119 to 0.165) and 48 to 55% less per generated token (0.315 to 0.400 J against 0.673 to 0.778); gross, 29 to 33% and 39 to 47% less. The floor is about a third of ANEMLL's 27 to 33 W and a fifth of Splash's 46 W, so the net savings are larger. Raw: `compare/ane_c2t_window.json`, `ane_64k_C2T.json`, summary `c2t_c2_splash_total_power.json`.
 
+### The M5 version (C2T without FP8)
+
+The M5 (H17) ANE compiler rejects FP8. C2T's chunk 0 on an M5 Max (macOS 27.2, compile mode 1) fails with `Compiler internal error: Error: MLIR MPS to ANEC conversion failed`, and Core AI runs the chunk on the GPU at about 1.9 s per call at any size (GPU at 100%, 1.2 s of CPU in 19.6 s). C2T with FP16 in place of FP8 (`ATT_INT8MM=s8,s8b`, `KV_KEYS_T=1`: INT8 scores, FP16 softmax and PV, transposed keys) runs on the ANE. Chunk 0, two rounds, ms per call:
+
+| Entry | Today's V8 | V8 + transposed keys | C2T for M5 | C2T for M5 vs V8 |
+| --- | ---: | ---: | ---: | ---: |
+| Verify 8K / 32K / 64K | 12.46 / 14.45 / 17.14 | 12.43 / 14.05 / 16.62 | 12.43 / 14.10 / 16.64 | -0.2 / -2.4 / -2.9% |
+| Prefill 8K / 32K / 64K | 20.93 / 28.94 / 39.28 | 20.74 / 27.97 / 37.70 | 20.62 / 27.06 / 35.79 | -1.5 / -6.5 / -8.9% |
+
+On the M5 the INT8 scores help prefill only (their tensors cross DRAM in 64-row calls and stay on chip in verify); the transposed keys give about 4% at 64K in both. One package holding both function sets (the builder's `ATT_INT8MM_M5`) does not work: the FP8 functions fail the ANE compile for the whole package, so its M5 functions also ran on the GPU, and Core AI's `SpecializationOptions` has no per-function selection. The M5 version is a separate package (about 10 GB of chunks; the head, drafter and `model/` are shared). Each package is the same `main.mlirb` (program and weights in one file), so they cannot share weights on disk.
+
+Full model on the M5 Max (export on the M6 synced chunk by chunk to the M5 Max and compiled as each arrived: 34 min from export start to a compiled model), the same server benchmark, whole-machine power:
+
+| Context | Prefill tok/s, C2T for M5 / V8 | Decode tok/s, C2T for M5 / V8 | J per prompt token | J per generated token |
+| --- | --- | --- | --- | --- |
+| 8K | 181 / 179 (+1.2%) | 29.9 / 28.8 (+3.7%) | 0.157 / 0.164 | 0.865 / 0.962 |
+| 16K | 176 / 172 (+2.5%) | 28.8 / 27.7 (+4.0%) | 0.173 / 0.178 | 0.958 / 0.944 |
+| 32K | 158 / 151 (+4.8%) | 27.0 / 24.9 (+8.2%) | 0.197 / 0.200 | 0.995 / 1.066 |
+| 48K | 145 / 136 (+6.3%) | 25.0 / 23.7 (+5.3%) | 0.209 / 0.224 | 1.051 / 1.128 |
+| 64K | 133 / 124 (+7.4%) | 23.4 / 22.1 (+5.7%) | 0.229 / 0.246 | 1.120 / 1.184 |
+
+(Idle floors 8.3 and 9.4 W; the M5 Max had other applications running, so the energy rows are indicative.) The M6 runs C2T at 1.7 to 1.8 times this prefill speed and about twice the decode speed. Raw: `compare/m5max_c2t_m5.json`, `m5max_v8.json`. The research scripts also used a hard-coded compile mode 2 (the M6 policy) until 5 October; they now follow the SoC policy, which the server always did.
+
 ### Model-file quality: Splash's GGUF on the same KL-512
 
 Splash's API returns no logits, so its model file was scored through llama.cpp (llama-cpp-python 0.3.36, M5 Max) with `scripts/kl512_gguf.py`: the same 64 sequences, 40,023 positions and metric as `m6_kl512_eval.py`. Splash reports 99.3 to 99.45% same top token as llama.cpp on this model. Mean KL to the BF16 teacher (reference perplexity 2.1355):

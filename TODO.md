@@ -12,9 +12,15 @@ INT8 x INT8 runs on the M6 ANE through Core AI at up to about 53 TOPS against 13
 
 Splitting a constant INT8 weight into two output-channel branches lifted 256-row W8A8 from 34.4 to 43.3 TOPS, and INT8 weights with FP16 activations from 23.0 to 32.2 (R, INT8 compute); a 4096 x 4096 FP16 matmul was unchanged at 256 rows. Our weights are LUT constants of other shapes (MLP 5120 to 17408 and back, head 5120 to 248,320), which the compiler may tile differently. Measure one chunk's MLP projections and the head as TP1 / TP2 / TP4 at 8 and 64 rows (chunk A/B for verify and prefill, head in a standalone package). Keep any split that shortens the verify or prefill call without hurting compile time.
 
-### 3. 8-bit attention: INT8-only path (M5)
+### 3. 8-bit attention on M5: C2T without FP8 (measured), INT8-only softmax still open
 
-On V8 (FP16 keys) the M6 form C (INT8 scores, FP8 softmax sum, FP8 PV weights) matches V8 on KL-512 (R, 5 October); the INT8 / UINT8 form A does not (direct KL 0.011 to V8): folding the per-token value scales into UINT8 weights rounds 84% of codes to zero and drops about 7% of the softmax mass. Options for M5, host simulation first (`scripts/m6_attn_logit_stats.py`): take the softmax sum from the same UINT8 weights (4.7% against 5.4% attention error), per-tile value scales (3.7%, a cache-format change), or retrain the rank-64 corrections with the 8-bit attention simulated.
+The M5 ANE compiler rejects FP8 (C2T falls to the GPU at about 1.9 s per call). C2T for M5 (`ATT_INT8MM=s8,s8b`,
+`KV_KEYS_T=1`) runs on the ANE: full model on an M5 Max against today's V8, prefill +1.2 to +7.4% and decode +3.7 to
++8.2% from 8K to 64K (research note, "The M5 version"). It is a separate package (one package with both function sets
+fails the M5 compile as a whole). Next for release: the runtime picks the package folder by chip, the release ships
+both chunk sets, a quality check of the M5 version (8K / 64K evals, KL-512; the math is chip-independent, run on the
+M6). Still open: an INT8 softmax for the M5 (UINT8 PV weights lose about 7% of the softmax mass; needs per-tile value
+scales or a LoRA retrain with it simulated).
 
 ### 4. Contexts above 64K: production ladder
 
