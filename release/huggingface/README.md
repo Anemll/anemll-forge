@@ -17,7 +17,7 @@ tags:
 
 # ANEMLL Forge · Qwen3.8-27B for ANE
 
-**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update replaces the 16 target chunks with a **faster exact ANE graph**: the same weights and model function, evaluated with less serial work. On M6 a full target verify is **19 to 31% faster** and a 64-row prefill call **29 to 35% faster** than the previous packages. The target now carries only the **V-only INT8 KV cache** (FP16 keys, INT8 values), which was already the default. Model-weight quantization is unchanged.
+**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update replaces the 16 target chunks with **8-bit attention** and a **transposed key cache**, with an **M6 and an M5 function set in the same packages**. On M6 the attention scores are INT8 and the softmax and PV weights FP8; the M5 functions keep the INT8 scores and run the softmax in FP16, because the M5 ANE compiler does not support FP8. Model-weight quantization is unchanged and quality matches the previous packages. Full server on M6: prefill **237 to 306 tok/s** from 64K to 8K. On an M5 Max the M5 set prefills **3 to 7% faster** than the previous packages at 32K to 64K.
 
 The normal inference path uses the included, tested **Core AI DFlash2 speculative drafter**. Each T=8 verifier cycle checks one anchor and seven draft proposals. T=8 target functions are verification functions; the separate `drafter/` package generates the proposals. Do not substitute a Core ML or unpaired drafter.
 
@@ -25,7 +25,7 @@ ANEMLL independently converts and quantizes [Qwen/Qwen3.8-27B](https://huggingfa
 
 ## Files and runtime compatibility
 
-- [coreai/](coreai): 16 target chunks (faster graph, V8 cache), the unchanged output head and the manifest. Target recipe: `mix25in_mixr_lr64mix`, with mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections.
+- [coreai/](coreai): 16 target chunks (8-bit attention with M6 and M5 function sets, transposed keys, V8 cache, faster graph), the output head and the manifest. Target recipe: `mix25in_mixr_lr64mix`, with mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections.
 - [model/](model): matching tokenizer/configuration files and FP16 host embedding table.
 - [drafter/](drafter): `dflash2_lut4_gptq.aimodel`, numerical metadata, configuration, compact BF16 selector codebooks and source licenses/notices. These assets are unchanged from the previous paired release.
 - [release.json](release.json): complete per-file SHA-256/size inventory and target/drafter pairing.
@@ -35,11 +35,37 @@ The target's supported entries are **8K, 16K, 32K, 48K and 64K**. There is no 24
 
 V8 caches store historical values as INT8 with FP16 scales per token and KV head. The host quantizes accepted rows; ANE attention reconstructs historical values. New graph outputs remain FP16. Keys and the recurrent GDN state retain their existing precision. Only the 16 full-attention layers grow this cache. These packages contain only V8 entries. The FP16-cache fallback remains in the previous revision [`cd7dfc6`](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/cd7dfc605ccad091b961f7788939c30d01c3793e), which has selectable FP16/V8 packages with the earlier graph.
 
-**Source:** use the current [ANEMLL Forge source](https://github.com/Anemll/anemll-forge/tree/main), which includes the V8 runtime; the faster graph needs no runtime change. The V8 runtime preserves V codes/scales through context growth and speculative commits and uses the Swift bridge. The source README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
+**Source:** these packages need the ANEMLL Forge source with the transposed-key runtime and the M5 build derivation (October 5, 2026 or later); earlier source refuses them at load (key-layout check). On an M5, the first start also needs the Core AI authoring package: `python -m pip install coreai-core`. The V8 runtime preserves V codes/scales through context growth and speculative commits and uses the Swift bridge. The source README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
 
-This update replaces the 16 target chunks and the manifest, and updates the inventory, [MODIFICATIONS.md](MODIFICATIONS.md) and this card. The output head, model assets and drafter are byte-identical to the previous revision. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
+This update replaces the 16 target chunks, the manifest and the output head (re-exported from the same LUT4 head weights), and updates the inventory, [MODIFICATIONS.md](MODIFICATIONS.md) and this card. The model assets and drafter are byte-identical to the previous revision. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
 
-## Faster exact graph (this update)
+## 8-bit attention for M6 and M5 (this update)
+
+The 16 full-attention layers now run most of their history attention in 8-bit, with every 8-bit operand as an explicit quantize / dequantize pair so the ANE compiler fuses it:
+
+- **M6 functions:** scores in INT8 (step 1/4) and the softmax weights, softmax sum and PV weights in FP8 e4m3 (scale 1/64).
+- **M5 functions** (`<entry>_m5`, mapped in the manifest's `entries_by_soc`): the same INT8 scores, softmax and PV in FP16. The M5 ANE compiler rejects FP8: the M6 functions would fail to compile there and run on the GPU at about 2 s per call.
+- **Transposed key cache:** keys are stored as (KV head, head dimension, token), the operand QK reads, so the ANE no longer transposes every key tile before QK.
+
+Both function sets share the weights, so the packages are no larger than before. Core AI compiles a package as a whole, so on first start an M5 derives its own build once: each chunk with only its M5 functions, written to the Forge state folder (the download is not modified; about 20 seconds on an M5 Max and one more copy of the chunks, about 10 GB, on disk), then compiled as usual. An M6 uses the packages as they are.
+
+Quality on M6 (M6 functions), against the previous V8 packages: KL-512 to BF16 **0.1838** (previous 0.1842), direct KL 0.0004 with the same top token at 99.3% of positions; 64K perplexity **5.0685** (5.0673), 8K perplexity 8.0957 (8.0952). The M5 functions compute what a build with those forms computes on the host; their device quality has not been measured separately.
+
+Full server, the same synthetic coding workload, greedy, thinking off, 256 tokens, DFlash2:
+
+| Context | M6: prefill / decode tok/s | M5 Max: prefill / decode tok/s (previous packages) |
+| --- | --- | --- |
+| 8K | 306 / 60.8 | 172 / 28.8 (179 / 28.8) |
+| 16K | 297 / 60.3 | 171 / 27.8 (172 / 27.7) |
+| 32K | 275 / 54.5 | 156 / 24.5 (151 / 24.9) |
+| 48K | 253 / 46.1 | 143 / 24.1 (136 / 23.7) |
+| 64K | 237 / 47.9 | 132 / 22.6 (124 / 22.1) |
+
+The M6 numbers come from the same build with only the M6 functions (identical weights and M6 functions); the M5 Max numbers from these packages, derived on the M5 Max, which had other applications running. Against the previous packages this run measured prefill -4% at 8K to +6.5% at 64K and decode 0 to +2%; an earlier run of the same M5 functions (built as a separate package) measured prefill +1.2 to +7.4% and decode +3.7 to +8.2%. One workload with three decode repeats is not a general benchmark. On M6 the 8-bit attention used about 30% less whole-machine energy per prompt token than a GPU runtime on the same Mac (details and limits in the source repository's research notes).
+
+**First start on M6 compiles both function sets** of each package; that compile time has not been measured yet (the M6-only build compiled in about 23 minutes). On an M5 Max the derived M5 build compiled in about 26 minutes.
+
+## Faster exact graph (previous update)
 
 Two rewrites change how the ANE evaluates the target, not its weights or math:
 
