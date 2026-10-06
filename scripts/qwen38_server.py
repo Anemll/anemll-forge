@@ -215,7 +215,16 @@ class Engine:
             import dflash2_ane_drafter as D
             from dflash2_coreai_drafter import CoreAIDrafter
             guide = getattr(self.model, "compile_guide", None)
-            make = lambda: CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)  # noqa: E731
+            def make():
+                try:
+                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
+                except Exception as e:  # noqa: BLE001  a stale cached specialization (nilError): recompile once
+                    import coreai_compile_guide as G
+                    n = G.purge(Path(dpath))
+                    if not n:
+                        raise
+                    log(f"drafter load failed ({str(e)[:60]}); purged {n} cached specializations, recompiling")
+                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
             self.drafter = guide.load(f"drafter {Path(dpath).name}", make) if guide else make()
             log(f"drafter: Core AI {dpath.name}")
         self.tok = AutoTokenizer.from_pretrained(str(hf))
