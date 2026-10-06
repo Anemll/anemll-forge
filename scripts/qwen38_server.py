@@ -35,6 +35,19 @@ DRAFT_GAP = float(os.environ.get("DRAFT_GAP_MS", "3")) / 1e3
 # Thinking budget: a reasoning that reaches its budget without "</think>" is closed with Qwen's budget phrase and the
 # answer follows (the quantized model can deliberate past pi's 16K maxTokens: 2026-09-28, 16384 tokens of thinking,
 # no answer). ANSWER_RESERVE tokens of max_tokens stay for the answer.
+# Pi's compaction request: a new conversation under this fixed system prompt (pi-coding-agent compaction.js)
+SUMMARY_PROMPTS = ("You are a context summarization assistant",)
+
+
+def is_summary_request(messages) -> bool:
+    """The request is a context summary (its first message is a known summarizer system prompt)."""
+    if not messages or messages[0].get("role") not in ("system", "developer"):
+        return False
+    c = messages[0].get("content")
+    text = c if isinstance(c, str) else "".join(p.get("text", "") for p in (c or []) if isinstance(p, dict))
+    return text.lstrip().startswith(SUMMARY_PROMPTS)
+
+
 THINK_STOP = ("\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly "
               "now.\n</think>\n\n")
 ANSWER_RESERVE = 4096
@@ -51,6 +64,9 @@ def parse(argv=None):
                    help="require matching model cache inputs; auto reads manifest.json")
     p.add_argument("--ctx", type=int, default=8192, help="context length the chunks were built for")
     p.add_argument("--think", action="store_true", help="enable thinking by default (clients can override)")
+    p.add_argument("--summary-no-think", action="store_true",
+                   help="no thinking for context-summary requests (Pi's compaction: its fixed summarizer system prompt), "
+                        "whatever the client asks; they then also get the non-thinking sampling defaults")
     p.add_argument("--max-tokens", type=int, default=4096, help="default completion limit")
     p.add_argument("--think-budget", default="low=2048,medium=6144,xhigh=12288",
                    help="reasoning tokens per reasoning_effort before the server closes the thinking (no effort: "
@@ -210,7 +226,8 @@ class Engine:
         self.budgets = {} if str(a.think_budget) in ("0", "off", "") else \
             {k: int(v) for k, v in (kv.split("=") for kv in a.think_budget.split(","))}
         self.think_stop = self.tok.encode(THINK_STOP, add_special_tokens=False)
-        self.think_forced = 0
+        self.think_close = self.tok.convert_tokens_to_ids("</think>")
+        self.think_forced, self.think_n = 0, None
         # DRY sequence breakers: byte-level BPE tokens containing a newline (\u010a), ':', '"' or '*'
         self.breakers = frozenset(i for i, t in enumerate(self.tok.convert_ids_to_tokens(list(range(len(self.tok)))))
                                   if t and any(c in t for c in "\u010a:\"*"))
@@ -467,7 +484,7 @@ class Engine:
     def generate(self, ids, max_tokens, temp, top_p, top_k, stop, seed, on_text, presence=None, dry=None,
                  think_budget=0):
         logits, reused = self.prefill(ids)
-        self.think_forced = 0
+        self.think_forced, self.think_n = 0, None
         decode_started = time.perf_counter()
         t_gen, out, text, finish = time.time(), [], "", "length"
         rng = np.random.default_rng(seed)
@@ -553,6 +570,7 @@ class Engine:
                              "draft_accept_histogram": list(self.acc_hist),
                              "phase_seconds": dict(self.tm), "finish_reason": finish,
                              "last_logits_finite": bool(np.isfinite(last_logits).all())}
+        self.think_n = out.index(self.think_close) if self.think_close in out else None  # reasoning tokens
         return text, finish, len(out), reused, decode_seconds
 
 
@@ -745,6 +763,10 @@ def make_handler(engine):
             effort = req.get("reasoning_effort") or kw.get("reasoning_effort")
             if effort:
                 kw["reasoning_effort"] = {"minimal": "low", "low": "low", "medium": "medium"}.get(effort, "xhigh")
+            why = ""
+            if engine.a.summary_no_think and kw["enable_thinking"] and is_summary_request(req.get("messages")):
+                kw["enable_thinking"], why = False, " (context-summary request: --summary-no-think)"
+                kw.pop("reasoning_effort", None)
             thinking = bool(kw["enable_thinking"])
             tools = req.get("tools") if req.get("tool_choice") != "none" else None
             stop = req.get("stop")
@@ -772,6 +794,10 @@ def make_handler(engine):
                 max_tokens = min(req.get("max_completion_tokens") or req.get("max_tokens") or engine.a.max_tokens, room)
                 budget = int(req["thinking_budget"]) if thinking and req.get("thinking_budget") is not None else \
                     engine.think_budget(thinking, kw.get("reasoning_effort"), max_tokens)
+                print(f"[{time.strftime('%H:%M:%S')}] thinking "
+                      + (f"on (effort {kw.get('reasoning_effort') or 'none'}, budget {budget or 'none'}, "
+                         f"max_tokens {max_tokens})" if thinking else f"off{why}")
+                      + f" | temperature {temp}, top_p {top_p}", flush=True)
                 t0 = time.time()
                 if stream:
                     self.send_response(200)
@@ -847,6 +873,8 @@ def make_handler(engine):
                       + ") | "
                       + (f"LOOP period {engine.loop} stopped | " if engine.loop else "")
                       + (f"THINK closed at {engine.think_forced} (budget) | " if engine.think_forced else "")
+                      + (f"thinking {engine.think_n} + answer {n - engine.think_n - 1} tok | "
+                         if engine.think_n is not None else "")
                       + f"{finish} | ctx {engine.model.pos}/{engine.ctx}"
                       + (f" ({engine.model.ctx // 1024}K entry)" if getattr(engine.model, "ladder", None) else ""), flush=True)
 

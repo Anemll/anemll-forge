@@ -64,6 +64,8 @@ def parser():
                 q.add_argument("--drafter", type=path, help="drafter config/selector directory; default: package parent")
                 q.add_argument("--host", default="127.0.0.1")
                 q.add_argument("--port", type=int, default=8765)
+                q.add_argument("--summary-no-think", action="store_true",
+                               help="no thinking for context-summary requests (Pi's compaction)")
             else:
                 q.add_argument("--prompt")
                 q.add_argument("--no-think", action="store_true")
@@ -133,7 +135,7 @@ def prepare(a):
         args = ["--hf", str(a.model), "--model-dir", str(a.build), "--ctx", str(a.ctx)]
         if a.command == "serve":
             args += ["--host", a.host, "--port", str(a.port), "--runtime", runtime,
-                     "--kv-cache-dtype", a.kv_cache_dtype]
+                     "--kv-cache-dtype", a.kv_cache_dtype] + (["--summary-no-think"] if a.summary_no_think else [])
             if a.plain:
                 if a.drafter:
                     raise ValueError("--drafter cannot be combined with diagnostic --plain")

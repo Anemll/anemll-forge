@@ -17,13 +17,20 @@ import time
 from pathlib import Path
 
 
+def mlir_module(prog):
+    """The program's MLIR module: AIProgram._mlir_module in coreai-core 1.0.0b2, ._module._mlir_module in 1.0.0b3."""
+    m = getattr(prog, "_mlir_module", None)
+    return m if m is not None else prog._module._mlir_module  # noqa: SLF001
+
+
 def graphs(region):
-    """Every GraphOp in a region, recursing into udml namespaces."""
-    from coreai._compiler.dialects import coreai, udml
+    """Every function (coreai.graph op) in a region, recursing into udml namespaces; by op name, which is stable
+    across coreai-core versions (the Python op classes moved)."""
     for op in region.blocks[0].operations:
-        if isinstance(op, coreai.GraphOp):
+        name = op.operation.name
+        if name == "coreai.graph":
             yield op
-        elif isinstance(op, udml.NamespaceOp):
+        elif name == "udml.namespace":
             yield from graphs(op.regions[0])
 
 
@@ -32,9 +39,10 @@ def strip(src: Path, dst: Path, keep: dict[str, str]) -> tuple[list[str], list[s
     from coreai._compiler.ir import StringAttr
     from coreai.authoring.asset import AIModelAsset
     prog = AIModelAsset.load(src).program
+    module = mlir_module(prog)
     kept, dropped = [], []
-    with prog._mlir_module.context:  # noqa: SLF001
-        for op in list(graphs(prog._mlir_module.body.region)):  # noqa: SLF001
+    with module.context:
+        for op in list(graphs(module.body.region)):
             name = op.sym_name.value
             if name in keep:
                 if keep[name] != name:
