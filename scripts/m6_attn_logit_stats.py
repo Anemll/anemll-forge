@@ -699,7 +699,7 @@ def selftest(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=("run", "selftest"))
-    ap.add_argument("--out", default="/Volumes/SSD4TB/anemll-forge-research/logit_stats")
+    ap.add_argument("--out", default="logit_stats")
     ap.add_argument("--json", default="attn_logit_stats.json")
     ap.add_argument("--pass", dest="passes", action="append",
                     help='one pass (repeatable), e.g. "kl=4,25" or "wiki=4096x2;qchunk=256;stride=4"')

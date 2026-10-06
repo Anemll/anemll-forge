@@ -117,7 +117,7 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
   server, cold prompts of repo source, greedy, thinking off: 6K 20.3 s both, 16K 55.2 against 56.6 s (2.5%), 30K
   112.7 against 115.4 s (2.3%); replies identical and tok/verify and acceptance identical at every length. A
   skipped drafter block costs about 6 ms, so ingestion explains only about 2.5 points of the gap between Pi's
-  prefill and the 8K eval. Raw: `/Volumes/SSD4TB/anemll-forge-research/ingest_ab/`.
+  prefill and the 8K eval. Raw: `ingest_ab/` (research volume).
 
 ### 12. Smaller ladder entries (2K, 4K) for the first prefill: measured, not worth it
 
@@ -142,7 +142,7 @@ prefill rates hid the 11% per-call difference behind other per-call costs.)
 The gaps at the top of the ladder matter more: rows between two entries run on the larger one, about 2.6 ms per
 call per 1K of unused history for the whole model. Rows 16K to 32K average 8K unused (about 20 ms of about 267 ms
 per call); a 24K entry would save about 2.6 s on a 32K cold prefill, for the same memory cost per entry.
-Raw: `/Volumes/SSD4TB/anemll-forge-research/ladder_small_sweep.json`, `ladder_C2_sweep.json`.
+Raw: `ladder_small_sweep.json` (research volume), `ladder_C2_sweep.json`.
 
 ### 13. Smaller items
 
