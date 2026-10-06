@@ -73,7 +73,11 @@ def load_weights(cfg):
             sc = sc / RESID_SCALE
         fold = LUT_F["down" if name.endswith("down_proj") else "default"]
         w[f"{name}/lut"], w[f"{name}/idx"], w[f"{name}/scale"] = (lut * fold).astype(np.float16), idx, (sc / fold)
-    with safe_open(DRAFTER / "model.safetensors", "pt") as f:
+    # the drafter checkpoint's small tensors: the full upstream model.safetensors, or small.safetensors holding only
+    # them (scripts/qwen38_small_checkpoint.py --drafter; the quantized-export repository's drafter/)
+    small = DRAFTER / "model.safetensors"
+    small = small if small.exists() else DRAFTER / "small.safetensors"
+    with safe_open(small, "pt") as f:
         for k in f.keys():
             if k.endswith(("norm.weight", "base_kernel")) or k == "candidate_selector.hidden_projection.weight":
                 w[k] = f.get_tensor(k).float().numpy()
@@ -83,10 +87,16 @@ def load_weights(cfg):
     return w
 
 
+MASK_ROW = "dflash.mask_token_embedding"  # the target embedding row of the mask token (a small checkpoint's copy)
+
+
 def mask_embedding(cfg) -> np.ndarray:
     tok = cfg["dflash_config"]["mask_token_id"]
     name = "model.language_model.embed_tokens.weight"
     wmap = json.loads((MODEL / "model.safetensors.index.json").read_text())["weight_map"]
+    if name not in wmap and MASK_ROW in wmap:
+        with safe_open(MODEL / wmap[MASK_ROW], "pt") as f:
+            return f.get_tensor(MASK_ROW)[0].float().numpy()
     with safe_open(MODEL / wmap[name], "pt") as f:
         return f.get_slice(name)[tok:tok + 1][0].float().numpy()
 

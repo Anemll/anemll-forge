@@ -4,7 +4,9 @@ digests give the builder identical weights (its output bytes still vary slightly
 serialization, not the weights).
 
     MODEL=<dir> EXPORT_DIR=<export> python scripts/qwen38_weights_digest.py --out digest.json
-    MODEL=<dir> EXPORT_DIR=<export> python scripts/qwen38_weights_digest.py --check weights_digest.json"""
+    MODEL=<dir> EXPORT_DIR=<export> python scripts/qwen38_weights_digest.py --check weights_digest.json
+--drafter digests what coreai/dflash2_coreai_build.py consumes instead (env DRAFTER, DRAFT_EXPORT, HEAD_EXPORT, MODEL):
+the drafter's weights with the build's folds, the mask-token embedding row and the output head."""
 from __future__ import annotations
 
 import argparse
@@ -33,13 +35,28 @@ def digest() -> dict:
     return out
 
 
+def digest_drafter() -> dict:
+    import dflash2_coreai_build as D
+    from safetensors import safe_open
+    cfg = json.loads((D.DRAFTER / "config.json").read_text())
+    arrays = {**D.load_weights(cfg), "mask_embedding": D.mask_embedding(cfg)}
+    with safe_open(D.HEAD_EXPORT, "np") as f:
+        arrays.update({k: f.get_tensor(k) for k in ("lm_head.lut", "lm_head.idx", "lm_head.scale")})
+    out = {}
+    for k, v in arrays.items():
+        a = np.ascontiguousarray(v)
+        out[k] = f"{a.dtype}{a.shape}:" + hashlib.sha256(a.view(np.uint8).data if a.size else b"").hexdigest()
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--out", type=Path, help="write the digests")
     g.add_argument("--check", type=Path, help="compare with a published digest file")
+    ap.add_argument("--drafter", action="store_true", help="the DFlash2 drafter build's inputs instead of the target's")
     a = ap.parse_args()
-    d = digest()
+    d = digest_drafter() if a.drafter else digest()
     if a.out:
         a.out.write_text(json.dumps(d, indent=0, sort_keys=True))
         print(f"{len(d)} arrays -> {a.out}")

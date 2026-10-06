@@ -1,6 +1,6 @@
 # Converting this export to Core AI packages
 
-These steps rebuild the Core AI target published in [anemll/anemll-forge-qwen3.8-27B](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B) (16 chunk packages, the output head and a manifest) from this repository, with [ANEMLL Forge](https://github.com/Anemll/anemll-forge). They were run on an M6 with macOS 27. About 25 minutes of export and, overlapped with it, the first ANE compile.
+These steps rebuild the Core AI target and its DFlash2 drafter published in [anemll/anemll-forge-qwen3.8-27B](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B) (16 chunk packages, the output head and a manifest) from this repository, with [ANEMLL Forge](https://github.com/Anemll/anemll-forge). They were run on an M6 with macOS 27. About 25 minutes of export and, overlapped with it, the first ANE compile.
 
 ## 1. Environment
 
@@ -47,9 +47,22 @@ python forge.py compile --follow --build "$OUT/mix25in_mixr_lr64mix_kvv8" &
 
 Variants: drop `ATT_INT8MM_M5` for an M6-only build; drop the `ATT_*` and `KV_KEYS_T` settings for the plain V8 graph; `--ctx` / `--pctx` choose the context entries. The settings are recorded in each chunk's `numerics` in `manifest.json`, and the server prints them at startup.
 
-## 4. Run it
+## 4. Drafter (optional)
 
-The runtime also needs the tokenizer and FP16 embedding table (`model/`) and the paired DFlash2 drafter (`drafter/`) of the inference bundle. Download that bundle and point `BUILD` at the new packages:
+The published drafter (`dflash2_lut4_gptq.aimodel`) from this repository's `drafter/` and the target's LM head; check its inputs first (165 arrays):
+
+```sh
+DRAFTER="$Q/drafter" DRAFT_EXPORT="$Q/drafter" HEAD_EXPORT="$Q/export/mix25in_mixr_lr64mix/lm_head.safetensors" MODEL="$Q/model" \
+  .venv-convert/bin/python scripts/qwen38_weights_digest.py --drafter --check "$Q/drafter/weights_digest.json"
+DRAFTER="$Q/drafter" DRAFT_EXPORT="$Q/drafter" HEAD_EXPORT="$Q/export/mix25in_mixr_lr64mix/lm_head.safetensors" MODEL="$Q/model" \
+  OUT="$OUT/drafter" .venv-convert/bin/python coreai/dflash2_coreai_build.py     # -> $OUT/drafter/dflash2_lut4_gptq.aimodel
+```
+
+The build reads only the drafter's small tensors and config (`drafter/small.safetensors`) and the mask token's embedding row (`model/`), not the full checkpoints. Put the new package and the inference bundle's `drafter/config.json` and `selector.safetensors` side by side to use it (step 5, `DRAFT` / `DRAFTER`).
+
+## 5. Run it
+
+The runtime also needs the tokenizer and FP16 embedding table (`model/`) of the inference bundle, and the paired drafter (the bundle's `drafter/`, or yours from step 4). Download that bundle and point `BUILD` at the new packages:
 
 ```sh
 export FORGE_BUNDLE="$HOME/Models/anemll-forge-qwen3.8-27B"

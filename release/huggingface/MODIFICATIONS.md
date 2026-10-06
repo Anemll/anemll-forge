@@ -28,7 +28,7 @@ The default release includes both Core AI target and speculative drafter. Vision
 
 The complete local drafter BF16 checkpoint was rehashed and matched the pinned upstream LFS SHA256. Configuration and source license/notice bytes were checked against upstream Git blobs. Compact selector tensor values were checked for identical raw bytes after extraction.
 
-The Core AI drafter body has not been independently reconstructed from the source checkpoint and GPTQ export. Head/target and calibration linkage are currently supported by the source sidecar/export metadata. The paired target/drafter has separate M6 prefill, decode and short KL experiments summarized with limitations in the model card. Packaging integrity checks do not run inference again or establish complete hardware or quality validation.
+The Core AI drafter body has not been independently reconstructed from the source checkpoint and GPTQ export. Its GPTQ export and build inputs are now published in [anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI); the 165 weight arrays its build consumes from there match those from the original drafter and target checkpoints exactly. Head/target and calibration linkage are currently supported by the source sidecar/export metadata. The paired target/drafter has separate M6 prefill, decode and short KL experiments summarized with limitations in the model card. Packaging integrity checks do not run inference again or establish complete hardware or quality validation.
 
 ## 8-bit attention for M6 and M5, transposed keys (this update)
 
