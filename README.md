@@ -101,6 +101,7 @@ Main startup options ([all options, defaults and request fields](docs/SERVER.md)
 | KV cache format | `--kv-cache-dtype` | `KV_CACHE_DTYPE` | `auto` (the build's default) |
 | Speculative drafter | `--draft PATH`, or `--plain` to disable | `DRAFT` | the bundle's `drafter/` |
 | Listen address and port | `--host`, `--port` | `BIND_HOST`, `PORT` | `127.0.0.1`, `8765` |
+| Thinking for Pi's compaction (context-summary) requests | `--summary-think` keeps the client's setting | `SUMMARY_THINK=1` | off ([why](#pi-compaction-runs-without-thinking)) |
 
 Requests choose their generation settings. Defaults: thinking off (`chat_template_kwargs.enable_thinking`); temperature 0.7, top_p 0.8, top_k 20 without thinking and 1.0, 0.95, 20 with it, following the Qwen3.8 model card; `max_tokens` 4096; `presence_penalty` 0. Speculative decoding keeps the target's sampling distribution. The card's `presence_penalty` 1.5 for non-thinking chat penalizes every repeated token and is usually unhelpful for code ([DFlash2 sampling plan](docs/research/DFLASH2_SAMPLING_PLAN.md)). Server-wide defaults such as `--think`, `--max-tokens` and `--presence` are flags of `scripts/qwen38_server.py`, not of `forge.py serve`; see [changing a server-wide default](docs/SERVER.md#changing-a-server-wide-default).
 
@@ -159,6 +160,49 @@ Measured on M6 against the release graph (complete target and head, V8 cache):
 | 64K | 190.3 → 131.5 ms (−31%) | 603.4 → 394.1 ms (−35%) |
 
 With DFlash2, server cold prefill was 26 to 41% faster and decode 21 to 25% faster at 32K to 64K on a synthetic coding workload (measured on a two-format build with the same changes; the default build's per-call times are lower still). Compiled KL-512 against BF16 is unchanged (mean 0.18427 → 0.18417), and a 64K long-context check matches the release graph (perplexity 5.0686 → 5.0673). The first start compiles in about 23 minutes, like the release graph. Check what a server loaded with its startup line or `curl -s localhost:8765/health` (`target_graph`). Details, method and limits: [M6 compute acceleration](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md). An 8-row verifier remains the fastest end to end ([verifier block length](docs/verifier_len.md)).
+
+### 8-bit attention for M6 and M5 in one download (research build)
+
+A research build, not yet the published packages, runs most of the attention in 8-bit. **C2T** (M6) computes the
+scores in INT8 and the softmax weights, softmax sum and PV weights in FP8, and stores the key cache transposed
+(head dimension x token) so the ANE no longer transposes every key tile before QK. Its conversion settings are
+`ATT_INT8MM=s8,s8b,sm8,pvf8`, `ATT_S8_UNIT=ATT_S8B_UNIT=0.25` and `KV_KEYS_T=1`; quality matches the V8 build
+(KL-512 against BF16 0.1838 against 0.1842; 64K perplexity 5.0685 against 5.0673). Whole server on M6 against
+[Splash](https://github.com/incoai/splash) on the GPU (UD-IQ3_XXS GGUF), same benchmark, whole-machine power:
+
+| Context | Prefill tok/s, C2T / Splash | Decode tok/s, C2T / Splash | Energy per prompt token | Energy per generated token |
+| --- | --- | --- | --- | --- |
+| 8K | 306 / 311 | 60.8 / 54.2 | 31% less | 47% less |
+| 32K | 275 / 272 | 54.5 / 52.0 | 29% less | 42% less |
+| 64K | 237 / 231 | 47.9 / 48.7 | 33% less | 41% less |
+
+Splash's model file is closer to BF16 on the same KL-512 (0.163 against 0.184), so this is not an equal-quality
+comparison. Details: [M6 compute acceleration](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md).
+
+**M5.** The M5 ANE compiler does not support FP8: C2T's attention fails to compile there and Core AI runs the chunk
+on the GPU at about 2 s per call. The M5 instead runs C2T with FP16 in place of FP8 (INT8 scores and transposed keys
+kept), which compiles for the ANE and is faster than today's V8 on an M5 Max (prefill +1.2% at 8K to +7.4% at 64K,
+decode +3.7 to +8.2%). Both function sets ship in **one package**: exporting with `ATT_INT8MM_M5=s8,s8b` adds an M5
+copy of every entry that shares the weights, so the download does not grow. Core AI compiles a package as a whole and
+an FP8 function would fail the whole M5 compile, so on first start an M5 derives its own build once: every chunk with
+only its M5 functions, written to `$ANEMLL_FORGE_STATE/builds/` (the download is not modified; about 20 s for the
+16 chunks on an M5 Max, and one more copy of the chunks, about 10 GB, on disk), then compiled as usual. Deriving needs
+the Core AI authoring package: `python -m pip install coreai-core`. The M6 uses the package as it is. The startup
+line names the attention the loaded build uses, for example
+`8-bit attention: INT8 scores (step 1/4), FP8 softmax (...), FP8 PV weights` on M6 and `INT8 scores (step 1/4)` on M5.
+
+### Pi compaction runs without thinking
+
+When a Pi session nears its context limit, Pi sends a separate request that summarizes the conversation, with the
+session's thinking level. With thinking on, the model first reasons for thousands of tokens (about 5,900 in one
+recorded session: 3.5 minutes on M6) before it writes the summary, and the summary request discards the server's
+cached prompt, so the session waits for a cold prefill plus the reasoning. The server now recognizes these requests by
+Pi's fixed summarizer system prompt and runs them **without thinking**, with the non-thinking sampling defaults. On
+Pi's own request for a 27.9K-token session (M6, C2): 260 s with thinking against 181 s without, both summaries with
+Pi's full section layout. Without thinking the model tends to keep more detail: in one long session the updated
+summary ran to 14.7K tokens (422 s), so the next compaction comes sooner. The log shows
+`thinking off (context-summary request; --summary-think keeps thinking)` for each such request; `--summary-think`
+(wrapper: `SUMMARY_THINK=1`) restores the client's setting.
 
 ## 5. Apply the Pi configuration patches
 
