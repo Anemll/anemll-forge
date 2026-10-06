@@ -195,6 +195,28 @@ class Int8CacheAttention(unittest.TestCase):
                         for a, b in zip(*outs):
                             torch.testing.assert_close(b, a, rtol=0, atol=0)
 
+    def test_m5_function_forms_override(self):
+        """An M5 function (ATT_INT8MM_M5, traced with the forms override) computes exactly what a build with those
+        forms as ATT_INT8MM computes, while the package's ATT_INT8MM is C2's (FP8 forms)."""
+        quant = lambda x, unit, zero, dtype=None, axis=0, minval=None: torch.round(x / unit)
+        dequant = lambda codes, unit, zero=None, axis=0, minval=None, input_dtype=None: codes.to(f64) * unit
+        T, ctx, filled = 8, 2048, 1500
+        mix, c = attention(T, 17), self.history(ctx, filled, 17)
+        for name, unit in (("s8_unit", 0.25), ("s8b_unit", 0.25), ("pf8_unit", 1 / 64)):
+            mix.register_buffer(name, torch.tensor(unit, dtype=f64))
+        cos, sin = torch.ones(T, Bld.rot, dtype=f64), torch.zeros(T, Bld.rot, dtype=f64)
+        h = torch.zeros(1, 8, 1, T, dtype=f64)
+        args = (h, cos, sin, c["mask"], c["kf"], c["vc"], ctx, T, c["vs"], True)
+        outs = {}
+        for key, forms, override in (("direct", "s8,s8b", None), ("m5", "s8,s8b,sm8,pvf8", "s8,s8b"),
+                                     ("c2", "s8,s8b,sm8,pvf8", None)):
+            with Patched(ATT_BLOCK=512, ATT_BLOCK_PREFILL=1024, STABLE_ATTN=True, ATT_INT8MM=forms, quant8=quant,
+                         _FORMS_OVERRIDE=override):
+                Bld.dequant8 = dequant
+                outs[key] = mix(*args)[0]
+        torch.testing.assert_close(outs["m5"], outs["direct"], rtol=0, atol=0)
+        self.assertFalse(torch.equal(outs["c2"], outs["direct"]))  # the override is what changed the forms
+
     def test_masked_rows_do_not_matter(self):
         T, ctx, filled = 8, 2048, 900
         mix, c = attention(T, 3), self.history(ctx, filled, 3)

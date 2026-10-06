@@ -90,6 +90,11 @@ ATT_INT8MM = os.environ.get("ATT_INT8MM", "")
 # per-layer override of ATT_INT8MM, "layer:forms;layer:forms" (forms may be empty: production attention), e.g.
 # "63:s8,s8b" keeps INT8 scores but FP16 PV in layer 63
 ATT_INT8MM_BY_LAYER = {int(k): v for k, v in (x.split(":", 1) for x in os.environ.get("ATT_INT8MM_BY_LAYER", "").split(";") if x)}
+# M5 functions in the same package: when set (e.g. "s8,s8b"; "none" for production attention), every entry is also
+# exported as <entry>_m5 traced with these forms instead of ATT_INT8MM (the M5 ANE compiler rejects FP8, sm8 / pvf8);
+# the weights are shared, the manifest maps them (entries_by_soc) and the runtime picks the chip's set
+ATT_INT8MM_M5 = os.environ.get("ATT_INT8MM_M5")
+_FORMS_OVERRIDE = None  # set by Entry.forward while an alternative function (M5) is traced
 P8_STATS = None  # host research only: a list collects (rounded-to-zero, masked) fractions of the pvn weight codes
 S8_STATS = None  # host research only: a list collects max |raw QK score| per tile (s8 step choice)
 # score steps: 1/4 covers real Qwen3.8 scores (up to about 32) at 1.2% attention error (v8: true scores); kv8 raw
@@ -469,7 +474,8 @@ class AttnW(nn.Module):
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
         sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
-        forms = ATT_INT8MM_BY_LAYER.get(getattr(self, "layer_index", -1), ATT_INT8MM)
+        forms = _FORMS_OVERRIDE if _FORMS_OVERRIDE is not None else \
+            ATT_INT8MM_BY_LAYER.get(getattr(self, "layer_index", -1), ATT_INT8MM)
         mm8 = set(filter(None, forms.split(","))) if cache_v8 else set()  # INT8 values: v8 and kv8
 
         def has(*forms):
@@ -706,9 +712,10 @@ def kv_len(ctx: int, T: int) -> int:
 class Entry(nn.Module):
     """One entry point of a chunk: T rows, KV history kv_len(ctx, T), verify (T = P, lazy commit) or prefill (T > P)."""
 
-    def __init__(self, layers: nn.ModuleList, ctx: int, T: int, kv_cache_dtype=None) -> None:
+    def __init__(self, layers: nn.ModuleList, ctx: int, T: int, kv_cache_dtype=None, att_forms=None) -> None:
         super().__init__()
         self.layers, self.T, self.prefill = layers, T, T > P
+        self.att_forms = att_forms  # attention forms of this function (ATT_INT8MM_M5); None: ATT_INT8MM
         mode = kv_cache_dtype or ("fp16" if KV_CACHE_DTYPE == "both" else KV_CACHE_DTYPE)
         if mode not in KV_INPUTS:
             raise ValueError("Entry KV format must be fp16, v8 or kv8")
@@ -732,6 +739,14 @@ class Entry(nn.Module):
                 + ([f"o{j}_dbg" for j in range(len(self.layers))] if DBG_O else []))
 
     def forward(self, x, cos, sin, mask, conv_sel, commit, commit_last, *rest):
+        global _FORMS_OVERRIDE
+        prev, _FORMS_OVERRIDE = _FORMS_OVERRIDE, self.att_forms
+        try:
+            return self._forward(x, cos, sin, mask, conv_sel, commit, commit_last, *rest)
+        finally:
+            _FORMS_OVERRIDE = prev
+
+    def _forward(self, x, cos, sin, mask, conv_sel, commit, commit_last, *rest):
         _DBG.clear()
         it = iter(rest)
         if self.prefill:
@@ -904,8 +919,15 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
     mods = nn.ModuleList(LayerW(W, i) for i in layers).eval().to(torch.float16)
     del W
     gc.collect()
-    entries, aliases = [], {}
+    entries, aliases, soc_aliases = [], {}, {}
     modes = ("fp16", "v8") if KV_CACHE_DTYPE == "both" else (KV_CACHE_DTYPE,)
+    m5_forms = None if ATT_INT8MM_M5 is None else ("" if ATT_INT8MM_M5 == "none" else ATT_INT8MM_M5)
+    if m5_forms is not None:
+        if len(modes) > 1:
+            raise ValueError("ATT_INT8MM_M5 needs a single KV cache format, not --kv-cache-dtype both")
+        extra = set(filter(None, m5_forms.split(","))) - set(filter(None, ATT_INT8MM.split(",")))
+        if extra:
+            raise ValueError(f"ATT_INT8MM_M5 forms {sorted(extra)} must be a subset of ATT_INT8MM (their buffers)")
     for mode in modes:
         aliases[mode] = {}
         shapes = [(f"v8_{ctx // 1024}k", ctx, 8) for ctx in ctxs]
@@ -915,6 +937,10 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
             e = Entry(mods, ctx, rows, kv_cache_dtype=mode)
             entries.append((physical, e, e.input_names(), e.output_names()))
             aliases[mode][canonical] = physical
+            if m5_forms is not None:
+                e5 = Entry(mods, ctx, rows, kv_cache_dtype=mode, att_forms=m5_forms)
+                entries.append((physical + "_m5", e5, e5.input_names(), e5.output_names()))
+                soc_aliases[canonical] = physical + "_m5"
     name = name or f"chunk_L{layers[0]:02d}-{layers[-1]:02d}"
     out = OUT / f"{name}.aimodel"
     mb = save_program(entries, out)
@@ -938,6 +964,9 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          **({"KV_KEYS_T": True} if KV_KEYS_T else {})}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
+    if m5_forms is not None:
+        info["entries_by_soc"] = {"m5": soc_aliases}
+        info["numerics"]["ATT_INT8MM_M5"] = m5_forms
     print(f"chunk {layers[0]}-{layers[-1]}: {len(entries)} entries in {time.time() - t0:.0f}s", flush=True)
     return info
 
