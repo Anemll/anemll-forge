@@ -904,7 +904,8 @@ def startup_banner(a):
         f"model dir     {mdir}  (max ctx {a.ctx}; {build})",
         f"checkpoint    {os.path.expanduser(a.hf)}",
         f"speculative   {'ON  drafter ' + os.path.expanduser(a.draft) if a.draft else 'OFF (no drafter)'}",
-        f"thinking      default {'on' if a.think else 'off'} (clients override via chat_template_kwargs.enable_thinking)",
+        f"thinking      default {'on' if a.think else 'off'} (clients override via chat_template_kwargs.enable_thinking)"
+        + ("; context-summary requests (Pi's compaction): off (--summary-no-think)" if a.summary_no_think else ""),
         f"think budget  {a.think_budget} tokens per reasoning_effort (request field thinking_budget overrides; "
         f"then closed with Qwen's budget phrase)",
         f"sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20; "
