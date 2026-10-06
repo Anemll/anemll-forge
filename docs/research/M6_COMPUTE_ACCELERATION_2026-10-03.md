@@ -565,7 +565,7 @@ The M5 (H17) ANE compiler rejects FP8. C2T's chunk 0 on an M5 Max (macOS 27.2, c
 | Verify 8K / 32K / 64K | 12.46 / 14.45 / 17.14 | 12.43 / 14.05 / 16.62 | 12.43 / 14.10 / 16.64 | -0.2 / -2.4 / -2.9% |
 | Prefill 8K / 32K / 64K | 20.93 / 28.94 / 39.28 | 20.74 / 27.97 / 37.70 | 20.62 / 27.06 / 35.79 | -1.5 / -6.5 / -8.9% |
 
-On the M5 the INT8 scores help prefill only (their tensors cross DRAM in 64-row calls and stay on chip in verify); the transposed keys give about 4% at 64K in both. One package holding both function sets (the builder's `ATT_INT8MM_M5`) does not work: the FP8 functions fail the ANE compile for the whole package, so its M5 functions also ran on the GPU, and Core AI's `SpecializationOptions` has no per-function selection. The M5 version is a separate package (about 10 GB of chunks; the head, drafter and `model/` are shared). Each package is the same `main.mlirb` (program and weights in one file), so they cannot share weights on disk.
+On the M5 the INT8 scores help prefill only (their tensors cross DRAM in 64-row calls and stay on chip in verify); the transposed keys give about 4% at 64K in both. One package holding both function sets (the builder's `ATT_INT8MM_M5`) does not work: the FP8 functions fail the ANE compile for the whole package, so its M5 functions also ran on the GPU, and Core AI's `SpecializationOptions` has no per-function selection. A separately built M5 package would duplicate the chunks (about 10 GB); one dual package with a derived M5 build avoids that (below).
 
 Full model on the M5 Max (export on the M6 synced chunk by chunk to the M5 Max and compiled as each arrived: 34 min from export start to a compiled model), the same server benchmark, whole-machine power:
 
@@ -577,7 +577,7 @@ Full model on the M5 Max (export on the M6 synced chunk by chunk to the M5 Max a
 | 48K | 145 / 136 (+6.3%) | 25.0 / 23.7 (+5.3%) | 0.209 / 0.224 | 1.051 / 1.128 |
 | 64K | 133 / 124 (+7.4%) | 23.4 / 22.1 (+5.7%) | 0.229 / 0.246 | 1.120 / 1.184 |
 
-(Idle floors 8.3 and 9.4 W; the M5 Max had other applications running, so the energy rows are indicative.) The M6 runs C2T at 1.7 to 1.8 times this prefill speed and about twice the decode speed. Raw: `compare/m5max_c2t_m5.json`, `m5max_v8.json`. The research scripts also used a hard-coded compile mode 2 (the M6 policy) until 5 October; they now follow the SoC policy, which the server always did.
+(Idle floors 8.3 and 9.4 W; the M5 Max had other applications running, so the energy rows are indicative.) One download for both chips works after all: the M6 and M5 function sets in one package share the weights (12 functions in 427 MB, as 6), and on an M5 the runtime derives that chip's build once (`scripts/soc_variant.py`: each chunk with only its `_m5` functions, renamed, same weights, `coreai/strip_functions.py`; 16 chunks in 22 s on the M5 Max) into `$ANEMLL_FORGE_STATE/builds/`, then compiles it. Started from the dual download, the M5 Max served at 172 / 171 / 156 / 143 / 132 tok/s prefill and 28.8 / 27.8 / 24.5 / 24.1 / 22.6 tok/s decode from 8K to 64K, within 1 to 5% of the separately built M5 package (the M5 Max was busier: 1 to 2 W more). Raw: `compare/m5max_dual_derived.json`. The M6 runs C2T at 1.7 to 1.8 times this prefill speed and about twice the decode speed. Raw: `compare/m5max_c2t_m5.json`, `m5max_v8.json`. The research scripts also used a hard-coded compile mode 2 (the M6 policy) until 5 October; they now follow the SoC policy, which the server always did.
 
 ### Model-file quality: Splash's GGUF on the same KL-512
 
