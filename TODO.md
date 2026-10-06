@@ -82,12 +82,18 @@ again. The summary itself is small (954, 2,221 and 2,513 tokens for the session'
 - Server: log enable_thinking, reasoning_effort and the budget applied at request start, and the thinking and
   answer tokens separately on the final line (completion tokens count thinking, the forced close phrase and the
   answer together).
-- Done 5 October: `--summary-no-think` (launcher `SUMMARY_NO_THINK=1`): Pi's summarizer system prompt is detected
+- Done 5 October, the server default since then (`--summary-think` / `SUMMARY_THINK=1` keeps the client's
+  setting): Pi's summarizer system prompt is detected
   and thinking switched off before the sampling defaults are picked (0.7 / 0.8). With Pi 1.0.2's own request
   for a 27.9K-token session on the M6 (C2): 260 s with thinking (prefill 109 s, 3,762 tokens in 151 s, acceptance
   31%) against 181 s without (104 s, 2,537 tokens in 77 s, acceptance 46%); both summaries have Pi's nine
   sections. The request start logs the thinking setting, the final line thinking and answer tokens. The card's
   non-thinking `presence_penalty` 1.5 stays off (it hurts code and lowers acceptance).
+  In a real session (Pi's update request, previous summary plus 16.7K tokens) the summary without thinking ran to
+  14,731 tokens in 422 s (38K characters, much of it copied code and logs, acceptance about 50%); with thinking a
+  comparable compaction took 298 s for a 2.2K-token summary. More detail kept, more context used after compaction
+  (about 29K against 17K tokens); kept as the default by choice. If compactions come too often: low-effort thinking
+  (2,048 tokens) for summaries, or a warning when a summary passes about 4K tokens.
 - Thinking level for long tool loops: max (xhigh, 12,288) adds 9K to 16K tokens per reply; medium (6,144) or low
   (2,048) is the largest lever on compaction frequency. Server option: a smaller budget for replies that follow a
   tool result, the full budget for the first reply to a user message. At max, the 12,288 thinking budget leaves

@@ -97,7 +97,7 @@ Clients set these in each `POST /v1/chat/completions` request. The server-wide d
 | Request field | Default | Server flag |
 | --- | --- | --- |
 | `chat_template_kwargs.enable_thinking` | `false` | `--think` makes `true` the default |
-| Thinking for context-summary requests (Pi's compaction) | as requested | `--summary-no-think` (launcher: `SUMMARY_NO_THINK=1`) turns it off, with the non-thinking sampling defaults |
+| Thinking for context-summary requests (Pi's compaction) | off, with the non-thinking sampling defaults | `--summary-think` (launcher: `SUMMARY_THINK=1`) keeps the client's setting |
 | `temperature` | 1.0 with thinking, 0.7 without; `0` decodes greedily | |
 | `top_p` | 0.95 with thinking, 0.8 without | |
 | `top_k` | 20 (`0` also means 20) | |

@@ -64,9 +64,11 @@ def parse(argv=None):
                    help="require matching model cache inputs; auto reads manifest.json")
     p.add_argument("--ctx", type=int, default=8192, help="context length the chunks were built for")
     p.add_argument("--think", action="store_true", help="enable thinking by default (clients can override)")
-    p.add_argument("--summary-no-think", action="store_true",
-                   help="no thinking for context-summary requests (Pi's compaction: its fixed summarizer system prompt), "
-                        "whatever the client asks; they then also get the non-thinking sampling defaults")
+    p.add_argument("--summary-think", action="store_true",
+                   help="keep the client's thinking setting for context-summary requests (Pi's compaction, recognized by "
+                        "its fixed summarizer system prompt); by default they run without thinking, with the "
+                        "non-thinking sampling defaults")
+    p.add_argument("--summary-no-think", action="store_true", help=argparse.SUPPRESS)  # the default since 5 Oct
     p.add_argument("--max-tokens", type=int, default=4096, help="default completion limit")
     p.add_argument("--think-budget", default="low=2048,medium=6144,xhigh=12288",
                    help="reasoning tokens per reasoning_effort before the server closes the thinking (no effort: "
@@ -773,8 +775,8 @@ def make_handler(engine):
             if effort:
                 kw["reasoning_effort"] = {"minimal": "low", "low": "low", "medium": "medium"}.get(effort, "xhigh")
             why = ""
-            if engine.a.summary_no_think and kw["enable_thinking"] and is_summary_request(req.get("messages")):
-                kw["enable_thinking"], why = False, " (context-summary request: --summary-no-think)"
+            if not engine.a.summary_think and kw["enable_thinking"] and is_summary_request(req.get("messages")):
+                kw["enable_thinking"], why = False, " (context-summary request; --summary-think keeps thinking)"
                 kw.pop("reasoning_effort", None)
             thinking = bool(kw["enable_thinking"])
             tools = req.get("tools") if req.get("tool_choice") != "none" else None
@@ -905,7 +907,8 @@ def startup_banner(a):
         f"checkpoint    {os.path.expanduser(a.hf)}",
         f"speculative   {'ON  drafter ' + os.path.expanduser(a.draft) if a.draft else 'OFF (no drafter)'}",
         f"thinking      default {'on' if a.think else 'off'} (clients override via chat_template_kwargs.enable_thinking)"
-        + ("; context-summary requests (Pi's compaction): off (--summary-no-think)" if a.summary_no_think else ""),
+        + ("; context-summary requests (Pi's compaction): as requested (--summary-think)" if a.summary_think
+           else "; context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)"),
         f"think budget  {a.think_budget} tokens per reasoning_effort (request field thinking_budget overrides; "
         f"then closed with Qwen's budget phrase)",
         f"sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20; "

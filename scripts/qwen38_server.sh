@@ -13,7 +13,7 @@
 #   MODEL, BUILD  override the checkpoint / Core AI build separately
 #   CTX           context cap; a number or 8K / 16K / 24K / 32K / 48K / 64K (default: 16384)
 #   KV_CACHE_DTYPE auto (manifest), fp16, v8 or kv8; requires the matching BUILD export
-#   SUMMARY_NO_THINK 1: no thinking for context-summary requests (Pi's compaction), default 0
+#   SUMMARY_THINK 1: keep thinking for context-summary requests (Pi's compaction); default 0: they run without
 #   PORT          listen port (default: 8765)
 #   BIND_HOST     listen address (default: 127.0.0.1; set 0.0.0.0 to expose)
 #   DRAFT         on (default, sibling drafter/), off/--plain, or a path to a *.aimodel package
@@ -45,7 +45,7 @@ PORT="${PORT:-8765}"
 BIND_HOST="${BIND_HOST:-127.0.0.1}"
 CTX="${CTX:-16384}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-auto}"
-SUMMARY_NO_THINK="${SUMMARY_NO_THINK:-0}"
+SUMMARY_THINK="${SUMMARY_THINK:-0}"
 PY="${PY:-}"
 if [[ -z "$PY" ]]; then
   if [[ -x "$ROOT/.venv/bin/python" ]]; then PY="$ROOT/.venv/bin/python"; else PY="python3"; fi
@@ -76,7 +76,7 @@ launch_args() {
   fi
   args=("$ROOT/forge.py" serve --runtime coreai --model "$MODEL" --build "$BUILD"
         --ctx "$CTX" --host "$BIND_HOST" --port "$PORT" --kv-cache-dtype "$KV_CACHE_DTYPE")
-  [[ "$SUMMARY_NO_THINK" == 1 ]] && args+=(--summary-no-think)
+  [[ "$SUMMARY_THINK" == 1 ]] && args+=(--summary-think)
   case "$DRAFT" in
     0|off|no|false) args+=(--plain) ;;
     on|1|yes|true) ;;
