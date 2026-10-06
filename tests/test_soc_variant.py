@@ -43,7 +43,7 @@ class SocVariantTests(unittest.TestCase):
             shutil.copytree(src, dst)
             return list(keep), []
         stub = types.ModuleType("strip_functions")
-        stub.strip = strip
+        stub.strip, stub.require = strip, lambda: None
         sys.modules["strip_functions"] = stub
         try:
             with tempfile.TemporaryDirectory() as d:
@@ -64,6 +64,23 @@ class SocVariantTests(unittest.TestCase):
                 self.assertFalse(any(p.name.endswith(".partial.aimodel") for p in out.iterdir()))
                 self.assertEqual(soc_variant.prepare(root, "m5", log=lambda m: None, state=state), out)
                 self.assertEqual(len(calls), 2)  # reused, not derived again
+        finally:
+            sys.modules.pop("strip_functions", None)
+
+    def test_missing_coreai_core_is_a_clear_error(self):
+        stub = types.ModuleType("strip_functions")
+
+        def require():
+            raise ImportError("No module named 'coreai._compiler'")
+        stub.strip, stub.require = (lambda *a: None), require
+        sys.modules["strip_functions"] = stub
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                root = Path(d) / "build"
+                root.mkdir()
+                (root / "manifest.json").write_text(json.dumps(manifest()))
+                with self.assertRaisesRegex(RuntimeError, "pip install coreai-core"):
+                    soc_variant.prepare(root, "m5", log=lambda m: None, state=Path(d) / "state")
         finally:
             sys.modules.pop("strip_functions", None)
 

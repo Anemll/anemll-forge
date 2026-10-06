@@ -59,11 +59,12 @@ def prepare(root: Path, soc: str, log=print, state: Path | None = None) -> Path:
         log(f"[{soc}] using the {soc} build derived from {root}: {out}")
         return out
     sys.path.insert(0, str(ROOT / "coreai"))
+    import strip_functions
     try:
-        import strip_functions
+        strip_functions.require()
     except ImportError as e:
-        raise RuntimeError(f"{root} needs its {soc} functions extracted once, which needs the Core AI authoring "
-                           f"package: pip install coreai-core ({e})") from None
+        raise RuntimeError(f"{root} has {soc} functions that are extracted once on this chip, which needs the Core AI "
+                           f"authoring package: python -m pip install coreai-core ({e})") from None
     need = sum(f.stat().st_size for c in man["chunks"] for f in (root / c["file"]).rglob("*") if f.is_file())
     out.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(out).free

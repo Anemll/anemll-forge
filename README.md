@@ -31,7 +31,7 @@ xcrun swiftc --version
 bash coreai/swift_bridge/build.sh
 ```
 
-The requirements file provides starting version pins for inference from prepared assets. The Core AI Swift path does not require installing the Python Core AI build SDK. Conversion and quantization have additional dependencies, including research patches described in [ENVIRONMENT.md](docs/ENVIRONMENT.md). An import check is not full-model or clean-environment validation; see [validation records](docs/VALIDATION.md).
+The requirements file provides starting version pins for inference from prepared assets. Inference runs through the Core AI Swift bridge; the requirements also include `coreai-core` (Core AI's Python authoring package), which an M5 uses once to extract its function set from the M6/M5 packages ([below](#8-bit-attention-for-m6-and-m5-in-one-download-research-build)). Conversion and quantization have additional dependencies, including research patches described in [ENVIRONMENT.md](docs/ENVIRONMENT.md). An import check is not full-model or clean-environment validation; see [validation records](docs/VALIDATION.md).
 
 ## 2. Download the model and drafter
 
@@ -187,7 +187,7 @@ copy of every entry that shares the weights, so the download does not grow. Core
 an FP8 function would fail the whole M5 compile, so on first start an M5 derives its own build once: every chunk with
 only its M5 functions, written to `$ANEMLL_FORGE_STATE/builds/` (the download is not modified; about 20 s for the
 16 chunks on an M5 Max, and one more copy of the chunks, about 10 GB, on disk), then compiled as usual. Deriving needs
-the Core AI authoring package: `python -m pip install coreai-core`. The M6 uses the package as it is. The startup
+the Core AI authoring package `coreai-core`, included in `requirements-inference.txt`. The M6 uses the package as it is. The startup
 line names the attention the loaded build uses, for example
 `8-bit attention: INT8 scores (step 1/4), FP8 softmax (...), FP8 PV weights` on M6 and `INT8 scores (step 1/4)` on M5.
 

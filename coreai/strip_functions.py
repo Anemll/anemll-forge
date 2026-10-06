@@ -17,6 +17,13 @@ import time
 from pathlib import Path
 
 
+def require():
+    """Raise ImportError unless the Core AI authoring package (coreai-core) is importable; this repository's own
+    coreai/ folder can shadow the name, so check its compiler module, not the bare package."""
+    from coreai._compiler.ir import StringAttr  # noqa: F401
+    from coreai.authoring.asset import AIModelAsset  # noqa: F401
+
+
 def mlir_module(prog):
     """The program's MLIR module: AIProgram._mlir_module in coreai-core 1.0.0b2, ._module._mlir_module in 1.0.0b3."""
     m = getattr(prog, "_mlir_module", None)
