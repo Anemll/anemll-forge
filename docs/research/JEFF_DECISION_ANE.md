@@ -278,7 +278,7 @@ A `GDN_SQ=64` rebuild moved no chunk error (layer 3 last row 0.0268 vs 0.0264). 
 2. **ANE temperature / ECE.** The FP32 temperature is reused. Fit it on holdout rows with the compiled build.
 3. **Live-last prefix cache.** `capture_state()` / `prefill(..., prefix=)` copy and resume GDN, KV and the last hidden row. The server forwards a snapshot when `App.prefix_cache` is set. Still open: the policy that snapshots the fixed question and options and replays only `Latest:`.
 4. **Longer prompts.** Jeff trains at up to 8,192 tokens. Build `--ctx 8192` (same 256-row entry, 8,192-row KV cache) and recheck placement and parity.
-5. **Serving route.** Done: `forge.py jeff-serve`. See [JEFF_SERVE.md](../JEFF_SERVE.md). The runtime method a prefix cache should call is `JeffCoreAI.prefill(token_ids, prefix=capture_state())`.
+5. **Serving route.** Done: `forge.py jeff-serve`. On the demo's prompts (133 and 213 tokens, one 256-row call) a decision is 65 ms, about 15.5/s, and the loaded packages stay `fully_ane`. See [JEFF_SERVE.md](../JEFF_SERVE.md). The runtime method a prefix cache should call is `JeffCoreAI.prefill(token_ids, prefix=capture_state())`.
 
 The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is not used here. Its normalization multiplies `amax` back in and is scale-incorrect; the Core AI head uses `rms_hidden`. The live-last layout comes from `decision_config.json` (the external feasibility note's "state-first" was wrong for v1.3).
 

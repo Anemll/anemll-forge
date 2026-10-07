@@ -123,4 +123,15 @@ python -m unittest tests.test_jeff_serve tests.test_jeff_coreai tests.test_launc
 
 ## Measured latency
 
-Filled in after a local run on the M5 Max against the demo's snake prompt and a routing prompt. See the pull request for the screen capture.
+Apple M5 Max, 7 October 2026, the `p256_2k` FP16 package. Ten warm decisions after two warmup calls, median. An idle 27B `forge.py serve` was already resident on port 8766 and was not generating; no other Jeff ANE bench was running. The medians match the earlier single 256-row prefill (about 63 ms), so that idle server did not move them.
+
+| Demo request | Tokens | Prefill calls | Tokenize | Prefill | Head | Total | HTTP wall | Decisions/s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Snake, opening board | 213 | 1 × 63.6 ms | 0.47 ms | 63.6 ms | 0.34 ms | 64.7 ms | 65.3 ms | 15.5 |
+| Route a refund message | 133 | 1 × 63.6 ms | 0.38 ms | 63.6 ms | 0.36 ms | 64.7 ms | 65.2 ms | 15.5 |
+
+A 256-row call costs about 63 ms whether the prompt fills it or not, so both demo prompts land on the same latency. Decisions/s is `1000 / total_ms` inside the model lock. The browser adds the 160 ms pause between snake moves on top of that.
+
+The refund message was classified `refunds` at probability 0.85. The snake's first moves were soft (top option about 0.34): this is the base checkpoint with no adapter.
+
+Placement audit of the specializations this server loaded (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).
