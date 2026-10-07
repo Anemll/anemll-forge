@@ -196,6 +196,9 @@ class JeffCoreAITests(unittest.TestCase):
         self.assertEqual(len(plan["chunk_plan"]), 2)
         with self.assertRaises(ValueError):
             convert_plan(ck, ctx=256, prefill=7, quant="fp16")
+        both = convert_plan(ck, ctx=256, prefill=64, quant="fp16", prefills=(32, 64))
+        self.assertEqual(both["prefills"], [32, 64])
+        self.assertEqual(both["prefill_rows"], 64)
 
     def test_int8_and_layer_arrays(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -283,6 +286,16 @@ class JeffLauncherTests(unittest.TestCase):
             forge.prepare(forge.parser().parse_args([
                 "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
                 "--prefill", "250"]))
+        with self.assertRaisesRegex(ValueError, "multiple of 8"):
+            forge.prepare(forge.parser().parse_args([
+                "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
+                "--prefill-extra", "12"]))
+
+    def test_jeff_prefill_extra_argv(self):
+        cmd, _ = forge.prepare(forge.parser().parse_args([
+            "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
+            "--prefill", "256", "--prefill-extra", "32,64", "--dry-run"]))
+        self.assertEqual(cmd[cmd.index("--prefill-extra") + 1], "32,64")
 
     def test_jeff_smoke_argv(self):
         cmd, _ = forge.prepare(forge.parser().parse_args([

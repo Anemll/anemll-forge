@@ -4,6 +4,11 @@ Used by jeff-smoke --build on macOS after jeff-convert + forge.py compile. A pro
 (TP rows) runs as consecutive TP-row calls: each chunk's DeltaNet conv / recurrent state is carried, every call's
 k / v rows go into the KV caches at its position and the history mask opens up to it, as in CoreAIQwen.prefill_block.
 The readout head then runs once on the last prompt row.
+
+Live-last prefix cache: ``prepare_prefix(token_ids)`` commits the shared prefix and snapshots GDN conv / recurrent
+state, attention KV and the position, keyed by those exact token ids (GDN state cannot be rewound, so a snapshot
+is taken at every committed call, including the prefix end). ``decide(handle, suffix)`` restores that snapshot and
+prefills only the live suffix. A build may compile several prefill widths; the suffix uses the cheapest one.
 """
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ import numpy as np
 from coreai.runtime import AIModel
 
 from jeff_coreai import JeffCheckpoint, load_decision_config, load_text_config, rms_last, softmax
+from jeff_prefix_cache import PrefixHandle, longest_snapshot, prefill_plan
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -24,6 +30,16 @@ if str(SCRIPTS) not in sys.path:
 import ane_compile_mode as SOC  # noqa: E402
 from qwen38_coreai_model import _spec, buffer, pick_package, writable  # noqa: E402
 from qwen38_kv_cache import put_rows  # noqa: E402
+
+
+def _entry_widths(entries: list[str]) -> list[int]:
+    widths = []
+    for name in entries:
+        if name.startswith("p") and "_" in name:
+            widths.append(int(name[1:].split("_", 1)[0]))
+    if not widths:
+        raise ValueError(f"no prefill entries in {entries}")
+    return sorted(set(widths))
 
 
 class JeffCoreAI:
@@ -38,10 +54,9 @@ class JeffCoreAI:
         ck = ck or JeffCheckpoint(self.model)
         self.emb, self.norm, self.readout = ck.embed_table(), ck.norm_weight(), np.asarray(ck.readout, np.float32)
         self.eps = float(c["rms_norm_eps"])
-        self.TP, self.P = int(self.man["TP"]), int(self.man["pend"])
+        self.P = int(self.man["pend"])
         self.ctx = int(self.man["pctxs"][0])
         self.L = int(self.man["pkv_len"][str(self.ctx)])
-        self.entry = f"p{self.TP}_{self.ctx // 1024}k"
         hid, self.nkv, self.hd = int(c["hidden_size"]), int(c["num_key_value_heads"]), int(c["head_dim"])
         nv, dk, dv = (int(c[k]) for k in ("linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim"))
         cdim = 2 * int(c["linear_num_key_heads"]) * dk + nv * dv
@@ -64,33 +79,99 @@ class JeffCoreAI:
             kv = {f"{s}{j}": buffer((self.nkv, self.L, self.hd)) for j in ch["att_j"] for s in ("k", "v")}
             self.chunks.append({**ch, "pkg": pkg, "fns": fns, "state": state, "kv": kv})
             log(f"loaded {ch['file']} in {time.time() - t1:.1f}s")
+        widths = _entry_widths(self.chunks[0]["entries"])
+        for ch in self.chunks[1:]:
+            if _entry_widths(ch["entries"]) != widths:
+                raise ValueError("Jeff chunks disagree on prefill entry widths")
+        self.widths = widths
+        self.TP = max(widths)
+        self.entry = f"p{self.TP}_{self.ctx // 1024}k"
+        self.prefill_cost: dict[int, float] | None = None
+        self._snaps: dict[tuple[int, ...], dict] = {}
         head = self.man["head"]
         self.head_pkg, hf = self.loop.run_until_complete(load(head["file"], [head.get("entry", "h1")]))
         self.head_fn = hf[head.get("entry", "h1")]
         self.load_s = time.time() - t0
-        TP = self.TP
-        self.pin = {n: buffer(s) for n, s in (
-            ("cos", (TP, rot)), ("sin", (TP, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
-            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, TP + 3)), ("valid", (1, TP, 1)),
-            ("x", (1, hid, 1, TP)), ("xb", (1, hid, 1, TP)), ("hx", (1, hid, 1, 1)))}
+        self.pins = {w: {n: buffer(s) for n, s in (
+            ("cos", (w, rot)), ("sin", (w, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
+            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, w + 3)), ("valid", (1, w, 1)),
+            ("x", (1, hid, 1, w)), ("xb", (1, hid, 1, w)))} for w in widths}
+        self.hx = buffer((1, hid, 1, 1))
         self.mask = buffer((1, self.L))
         self.pos = 0
+        log(f"prefill entries {['p' + str(w) for w in widths]} KV rows {self.L}")
 
     def reset(self):
+        """Zero the live DeltaNet state and the position. Prefix snapshots are kept (KV rows in them are copies)."""
         for ch in self.chunks:
             for _, w in ch["state"].values():
                 w[:] = 0
         self.pos = 0
 
-    def _block(self, ids, keep=None) -> np.ndarray:
-        """Up to TP prompt tokens at self.pos, all committed. Returns the last row's hidden state (1, hid, 1, 1).
+    def clear_prefixes(self):
+        self._snaps.clear()
+
+    def set_prefill_costs(self, call_ms: dict[int, float]):
+        """Milliseconds for one call of each prefill width (a partial call costs the same). Used to plan suffixes."""
+        costs = {int(k): float(v) for k, v in call_ms.items()}
+        missing = [w for w in self.widths if w not in costs]
+        if missing:
+            raise ValueError(f"call_ms missing prefill widths {missing}")
+        self.prefill_cost = {w: costs[w] for w in self.widths}
+
+    def measure_prefill_calls(self, repeats: int = 3, warmup: int = 1) -> dict[int, float]:
+        """Median milliseconds of one call at each compiled width. Overwrites the live state, not the snapshots."""
+        costs = {}
+        for width in self.widths:
+            samples = []
+            for i in range(warmup + repeats):
+                self.reset()
+                t1 = time.perf_counter()
+                self._block([1] * min(8, width), width)
+                dt = 1e3 * (time.perf_counter() - t1)
+                if i >= warmup:
+                    samples.append(dt)
+            costs[width] = float(np.median(samples))
+        self.reset()
+        self.prefill_cost = costs
+        self.log("prefill call ms: " + ", ".join(f"p{w} {costs[w]:.1f}" for w in self.widths))
+        return costs
+
+    def _snapshot(self, token_ids: tuple[int, ...]):
+        """Copy GDN conv / recurrent / pending state, attention KV rows ``[0, pos)`` and the position.
+        The key is the exact committed token ids: GDN state cannot be rewound to any other cut."""
+        if self.pos != len(token_ids) or self.pos <= 0:
+            raise RuntimeError(f"snapshot position {self.pos} does not match {len(token_ids)} tokens")
+        self._snaps[tuple(token_ids)] = {
+            "pos": self.pos,
+            "states": [{name: arr.copy() for name, (_, arr) in ch["state"].items()} for ch in self.chunks],
+            "kv": [{name: arr[:, :self.pos].copy() for name, (_, arr) in ch["kv"].items()} for ch in self.chunks],
+        }
+
+    def _restore(self, token_ids: tuple[int, ...]):
+        snap = self._snaps.get(tuple(token_ids))
+        if snap is None:
+            raise KeyError(f"no prefix snapshot for {len(token_ids)} tokens")
+        pos = snap["pos"]
+        if pos != len(token_ids) or pos > self.L:
+            raise RuntimeError(f"snapshot at {pos} does not fit this {self.L}-row cache")
+        for ch, states, kv in zip(self.chunks, snap["states"], snap["kv"]):
+            for name, saved in states.items():
+                ch["state"][name][1][:] = saved
+            for name, saved in kv.items():
+                ch["kv"][name][1][:, :pos] = saved
+        self.pos = pos
+
+    def _block(self, ids, width: int, keep=None) -> np.ndarray:
+        """Up to ``width`` prompt tokens at self.pos, all committed. Returns the last row's hidden state.
         keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
-        d, TP, n, p0 = self.pin, self.TP, len(ids), self.pos
-        if not 0 < n <= TP or p0 + n > self.L:
-            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {self.entry}")
+        d, n, p0 = self.pins[width], len(ids), self.pos
+        entry = f"p{width}_{self.ctx // 1024}k"
+        if not 0 < n <= width or p0 + n > self.L:
+            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {entry}")
         d["x"][1][:] = 0
         d["x"][1][0, :, 0, :n] = self.emb[np.asarray(ids)].T
-        pos = np.minimum(np.arange(p0, p0 + TP), p0 + n - 1)
+        pos = np.minimum(np.arange(p0, p0 + width), p0 + n - 1)
         ang = np.concatenate([np.outer(pos, self.inv)] * 2, axis=1)
         d["cos"][1][:], d["sin"][1][:] = np.cos(ang), np.sin(ang)
         d["conv_sel"][1][:] = 0
@@ -103,7 +184,7 @@ class JeffCoreAI:
         d["valid"][1][0, :n, 0] = 1
         self.mask[1][:] = -1e4
         self.mask[1][0, :p0] = 0
-        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb", "hx")}
+        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb")}
         shared["mask"] = self.mask[0]
 
         async def run():
@@ -111,7 +192,7 @@ class JeffCoreAI:
             for ci, ch in enumerate(self.chunks):
                 ins = {**shared, "x": x, **{k: v[0] for k, v in ch["state"].items()},
                        **{k: v[0] for k, v in ch["kv"].items()}}
-                out = await ch["fns"][self.entry](inputs=ins)
+                out = await ch["fns"][entry](inputs=ins)
                 for k, (_, w) in ch["state"].items():
                     w[:] = writable(out[f"{k}_out"])
                 for k, (_, w) in ch["kv"].items():
@@ -124,49 +205,142 @@ class JeffCoreAI:
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
 
+    def _run(self, ids, plan, keep=None):
+        """Run ``plan`` (entry width, token count) over ``ids``. Returns the last hidden state and per-call timings."""
+        if sum(count for _, count in plan) != len(ids):
+            raise RuntimeError(f"prefill plan covers {sum(c for _, c in plan)} tokens, prompt has {len(ids)}")
+        last, calls, off = None, [], 0
+        for width, count in plan:
+            t1 = time.perf_counter()
+            last = self._block(ids[off:off + count], width, keep)
+            calls.append({"width": width, "tokens": count, "ms": 1e3 * (time.perf_counter() - t1)})
+            off += count
+        return last, calls
+
+    def _readout(self, last) -> tuple[np.ndarray, float]:
+        t1 = time.perf_counter()
+        self.hx[1][:] = last
+        out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.hx[0]}))
+        logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
+        return logits, 1e3 * (time.perf_counter() - t1)
+
     def prefill(self, token_ids: list[int], keep_chunks: bool = False) -> dict:
         """The whole prompt from position 0; returns readout logits (ANE head), the last hidden state and timings.
-        keep_chunks: also every chunk's output for every prompt row ("chunks": [(n, hid) fp16] per chunk)."""
+        keep_chunks: also every chunk's output for every prompt row ("chunks": [(n, hid) fp16] per chunk).
+        Always chunks on the largest prefill entry (the fast path for a long cold prompt)."""
         ids = [int(t) for t in token_ids]
         if not ids:
             raise ValueError("token_ids must be non-empty")
         self.reset()
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
-        calls = []
-        for i in range(0, len(ids), self.TP):
-            t1 = time.perf_counter()
-            last = self._block(ids[i:i + self.TP], keep)
-            calls.append(1e3 * (time.perf_counter() - t1))
-        t1 = time.perf_counter()
-        self.pin["hx"][1][:] = last
-        out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.pin["hx"][0]}))
-        head_ms = 1e3 * (time.perf_counter() - t1)
-        logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
-        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
+        last, calls = self._run(ids, prefill_plan(len(ids), [self.TP]), keep)
+        logits, head_ms = self._readout(last)
+        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32),
+             "calls_ms": [c["ms"] for c in calls], "calls": calls,
              "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0)}
         if keep is not None:
             r["chunks"] = [np.concatenate(rows, 0) for rows in keep]
         return r
 
-    def decide(self, token_ids: list[int], n_options: int, temperature: float | None = None) -> dict:
-        r = self.prefill(token_ids)
+    def prepare_prefix(self, token_ids, *, n_options: int | None = None,
+                       temperature: float | None = None) -> PrefixHandle:
+        """Commit ``token_ids`` and snapshot the recurrent state. An exact cached prefix is free; otherwise the
+        longest cached strict prefix (a previous chunk boundary or prefix end) is restored and only the rest runs.
+        Snapshots are stored at every call, so a later prefix that shares a chunk boundary reuses it."""
+        ids = tuple(int(t) for t in token_ids)
+        if not ids:
+            raise ValueError("prefix token_ids must be non-empty")
+        if len(ids) > self.L:
+            raise ValueError(f"prefix of {len(ids)} tokens exceeds the {self.L}-row KV cache")
+        t0 = time.perf_counter()
+        if ids in self._snaps:
+            reused = len(ids)
+        else:
+            best = longest_snapshot(ids, self._snaps)
+            if best is None:
+                self.reset()
+                reused = 0
+            else:
+                self._restore(best)
+                reused = len(best)
+            fed = reused
+            while fed < len(ids):
+                count = min(self.TP, len(ids) - fed)
+                self._block(list(ids[fed:fed + count]), self.TP)
+                fed += count
+                if self.pos != fed:
+                    raise RuntimeError(f"prefill position {self.pos} != {fed} committed prefix tokens")
+                self._snapshot(ids[:fed])
+        return PrefixHandle(ids, n_options=n_options, temperature=temperature, reused_tokens=reused,
+                            prefilled_tokens=len(ids) - reused, prepare_ms=1e3 * (time.perf_counter() - t0))
+
+    def _pack(self, logits, hidden, n_options: int, temperature, tokens: int, calls, head_ms: float,
+              prefill_ms: float, extra: dict | None = None) -> dict:
         temp = float(self.decision["temperature"] if temperature is None else temperature)
-        probs = softmax(r["logits"][:n_options] / temp)
-        # the same readout applied on the host to the ANE hidden state: isolates head error from backbone error
-        host_logits = self.readout[:n_options] @ rms_last(r["hidden"], self.norm, self.eps)
+        probs = softmax(logits[:n_options] / temp)
+        host_logits = self.readout[:n_options] @ rms_last(hidden, self.norm, self.eps)
         codes = self.decision["codes"][:n_options]
         best = int(np.argmax(probs))
-        return {
+        out = {
             "probabilities": {codes[i]: float(probs[i]) for i in range(n_options)},
             "answer": codes[best],
             "confidence": float(probs[best]),
             "host_head_probabilities": softmax(host_logits / temp).tolist(),
             "temperature": temp,
-            "tokens": len(token_ids),
-            "calls": len(r["calls_ms"]),
-            "calls_ms": [round(t, 2) for t in r["calls_ms"]],
-            "head_ms": round(r["head_ms"], 2),
-            "prefill_ms": round(r["total_ms"], 2),
+            "tokens": tokens,
+            "calls": len(calls),
+            "calls_ms": [round(c["ms"] if isinstance(c, dict) else c, 2) for c in calls],
+            "head_ms": round(head_ms, 2),
+            "prefill_ms": round(prefill_ms, 2),
             "backend": f"coreai-ane {self.entry}",
         }
+        if extra:
+            out.update(extra)
+        return out
+
+    def decide(self, prompt, n_options=None, temperature: float | None = None) -> dict:
+        """Full prompt: ``decide(token_ids, n_options)``. Cached: ``decide(handle, suffix_ids)`` after
+        ``prepare_prefix``. The suffix is the live field plus the generation-prompt tail."""
+        if isinstance(prompt, PrefixHandle):
+            if isinstance(n_options, (str, bytes)) or not isinstance(n_options, (list, tuple)):
+                raise TypeError("decide(handle, suffix) expects the live suffix token ids")
+            return self._decide_cached(prompt, n_options, temperature)
+        if n_options is None:
+            raise TypeError("decide(token_ids, n_options) needs n_options")
+        r = self.prefill(prompt)
+        return self._pack(r["logits"], r["hidden"], int(n_options), temperature, len(prompt), r["calls"],
+                          r["head_ms"], r["total_ms"])
+
+    def _decide_cached(self, handle: PrefixHandle, suffix, temperature: float | None) -> dict:
+        suffix = [int(t) for t in suffix]
+        if not suffix:
+            raise ValueError("suffix must be non-empty (live field plus the generation-prompt tail)")
+        n_options = handle.n_options
+        if n_options is None:
+            raise ValueError("prepare_prefix(..., n_options=) so decide(handle, suffix) can score the options")
+        if handle.token_ids not in self._snaps:
+            raise KeyError("prefix handle is not in this runtime's cache")
+        if len(handle.token_ids) + len(suffix) > self.L:
+            raise ValueError(f"{len(handle.token_ids) + len(suffix)} positions exceed the {self.L}-row KV cache")
+        t0 = time.perf_counter()
+        self._restore(handle.token_ids)
+        restore_ms = 1e3 * (time.perf_counter() - t0)
+        plan = prefill_plan(len(suffix), self.widths, self.prefill_cost)
+        t1 = time.perf_counter()
+        last, calls = self._run(suffix, plan)
+        suffix_ms = 1e3 * (time.perf_counter() - t1)
+        logits, head_ms = self._readout(last)
+        total_ms = 1e3 * (time.perf_counter() - t0)
+        temp = handle.temperature if temperature is None else temperature
+        return self._pack(logits, last.reshape(-1).astype(np.float32), n_options, temp,
+                          len(handle.token_ids) + len(suffix), calls, head_ms, suffix_ms + head_ms, {
+                              "prefix_tokens": len(handle.token_ids),
+                              "suffix_tokens": len(suffix),
+                              "cached_tokens": len(handle.token_ids),
+                              "restore_ms": round(restore_ms, 3),
+                              "suffix_ms": round(suffix_ms, 2),
+                              "total_ms": round(total_ms, 2),
+                              "prefill_entries": [c["width"] for c in calls],
+                              "backend": "coreai-ane prefix-cache " + "+".join(f"p{c['width']}" for c in calls),
+                          })

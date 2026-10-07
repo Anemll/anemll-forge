@@ -1,7 +1,7 @@
 # Jeff / Unsloth decision models on the ANE
 
 - **Scope:** run Jeff (Qwen3.5-0.8B decision head) on the Apple Neural Engine through a prefill-only Core AI path.
-- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). Not done: LoRA adapters, ANE temperature/ECE fit, live-last prefix cache, a serving route.
+- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). The live-last prefix cache snapshots GDN, conv and KV after the shared prefix and prefills only the changing suffix; see [Live-last prefix cache](#live-last-prefix-cache). Not done: LoRA adapters, ANE temperature/ECE fit, a serving route.
 - **Branch:** `cursor/jeff-decision-ane-85f5`.
 
 Evidence labels: **Source-verified** (this checkout), **External doc** (Jeff / Unsloth / Qwen cards, not fetched as weights), **Inferred**.
@@ -274,9 +274,26 @@ A `GDN_SQ=64` rebuild moved no chunk error (layer 3 last row 0.0268 vs 0.0264). 
 
 1. **LoRA adapters.** v1.3 is a base for adapters (per-adapter LoRA, readout and temperature). Merging an adapter into the FP16 weights before `jeff-convert` is the simplest path. A shared base with runtime LoRA is not built.
 2. **ANE temperature / ECE.** The FP32 temperature is reused. Fit it on holdout rows with the compiled build.
-3. **Live-last prefix cache.** The chained runtime already carries DeltaNet / KV state between calls. Snapshotting after the fixed part (question and options) and replaying only `Latest:` is the next runtime piece.
-4. **Longer prompts.** Jeff trains at up to 8,192 tokens. Build `--ctx 8192` (same 256-row entry, 8,192-row KV cache) and recheck placement and parity.
-5. **Serving route.** A SystemOne-style `state` / `questions` endpoint around `JeffCoreAI.decide`.
+3. **Longer prompts.** Jeff trains at up to 8,192 tokens. Build `--ctx 8192` (same 256-row entry, 8,192-row KV cache) and recheck placement and parity.
+4. **Serving route.** A SystemOne-style `state` / `questions` endpoint around `JeffCoreAI.prepare_prefix` / `decide(handle, suffix)`.
+
+## Live-last prefix cache
+
+`decision_config.json` sets `prompt_layout: live-last`: the system message, question, instructions, options and every state field except the last come first, and the changing field is rendered after `Latest:`. Gated DeltaNet state cannot be rewound, so a snapshot is valid only for the exact token ids a prefill call committed.
+
+`JeffCoreAI.prepare_prefix(token_ids, n_options=)` runs that prefix (reusing the longest cached strict prefix, which is a previous chunk boundary or prefix end) and stores, per layer, the GDN conv / recurrent / pending state, the attention KV rows `[0, pos)` and the position. The key is the prefix token ids. `JeffCoreAI.decide(handle, suffix_ids)` restores that snapshot and prefills only the suffix: the last field, the closing instruction and the generation-prompt tail. A cold `decide(token_ids, n_options)` is unchanged.
+
+`split_live_last` returns `prefix` and `suffix` whose concatenation is `prompt_ids`. On the Qwen tokenizer the cut after `Latest:\n` is a token boundary, so two decisions that differ only in the last field share the prefix ids exactly.
+
+```python
+split = split_live_last(model, row)          # prefix, suffix, ids
+handle = runtime.prepare_prefix(split["prefix"], n_options=n)
+out = runtime.decide(handle, split["suffix"])  # probabilities, restore_ms, suffix_ms, total_ms
+```
+
+A short suffix still occupies a whole prefill call. `--prefill-extra 32,64` compiles those widths into the same packages as the 256-row entry. Without measured call times the suffix uses the smallest width that can hold it in one call; `measure_prefill_calls` / `set_prefill_costs` picks the width whose call count times measured milliseconds is smallest. The 256-row entry stays the one used to build a long prefix. Whether a 32- or 64-row call is faster, and whether it stays fully on the ANE, is measured on the M5 Max build (see the results below once filled in).
+
+`scripts/jeff_prefix_cache.py prepare` writes Snake, Tetris and the published parity rows (including a second ~2K-token, 100-option message) with the split and HF FP32 probabilities. `run` checks cache against a cold prefill and against that reference, and reports decisions/sec.
 
 The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is not used here. Its normalization multiplies `amax` back in and is scale-incorrect; the Core AI head uses `rms_hidden`. The live-last layout comes from `decision_config.json` (the external feasibility note's "state-first" was wrong for v1.3).
 

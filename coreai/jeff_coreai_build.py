@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from jeff_coreai import JeffCheckpoint, convert_plan, layer_arrays
+from jeff_coreai import JeffCheckpoint, convert_plan, layer_arrays, prefill_widths
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -118,7 +118,7 @@ class ReadoutHead:
         return Head().eval().to(torch.float16)
 
 
-def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, prefill: int,
+def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, widths: list[int],
                         quant: str, out: Path) -> dict:
     import torch.nn as nn
     W = {}
@@ -129,13 +129,18 @@ def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, pref
     mods = mods.to(torch.float16)
     del W
     gc.collect()
-    entry_name = f"p{prefill}_{ctx // 1024}k"
-    e = B.Entry(mods, ctx, prefill, kv_cache_dtype="fp16")
-    mb = save_dense_program(B, [(entry_name, e, e.input_names(), e.output_names())], out)
+    # One package, one shared weight set, one prefill function per width (a short suffix entry next to p256).
+    built = []
+    for width in widths:
+        entry = B.Entry(mods, ctx, width, kv_cache_dtype="fp16")
+        name = f"p{width}_{ctx // 1024}k"
+        built.append((name, entry, entry.input_names(), entry.output_names()))
+    mb = save_dense_program(B, built, out)
+    e = built[0][1]
     return {
         "file": out.name,
         "layers": [layers[0], layers[-1]],
-        "entries": [entry_name],
+        "entries": [name for name, _, _, _ in built],
         "gdn_j": e.gdn_j,
         "att_j": e.att_j,
         "taps": [],
@@ -154,10 +159,11 @@ def build_readout_head(B, ck: JeffCheckpoint, out: Path) -> dict:
 
 
 def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
-                quant: str = "fp16", chunk: int = 4) -> dict:
-    plan = convert_plan(ck, ctx, prefill, quant, chunk)
+                quant: str = "fp16", chunk: int = 4, prefills=()) -> dict:
+    widths = prefill_widths(prefill, prefills)
+    plan = convert_plan(ck, ctx, prefill, quant, chunk, widths)
     B = load_builder(ck.cfg)
-    B.TPS = [prefill]
+    B.TPS = widths
     B.OUT = out_dir
     coreai = out_dir / "coreai"
     model_dir = out_dir / "model"
@@ -176,13 +182,14 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
         "version": "jeff-coreai1",
         "kind": "jeff-decision",
         "T": 8,
-        "TP": prefill,
+        "TP": max(widths),
+        "prefills": widths,
         "pend": B.P,
         "taps": [],
         "ctxs": [ctx],
         "pctxs": [ctx],
         "kv_len": {str(ctx): B.kv_len(ctx, 8)},
-        "pkv_len": {str(ctx): B.kv_len(ctx, prefill)},
+        "pkv_len": {str(ctx): B.kv_len(ctx, max(widths))},
         "kv_cache": {"format": "fp16", "keys": "float16", "values": "float16", "scales": None},
         "quant": quant,
         "dflash2": False,
@@ -195,7 +202,7 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
     chunks = []
     for layers in chunk_plan_from(plan):
         dest = coreai / f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
-        info = build_prefill_chunk(B, ck, layers, ctx, prefill, quant, dest)
+        info = build_prefill_chunk(B, ck, layers, ctx, widths, quant, dest)
         chunks.append(info)
         man["chunks"] = chunks
         man_path.write_text(json.dumps(man, indent=1))

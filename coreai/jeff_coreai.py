@@ -11,6 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
+from jeff_prefix_cache import LIVE_MARK, token_cut
+
 SMALL = (
     "input_layernorm.weight", "post_attention_layernorm.weight",
     "linear_attn.conv1d.weight", "linear_attn.A_log", "linear_attn.dt_bias",
@@ -120,16 +122,44 @@ def decision_messages(row: dict, codes: list[str], layout: str) -> list[dict]:
             {"role": "user", "content": [{"type": "text", "text": prompt}]}]
 
 
-def prompt_ids(model: Path, row: dict, decision: dict | None = None, tokenizer=None) -> list[int]:
-    """Token ids exactly as Jeff's backends build them: the checkpoint's chat template with
-    add_generation_prompt=True, enable_thinking=False, then add_special_tokens=False. Needs transformers."""
-    decision = decision or load_decision_config(model)
+def _chat_text(model: Path, row: dict, decision: dict, tokenizer):
     if tokenizer is None:
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(str(model))
     text = tokenizer.apply_chat_template(decision_messages(row, decision["codes"], decision["prompt_layout"]),
                                          tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    return tokenizer, text
+
+
+def prompt_ids(model: Path, row: dict, decision: dict | None = None, tokenizer=None) -> list[int]:
+    """Token ids exactly as Jeff's backends build them: the checkpoint's chat template with
+    add_generation_prompt=True, enable_thinking=False, then add_special_tokens=False. Needs transformers."""
+    decision = decision or load_decision_config(model)
+    tokenizer, text = _chat_text(model, row, decision, tokenizer)
     return list(tokenizer(text, add_special_tokens=False)["input_ids"])
+
+
+def split_live_last(model: Path, row: dict, decision: dict | None = None, tokenizer=None) -> dict:
+    """Token ids of one decision, split into the shared prefix and the live suffix.
+
+    The prefix is the system message, question, instructions, options and every state field except the
+    last, through ``Latest:\\n``. The suffix is the last field plus the closing instruction and the
+    generation-prompt tail (those tokens sit after the changing field, so they cannot stay in the
+    snapshot). ``prefix + suffix`` equals :func:`prompt_ids`. Needs transformers. Raises if the row is
+    not a live-last object state.
+    """
+    decision = decision or load_decision_config(model)
+    tokenizer, text = _chat_text(model, row, decision, tokenizer)
+    mark = text.find(LIVE_MARK)
+    if mark < 0:
+        raise ValueError("live-last split needs an object state whose last field is rendered after 'Latest:'")
+    enc = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
+    ids = list(enc["input_ids"])
+    cut = token_cut(enc["offset_mapping"], mark + len(LIVE_MARK))
+    if cut <= 0 or cut >= len(ids):
+        raise ValueError(f"live-last cut {cut} is outside the {len(ids)}-token prompt")
+    return {"ids": ids, "prefix": ids[:cut], "suffix": ids[cut:],
+            "prefix_tokens": cut, "suffix_tokens": len(ids) - cut}
 
 
 def _read_safetensors(path: Path, names=None):
@@ -298,11 +328,19 @@ def chunk_plan(n_layers: int, chunk: int = 4) -> list[list[int]]:
     return [list(range(a, min(a + chunk, n_layers))) for a in range(0, n_layers, chunk)]
 
 
-def convert_plan(ck: JeffCheckpoint, ctx: int, prefill: int, quant: str, chunk: int = 4) -> dict:
-    if prefill <= 8 or prefill % 8:
-        raise ValueError("Jeff prefill rows must be a multiple of 8 and greater than 8 (GDN sub-chunk)")
-    if ctx < prefill:
-        raise ValueError(f"context {ctx} must be >= prefill {prefill}")
+def prefill_widths(prefill: int, extra=()) -> list[int]:
+    """Sorted unique prefill entry widths. Each must be a multiple of 8 and greater than 8."""
+    widths = sorted({int(prefill), *(int(w) for w in extra)})
+    for width in widths:
+        if width <= 8 or width % 8:
+            raise ValueError("Jeff prefill rows must be a multiple of 8 and greater than 8 (GDN sub-chunk)")
+    return widths
+
+
+def convert_plan(ck: JeffCheckpoint, ctx: int, prefill: int, quant: str, chunk: int = 4, prefills=()) -> dict:
+    widths = prefill_widths(prefill, prefills)
+    if ctx < max(widths):
+        raise ValueError(f"context {ctx} must be >= prefill {max(widths)}")
     n = int(ck.cfg["num_hidden_layers"])
     plan = chunk_plan(n, chunk)
     return {
@@ -313,7 +351,8 @@ def convert_plan(ck: JeffCheckpoint, ctx: int, prefill: int, quant: str, chunk: 
         "layer_types": list(ck.cfg["layer_types"]),
         "chunk_plan": [f"{p[0]}-{p[-1]}" for p in plan],
         "ctx": ctx,
-        "prefill_rows": prefill,
+        "prefill_rows": max(widths),
+        "prefills": widths,
         "kv_cache": "fp16",
         "quant": quant,
         "head": {"kind": "readout", "shape": list(ck.readout.shape)},
