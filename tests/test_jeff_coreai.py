@@ -304,6 +304,16 @@ class JeffLauncherTests(unittest.TestCase):
                 "jeff-convert", "--model", str(self.model), "--output", str(self.root / "o")]))
             self.assertEqual(cmd[0], "/sdk/bin/python")
 
+    def test_compile_uses_coreai_python_for_jeff_builds_only(self):
+        build = self.root / "coreai"
+        build.mkdir()
+        for kind, expected in (("jeff-decision", "/sdk/bin/python"), (None, sys.executable)):
+            (build / "manifest.json").write_text(json.dumps({"kind": kind} if kind else {"chunks": []}))
+            with patch.dict(os.environ, {"COREAI_PYTHON": "/sdk/bin/python"}), \
+                    patch("builtins.print") as out:
+                self.assertEqual(forge.main(["compile", "--build", str(build), "--dry-run"]), 0)
+            self.assertEqual(json.loads(out.call_args[0][0])["argv"][0], expected)
+
     def test_jeff_convert_dry_run_does_not_write(self):
         out = self.root / "builds"
         with patch("forge.subprocess.call") as run:

@@ -149,7 +149,7 @@ def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, pref
 def build_readout_head(B, ck: JeffCheckpoint, out: Path) -> dict:
     head = ReadoutHead.make(B, ck, T=1)
     mb = save_dense_program(B, [("h1", head, ["x"], ["logits"])], out)
-    return {"file": out.name, "mb": round(mb, 1), "entry": "h1",
+    return {"file": out.name, "mb": round(mb, 1), "entry": "h1", "entries": ["h1"],
             "shape": list(ck.readout.shape)}
 
 

@@ -155,6 +155,13 @@ def coreai_python() -> str:
     return os.environ.get("COREAI_PYTHON") or sys.executable
 
 
+def is_jeff_build(build: Path) -> bool:
+    try:
+        return json.loads((build / "manifest.json").read_text()).get("kind") == "jeff-decision"
+    except (OSError, ValueError):
+        return False
+
+
 def prepare(a):
     """Return argv and env overrides without importing ML packages or writing files."""
     if a.command in ("jeff-convert", "jeff-smoke"):
@@ -277,7 +284,10 @@ def main(argv=None):
                 draft, _ = hf_release.drafter_paths(a.build)
             except ValueError:
                 draft = None
-        command = [sys.executable, str(ROOT / "scripts" / "coreai_compile.py"), "--build", str(a.build)]
+        # The compile cache is keyed by the loading Python's identity: a Jeff build is loaded by jeff-smoke in the
+        # Core AI SDK Python, so it is compiled there too.
+        python = coreai_python() if is_jeff_build(a.build) else sys.executable
+        command = [python, str(ROOT / "scripts" / "coreai_compile.py"), "--build", str(a.build)]
         command += ["--draft", str(draft)] if draft else []
         command += ["--force"] if a.force else []
         command += ["--follow"] if a.follow else []
