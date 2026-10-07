@@ -2,12 +2,12 @@
 """Live-last prefix cache: HF FP32 cases, then Core AI parity and per-decision latency.
 
     # forge .venv (transformers): token split + PyTorch FP32 probabilities
-    python scripts/jeff_prefix_cache.py prepare --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
+    python scripts/jeff_prefix_bench.py prepare --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
         --cases /Users/anemll/Models/jeff/spike/parity/cases.json \
         --out /Users/anemll/Models/jeff/spike/parity/prefix_cases.json
 
     # Core AI SDK Python: restore the prefix snapshot, prefill only the suffix
-    python scripts/jeff_prefix_cache.py run --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
+    python scripts/jeff_prefix_bench.py run --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
         --build /Users/anemll/Models/jeff-coreai/coreai \
         --cases /Users/anemll/Models/jeff/spike/parity/prefix_cases.json --bench 5 \
         --out /Users/anemll/Models/jeff/spike/parity/prefix_cache.json
@@ -28,7 +28,6 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from jeff_coreai import JEFF_DEFAULT, load_decision_config, question_options, split_live_last  # noqa: E402
 from jeff_prefix_cache import snake_row, tetris_row  # noqa: E402

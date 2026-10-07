@@ -295,7 +295,7 @@ out = runtime.decide(handle, split["suffix"])  # probabilities, restore_ms, suff
 
 A short suffix still occupies a whole prefill call. `--prefill-extra 32,64` compiles those widths into the same packages as the 256-row entry. Without measured call times the suffix uses the smallest width that can hold it in one call; `measure_prefill_calls` / `set_prefill_costs` picks the width whose call count times measured milliseconds is smallest. The 256-row entry stays the one used to build a long prefix. Whether a 32- or 64-row call is faster, and whether it stays fully on the ANE, is measured on the M5 Max build (see the results below once filled in).
 
-`scripts/jeff_prefix_cache.py prepare` writes Snake, Tetris and the published parity rows (including a second ~2K-token, 100-option message) with the split and HF FP32 probabilities. `run` checks cache against a cold prefill and against that reference, and reports decisions/sec.
+`scripts/jeff_prefix_bench.py prepare` writes Snake, Tetris and the published parity rows (including a second ~2K-token, 100-option message) with the split and HF FP32 probabilities. `run` checks cache against a cold prefill and against that reference, and reports decisions/sec.
 
 The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is not used here. Its normalization multiplies `amax` back in and is scale-incorrect; the Core AI head uses `rms_hidden`. The live-last layout comes from `decision_config.json` (the external feasibility note's "state-first" was wrong for v1.3).
 
