@@ -80,7 +80,9 @@ The response is Jeff's decision object plus timings:
 
 `calls_ms` is one number per 256-row prefill call. `prefill_ms` is their sum. `head_ms` is the readout. `total_ms` is the whole request inside the model lock (tokenize, prefill, head, and the small Python around them). `prefix_tokens` is how many leading tokens were resumed from a cache; it is 0 until a cache is installed.
 
-Aliases `jeff` and `jeff-latest` (and the legacy name `jeff-qwen3.8-27b`) all select this checkpoint. There is no adapter loading.
+Aliases `jeff` and `jeff-latest` (and the legacy name `jeff-qwen3.8-27b`) select the base build. A loaded adapter is selected with `"adapter": "snake"` or with `"model": "snake"` (the same name is listed by `GET /v1/models`). Omitting both stays on the base. The response includes `"adapter"`.
+
+The demo's Snake panel has a dropdown filled from `/health` (`adapters`). It shows each move's probabilities, the food eaten this life, and the best life since the last switch. Switching adapters resets the board to the opening position. The routing panel stays on the base build.
 
 An existing Jeff client points at this server with no other change, for text requests:
 
@@ -90,6 +92,79 @@ jeff = Client("http://127.0.0.1:8787", model="jeff-latest")
 jeff.choose("The disk is full.", {"page": "Page someone.", "wait": "Wait."})
 ```
 
+## Sample LoRA (Snake)
+
+Base Jeff has no Snake adapter, so the demo's first moves are soft (top probability about 0.34) and the snake misses the food. `jeff-train-lora` is a copyable sample: it builds rows of `{state, options, label, instructions}`, renders them with the same Jeff prompt the server uses, and trains a rank-8 LoRA plus the readout. Loss is cross-entropy on the option-code logits divided by `decision_config` temperature.
+
+Snake rows are synthetic. An oracle plays a shortest safe path to the food (walls and the body are illegal; the tail cell is free because it vacates). The board text matches the demo: `H` head, `#` body, `F` food, `.` empty, and the state object's last field is `latest`.
+
+```json
+{"state": {"rules": "8 by 8 grid. …", "latest": {"board": "…", "head": "4,2", "food": "1,6"}},
+ "options": {"up": "move the head one cell up", "down": "move the head one cell down",
+             "left": "move the head one cell left", "right": "move the head one cell right"},
+ "label": "up",
+ "instructions": "Pick the snake's next move."}
+```
+
+`options` may be a list of strings. `label` is a key or a zero-based index. Pass your own file with `--dataset rows.jsonl` (an 80/20 split). The Snake generator is the default.
+
+```sh
+python forge.py jeff-train-lora \
+  --model "$HOME/Models/jeff/jeff-base-v1.3" \
+  --output "$HOME/Models/jeff-snake"
+```
+
+Default is 256 train rows, 64 held-out, rank 8, alpha 16, 2 epochs, batch 4. `--device auto` uses MPS when it is free and no Core AI convert, compile, or bench process is running; otherwise it stays on CPU. The run prints train and held-out accuracy for the base and the adapter. On Snake it also scores the base model with a hint prompt (food direction and the safe-move list added in front of `latest`). `--play N` adds PyTorch self-play; the default is 0 because each move is a full forward. Game scores for the served builds come from `scripts/jeff_snake_eval.py`.
+
+The script writes:
+
+| Path | What it is |
+| --- | --- |
+| `adapter/` | LoRA factors (`adapter_model.safetensors`), the trained readout, `adapter_config.json` |
+| `merged/` | Full Jeff checkpoint with `W <- W + (alpha/rank) B A` folded in |
+| `report.json` | Accuracy, optional games, device |
+| `parity_rows.json` | A few held-out token rows and PyTorch probabilities |
+
+This is not a PEFT folder and the server does not apply LoRA at runtime. Deploy by merging, then converting that checkpoint into its own Core AI directory so the package stays fully on the ANE:
+
+```sh
+export COREAI_PYTHON=/path/to/coreai-sdk/bin/python
+python forge.py jeff-convert \
+  --model "$HOME/Models/jeff-snake/merged" \
+  --output "$HOME/Models/jeff-coreai/adapters/snake"
+python forge.py compile --build "$HOME/Models/jeff-coreai/adapters/snake/coreai"
+```
+
+Check the merged build against the PyTorch probabilities:
+
+```sh
+$COREAI_PYTHON scripts/jeff_lora_parity.py \
+  --model "$HOME/Models/jeff/jeff-base-v1.3" \
+  --build "$HOME/Models/jeff-coreai/adapters/snake/coreai" \
+  --rows "$HOME/Models/jeff-snake/parity_rows.json"
+```
+
+`--model` on the parity script is the base checkpoint. Embeddings and temperature are unchanged. The Snake weights and readout are in the compiled build.
+
+Serve both builds. `base` is `--build`. Each `--adapter` is `name=` plus that build's `coreai/` directory:
+
+```sh
+python forge.py jeff-serve \
+  --model "$HOME/Models/jeff/jeff-base-v1.3" \
+  --build "$HOME/Models/jeff-coreai/coreai" \
+  --adapter snake="$HOME/Models/jeff-coreai/adapters/snake/coreai" \
+  --host 127.0.0.1 --port 8787
+```
+
+Food eaten, survival steps, and per-decision latency, same opening boards for each name:
+
+```sh
+python scripts/jeff_snake_eval.py --url http://127.0.0.1:8787 --games 8 \
+  --adapter base --adapter snake
+```
+
+The code behind the sample is `coreai/jeff_snake.py` (oracle and the row format), `coreai/jeff_lora.py` (the low-rank update and the merge), and `scripts/jeff_lora_train.py`.
+
 ## Prefix cache hook
 
 Every request currently starts from an empty Gated DeltaNet state and position 0. A later live-last cache plugs in at two places:
@@ -97,7 +172,7 @@ Every request currently starts from an empty Gated DeltaNet state and position 0
 1. **Runtime.** `JeffCoreAI.capture_state()` copies position, token ids, the last hidden row, and each chunk's GDN/conv state and KV. `JeffCoreAI.prefill(token_ids, prefix=snapshot)` and `decide(..., prefix=snapshot)` restore that snapshot and prefill only the suffix. The shape check lives in `coreai/jeff_prefix.py` (`resume_at`). A snapshot that already covers the prompt runs the readout on the cached hidden row and does not call the backbone.
 2. **Server.** Set `app.prefix_cache` to an object with `lookup(token_ids) -> snapshot | None` and `store(token_ids, snapshot)`. After each question the server passes `lookup`'s snapshot into `decide` and then stores `capture_state()`. With `prefix_cache is None` (the default) the server does not copy KV.
 
-The demo's snake state is an object whose last field is `latest` (the board). Question, options, and `rules` stay in front of that, which is the split a live-last cache would reuse. The cache policy itself is not in this branch.
+The demo's snake state is an object whose last field is `latest` (the board). Question, options, and `rules` stay in front of that, which is the split a live-last cache would reuse. The cache policy itself is not in this branch. When more than one build is loaded, the hook is applied only to `base`, so a snapshot from one package is not restored into another.
 
 ## What stays on the ANE
 

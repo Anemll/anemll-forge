@@ -66,7 +66,26 @@ def parser():
     jv.add_argument("--build", type=path, required=True, help="coreai/ directory from jeff-convert")
     jv.add_argument("--host", default="127.0.0.1")
     jv.add_argument("--port", type=int, default=8787)
+    jv.add_argument("--adapter", action="append", default=[], metavar="NAME=PATH",
+                    help="extra merged Core AI build, name=coreai-dir. Repeatable. base is --build")
     jv.add_argument("--dry-run", action="store_true")
+    jt = sub.add_parser("jeff-train-lora", help="sample LoRA on a Jeff checkpoint (snake oracle, or a JSONL dataset)")
+    jt.add_argument("--model", type=path, required=True, help="local Jeff checkpoint directory")
+    jt.add_argument("--output", type=path, required=True, help="new directory for adapter/, merged/, and report.json")
+    jt.add_argument("--dataset", type=path, help="JSONL of {state, options, label, instructions}; default is synthetic snake")
+    jt.add_argument("--rank", type=int, default=8)
+    jt.add_argument("--alpha", type=float, default=16)
+    jt.add_argument("--train", type=int, default=256)
+    jt.add_argument("--heldout", type=int, default=64)
+    jt.add_argument("--epochs", type=int, default=2)
+    jt.add_argument("--batch", type=int, default=4)
+    jt.add_argument("--lr", type=float, default=1e-3)
+    jt.add_argument("--device", choices=("auto", "cpu", "mps"), default="auto")
+    jt.add_argument("--seed", type=int, default=0)
+    jt.add_argument("--play", type=int, default=0, help="PyTorch self-play games per model; 0 skips them")
+    jt.add_argument("--max-steps", type=int, default=48)
+    jt.add_argument("--skip-merge", action="store_true")
+    jt.add_argument("--dry-run", action="store_true")
     for name in ("quantize", "convert", "chat", "serve"):
         q = sub.add_parser(name)
         q.add_argument("--model", type=path, required=True, help="original checkpoint directory")
@@ -123,7 +142,7 @@ def prepare_jeff(a):
         raise ValueError(f"Missing checkpoint config: {a.model / 'config.json'}")
     cfg = _text_config(a.model)
     if not _is_hybrid(cfg):
-        raise ValueError("jeff-convert / jeff-smoke / jeff-serve expect a Qwen3.5 hybrid text config "
+        raise ValueError("jeff-convert / jeff-smoke / jeff-serve / jeff-train-lora expect a Qwen3.5 hybrid text config "
                          "(layer_types with linear_attention and full_attention).")
     env = {"MODEL": str(a.model)}
     published_embedding = a.model / "embed_tokens_fp16.npy"
@@ -143,8 +162,24 @@ def prepare_jeff(a):
             args.append("--dry-run")
         python = sys.executable if a.dry_run else coreai_python()
         return [python, str(ROOT / "scripts" / "jeff_coreai_convert.py"), *args], env
+    if a.command == "jeff-train-lora":
+        # Training is PyTorch in this interpreter (transformers + MPS or CPU). It does not load Core AI.
+        args = ["--model", str(a.model), "--output", str(a.output), "--rank", str(a.rank),
+                "--alpha", str(a.alpha), "--train", str(a.train), "--heldout", str(a.heldout),
+                "--epochs", str(a.epochs), "--batch", str(a.batch), "--lr", str(a.lr),
+                "--device", a.device, "--seed", str(a.seed), "--play", str(a.play),
+                "--max-steps", str(a.max_steps)]
+        if a.dataset is not None:
+            args += ["--dataset", str(a.dataset)]
+        if a.skip_merge:
+            args.append("--skip-merge")
+        return [sys.executable, str(ROOT / "scripts" / "jeff_lora_train.py"), *args], env
     if a.command == "jeff-serve":
         args = ["--model", str(a.model), "--build", str(a.build), "--host", a.host, "--port", str(a.port)]
+        for item in a.adapter or []:
+            if item.count("=") != 1 or not item.split("=", 1)[0]:
+                raise ValueError("--adapter must be name=path to a coreai directory")
+            args += ["--adapter", item]
         # The HTTP process is the Core AI interpreter (it loads the ANE packages). Tokenizing the Jeff
         # chat template needs transformers, which lives in the interpreter that launched forge.py.
         return [coreai_python(), str(ROOT / "scripts" / "jeff_serve.py"), *args], {
@@ -176,7 +211,7 @@ def is_jeff_build(build: Path) -> bool:
 
 def prepare(a):
     """Return argv and env overrides without importing ML packages or writing files."""
-    if a.command in ("jeff-convert", "jeff-smoke", "jeff-serve"):
+    if a.command in ("jeff-convert", "jeff-smoke", "jeff-serve", "jeff-train-lora"):
         return prepare_jeff(a)
     if not (a.model / "config.json").is_file():
         raise ValueError(f"Missing checkpoint config: {a.model / 'config.json'}")
@@ -346,7 +381,7 @@ def main(argv=None):
     if a.dry_run:
         print(json.dumps(dict(argv=command, environment=overrides), indent=2))
         return 0
-    linux_ok = a.command in ("quantize", "jeff-smoke")
+    linux_ok = a.command in ("quantize", "jeff-smoke", "jeff-train-lora")
     if not linux_ok and sys.platform != "darwin":
         p.error("Core ML/Core AI inference and conversion require macOS for this port "
                 "(jeff-smoke host readout and --dry-run run anywhere)")

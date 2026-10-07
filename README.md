@@ -264,7 +264,7 @@ python forge.py jeff-serve \
   --host 127.0.0.1 --port 8787
 ```
 
-Open http://127.0.0.1:8787/. The request shape is Jeff's `POST /v1/systemone`. Details, the prefix-cache hook, and measured latency are in [docs/JEFF_SERVE.md](docs/JEFF_SERVE.md). The 27B `serve` command still requires 64 layers and hidden size 5120.
+Open http://127.0.0.1:8787/. The request shape is Jeff's `POST /v1/systemone`. `--adapter name=coreai-dir` loads another merged build beside the base; the demo dropdown switches them. `python forge.py jeff-train-lora` is a sample that trains a Snake LoRA and writes a checkpoint `jeff-convert` can compile. Details, the prefix-cache hook, and measured latency are in [docs/JEFF_SERVE.md](docs/JEFF_SERVE.md). The 27B `serve` command still requires 64 layers and hidden size 5120.
 
 ## Research, evaluation, and limitations
 

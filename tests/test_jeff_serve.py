@@ -58,12 +58,13 @@ def encode(row):
 def make_app(**overrides):
     engine = overrides.pop("engine", None) or FakeEngine()
     cache = overrides.pop("prefix_cache", None)
+    adapters = overrides.pop("adapters", None)
     app = jeff_serve.App(
         engine, overrides.pop("encode", encode), name="jeff-qwen3.5-0.8b", checkpoint="/models/jeff-base-v1.3",
         max_options=overrides.pop("max_options", 254), n_codes=255, max_tokens=overrides.pop("max_tokens", 2048),
         release_date="2026-10-07", backend="coreai-ane p256_2k", layout="live-last",
         demo_html="<html>Snake /v1/systemone</html>", queue_seconds=overrides.pop("queue_seconds", 0),
-        api_key=overrides.pop("api_key", None), prefix_cache=cache)
+        api_key=overrides.pop("api_key", None), prefix_cache=cache, adapters=adapters)
     app.engine = engine
     return app
 
@@ -128,6 +129,9 @@ class ServerTests(unittest.TestCase):
         demo = (ROOT / "scripts" / "jeff_demo.html").read_text()
         self.assertIn("/v1/systemone", demo)
         self.assertIn("latest", demo)
+        self.assertIn('id="adapter"', demo)
+        self.assertIn("Food eaten", demo)
+        self.assertEqual(health["adapters"], ["base"])
         self.assertIn("x-request-id", {key.lower() for key in headers})
 
     def test_choice_response_shape_and_timings(self):
@@ -139,6 +143,7 @@ class ServerTests(unittest.TestCase):
         })
         self.assertEqual(status, 200)
         self.assertEqual(body["model"], "jeff-qwen3.5-0.8b")
+        self.assertEqual(body["adapter"], "base")
         answer = body["answers"]["action"]
         self.assertEqual(answer["type"], "choice")
         self.assertEqual(answer["choice"], "page")
@@ -239,6 +244,33 @@ class ServerTests(unittest.TestCase):
             locked.lock.release()
         self.assertEqual(raised.exception.code, 529)
         self.assertEqual(raised.exception.headers["Retry-After"], "1")
+
+    def test_adapter_selects_its_engine(self):
+        snake = FakeEngine()
+        cache = RecordingCache({"pos": 1, "token_ids": [11], "hidden": [1.0], "chunks": []})
+        app = make_app(adapters={"snake": snake}, prefix_cache=cache)
+        body = app.evaluate({"state": "board", "options": ["up", "down"], "adapter": "snake"})
+        self.assertEqual(body["adapter"], "snake")
+        self.assertEqual(body["model"], "snake")
+        self.assertEqual(len(snake.seen), 1)
+        self.assertEqual(app.engine.seen, [])
+        self.assertIsNone(snake.seen[0]["prefix"])
+        self.assertEqual(cache.stored, [])
+        by_model = app.evaluate({"model": "snake", "state": "board", "options": ["up", "down"]})
+        self.assertEqual(by_model["adapter"], "snake")
+        self.assertEqual(len(snake.seen), 2)
+        names = {item["name"] for item in app.models()["models"]}
+        self.assertIn("snake", names)
+        self.assertIn("jeff", names)
+        self.assertEqual(app.health()["adapters"], ["base", "snake"])
+        missing = app.evaluate
+        with self.assertRaises(jeff_serve.DecisionError) as raised:
+            missing({"state": "board", "options": ["up"], "adapter": "missing"})
+        self.assertEqual(raised.exception.status, 422)
+        self.assertIn("Unknown adapter", str(raised.exception.detail))
+        with self.assertRaises(jeff_serve.DecisionError) as raised:
+            app.evaluate({"model": "snake", "adapter": "base", "state": "board", "options": ["up"]})
+        self.assertEqual(raised.exception.status, 422)
 
     def test_prefix_cache_is_forwarded(self):
         hit = {"pos": 2, "token_ids": [11, 22], "hidden": [1.0], "chunks": []}

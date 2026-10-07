@@ -293,6 +293,19 @@ class JeffLauncherTests(unittest.TestCase):
         self.assertTrue(command[1].endswith("jeff_serve.py"))
         self.assertEqual(command[command.index("--port") + 1], "8799")
         self.assertEqual(env["TOKENIZER_PYTHON"], sys.executable)
+        command, _env = forge.prepare(forge.parser().parse_args([
+            "jeff-serve", "--model", str(self.model), "--build", str(self.root / "coreai"),
+            "--adapter", "snake=/tmp/jeff-snake/coreai"]))
+        self.assertEqual(command[command.index("--adapter") + 1], "snake=/tmp/jeff-snake/coreai")
+
+    def test_jeff_train_lora_uses_this_interpreter(self):
+        command, _env = forge.prepare(forge.parser().parse_args([
+            "jeff-train-lora", "--model", str(self.model), "--output", str(self.root / "lora"),
+            "--train", "4", "--play", "0"]))
+        self.assertEqual(command[0], sys.executable)
+        self.assertTrue(command[1].endswith("jeff_lora_train.py"))
+        self.assertEqual(command[command.index("--train") + 1], "4")
+        self.assertNotIn("coreai_python", command[0])
 
     def test_serve_still_rejects_jeff_shape(self):
         with self.assertRaisesRegex(ValueError, "64 layers"):

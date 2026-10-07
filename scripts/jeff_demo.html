@@ -66,7 +66,7 @@
   .track { height: 10px; background: #0c100c; border-radius: 99px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); width: 0; }
   .bar.chosen .name { color: var(--accent); }
-  button, .examples button {
+  button, .examples button, select {
     background: transparent;
     color: var(--ink);
     border: 1px solid var(--line);
@@ -75,6 +75,7 @@
     font: inherit;
     cursor: pointer;
   }
+  select { background: #0c100c; }
   button:hover { border-color: var(--accent); }
   textarea {
     width: 100%;
@@ -111,11 +112,18 @@
   <section id="game">
     <div>
       <h2>Snake</h2>
-      <p class="meta">Every move is one decision. The base model has no adapter, so the bars can be soft.</p>
+      <p class="meta">Every move is one decision. Base has no task adapter. Snake is a LoRA merged into its own ANE build.</p>
+      <p class="row">
+        <label for="adapter">Adapter</label>
+        <select id="adapter" aria-label="Decision adapter">
+          <option value="base">base</option>
+        </select>
+      </p>
       <div class="board" id="board" aria-label="Snake board"></div>
     </div>
     <div>
       <div class="latency"><span id="ms">—</span><small>ms total</small></div>
+      <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
       <p class="meta" id="timing">Waiting for the first decision.</p>
       <div id="bars"></div>
       <p class="meta" id="status"></p>
@@ -158,6 +166,8 @@ const ROUTES = {
 let snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
 let food = { r: 1, c: 6 };
 let score = 0;
+let best = 0;
+let adapter = "base";
 let playing = true;
 let inflight = false;
 let routing = false;
@@ -220,8 +230,9 @@ function bars(target, probabilities, chosen) {
 }
 
 function snakeRequest() {
-  return {
+  const body = {
     model: "jeff-latest",
+    adapter,
     state: {
       rules: "8 by 8 grid. H is the head, # is the body, F is food, a dot is empty. Eat F. Never move onto # or off the board.",
       latest: { board: boardText(), head: `${snake[0].r},${snake[0].c}`, food: `${food.r},${food.c}` },
@@ -239,6 +250,15 @@ function snakeRequest() {
       },
     },
   };
+  return body;
+}
+
+function resetSnake() {
+  snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
+  food = { r: 1, c: 6 };
+  score = 0;
+  document.getElementById("scoreline").textContent = `Food eaten 0 · best ${best}`;
+  draw();
 }
 
 async function decide(body) {
@@ -271,23 +291,28 @@ async function step() {
   try {
     const payload = await decide(snakeRequest());
     const answer = payload.answers.move;
-    showTiming(payload, `score ${score}`);
+    showTiming(payload, payload.adapter || adapter);
     bars("bars", answer.probabilities, answer.choice);
+    document.getElementById("scoreline").textContent = `Food eaten ${score} · best ${best}`;
     const delta = DIRS[answer.choice];
     const next = { r: snake[0].r + delta.r, c: snake[0].c + delta.c };
     const ontoTail = next.r === snake[snake.length - 1].r && next.c === snake[snake.length - 1].c;
     const hit = next.r < 0 || next.c < 0 || next.r >= SIZE || next.c >= SIZE || (occupied(next.r, next.c, false) && !ontoTail);
     if (hit) {
-      document.getElementById("status").textContent = `Jeff chose ${answer.choice}. That hits a wall or the body. Restarting.`;
+      best = Math.max(best, score);
+      document.getElementById("status").textContent = `Chose ${answer.choice}. That hits a wall or the body. Food eaten this life: ${score}. Restarting.`;
       snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
       score = 0;
       placeFood();
+      document.getElementById("scoreline").textContent = `Food eaten 0 · best ${best}`;
     } else {
       snake.unshift(next);
       if (next.r === food.r && next.c === food.c) {
         score += 1;
+        best = Math.max(best, score);
         placeFood();
-        document.getElementById("status").textContent = `Jeff chose ${answer.choice} and ate the food.`;
+        document.getElementById("scoreline").textContent = `Food eaten ${score} · best ${best}`;
+        document.getElementById("status").textContent = `Chose ${answer.choice} and ate the food.`;
       } else {
         snake.pop();
         document.getElementById("status").textContent = `Jeff chose ${answer.choice}.`;
@@ -301,6 +326,13 @@ async function step() {
     if (playing) setTimeout(step, 160);
   }
 }
+
+document.getElementById("adapter").addEventListener("change", (event) => {
+  adapter = event.target.value || "base";
+  best = 0;
+  resetSnake();
+  document.getElementById("status").textContent = `Switched to ${adapter}. Board reset.`;
+});
 
 document.getElementById("toggle").addEventListener("click", () => {
   playing = !playing;
@@ -350,6 +382,17 @@ for (const button of document.querySelectorAll(".examples button")) {
 fetch("/health").then((response) => response.json()).then((health) => {
   document.getElementById("health").innerHTML =
     `<strong>${health.model}</strong><br>${health.backend}<br>${health.status} · text · prefix cache ${health.prefix_cache ? "on" : "off"}`;
+  const names = health.adapters && health.adapters.length ? health.adapters : ["base"];
+  const select = document.getElementById("adapter");
+  select.replaceChildren();
+  for (const name of names) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  adapter = names.includes(adapter) ? adapter : "base";
+  select.value = adapter;
 }).catch(() => {
   document.getElementById("health").textContent = "Health check failed.";
 });
