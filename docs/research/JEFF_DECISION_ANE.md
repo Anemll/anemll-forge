@@ -1,8 +1,8 @@
 # Jeff / Unsloth decision models on the ANE
 
-- **Scope:** can ANEMLL Forge run Jeff (Qwen3.5-0.8B decision head) and Unsloth-style Clef heads on the Apple Neural Engine through the existing Core AI path?
-- **Status:** source inventory plus external-doc check. No Hugging Face weights were downloaded here. No ANE compile or timing. Nothing below is a measured tokens/s or millisecond claim.
-- **Branch:** `cursor/jeff-decision-ane-85f5`. Analysis only; no converter or server code.
+- **Scope:** run Jeff (Qwen3.5-0.8B decision head) on the Apple Neural Engine through a prefill-only Core AI path.
+- **Status:** Path B implemented on this branch. Config-driven hybrid graphs, 255-way readout instead of the vocab `lm_head`, `forge.py jeff-convert` / `jeff-smoke` (no 64 × 5120 gate). No Hugging Face weights were downloaded in the cloud agent. No ANE compile or timing here. Nothing below is a measured tokens/s claim.
+- **Branch:** `cursor/jeff-decision-ane-85f5`.
 
 Evidence labels: **Source-verified** (this checkout), **External doc** (Jeff / Unsloth / Qwen cards, not fetched as weights), **Inferred**.
 
@@ -63,7 +63,7 @@ What actually holds:
 
 | Stage | Path | What it does for Qwen | Jeff fit |
 | --- | --- | --- | --- |
-| Launcher | [`forge.py`](../../forge.py) | `quantize` → `qwen38_gptq_27b.py`; `convert` → `qwen38_ane_model.py build_v3`; `serve`/`chat` → `qwen38_server.py` / `qwen38_chat.py`; Core AI compile | Hard-gates 64 × 5120. Needs a Jeff command or a relaxed gate. |
+| Launcher | [`forge.py`](../../forge.py) | 27B: `quantize` / `convert` / `serve` / `chat` (still 64 × 5120). Jeff: `jeff-convert` / `jeff-smoke` (hybrid + readout only). Core AI compile is shared and does not require a drafter. | 27B gate unchanged. Jeff commands bypass it. |
 | Bundle check | [`scripts/hf_release.py`](../../scripts/hf_release.py) | Same 64 × 5120 + vocab check; `embed_tokens_fp16.npy` | Same. |
 | 0.6B-era LUT | [`scripts/qwen3_lut_common.py`](../../scripts/qwen3_lut_common.py) | Dense Qwen3 fp32 ref (default `~/Models/Qwen3-0.6B`), tokenizer, Hadamard, LUT/GPTQ | Formats yes; graph no. |
 | 0.6B-era MLP | [`scripts/qwen3_mlp_gptq_model.py`](../../scripts/qwen3_mlp_gptq_model.py) | Sequential GPTQ of MLPs, attention left fp32 | Lesson: small dense models did not need 27B VQ. |
@@ -118,24 +118,80 @@ Packaging patterns that are model-size-agnostic: shared-weight multifunction pac
 | Clef head vs Jeff readout | Unsloth span head ≠ answer-code readout | Spike Jeff readout first (published files); keep Clef as a second head package |
 | Prefill entry shape | 27B uses T=8 verify + T=64 prefill | Decision serve only needs a prefill entry (start with 512–2048 rows) |
 
+## Implementation (Path B)
+
+| Piece | Path | Role |
+| --- | --- | --- |
+| Checkpoint + readout | [`coreai/jeff_coreai.py`](../../coreai/jeff_coreai.py) | Hybrid config, `JeffCheckpoint`, 255×hidden `readout.safetensors`, live-last prompt, host softmax |
+| Core AI export | [`coreai/jeff_coreai_build.py`](../../coreai/jeff_coreai_build.py) | Rebinds `qwen38_coreai_build` widths to Jeff `text_config`; FP16 or light INT8; **no** LUT/VQ/palettize; prefill-only entries; `head_readout.aimodel` |
+| Runtime | [`coreai/jeff_coreai_runtime.py`](../../coreai/jeff_coreai_runtime.py) | One prefill through every chunk, T=1 readout on the last valid row |
+| CLI | [`scripts/jeff_coreai_convert.py`](../../scripts/jeff_coreai_convert.py), [`scripts/jeff_coreai_smoke.py`](../../scripts/jeff_coreai_smoke.py) | Convert / host+Core AI smoke |
+| Launcher | [`forge.py`](../../forge.py) `jeff-convert`, `jeff-smoke` | Bypasses the 27B 64 × 5120 gate **only** on these commands |
+
+The 27B `convert` / `serve` / `hf_release` checks are unchanged. DFlash2 is not built. `--quant int8` is per-channel INT8 on large projections only (not GPTQ/VQ).
+
+Host smoke steps [`qwen38_decode_ref.DecodeLayer`](../../scripts/qwen38_decode_ref.py) (config-driven GDN + gated attention). That is the portable correctness path. ANE uses tanh-SiLU and the Core AI graph; treat host vs ANE as a later parity check, not as bit-identical.
+
+## Convert / compile / smoke (M5 Max)
+
+Weights stay on the Mac. Default layout: `/Users/anemll/Models/jeff/jeff-base-v1.3` (`config.json`, `model.safetensors`, `readout.safetensors`, `decision_config.json`, tokenizer). Do not download them in a cloud agent.
+
+Conversion SDK: Core AI Python stack from [ENVIRONMENT.md](../ENVIRONMENT.md) (`coreai-torch`, `coreai-opt`). Inference compile uses the same Python as `forge.py serve` so the ANE cache key matches.
+
+```sh
+# 1) Plan only (any OS; no SDK)
+python forge.py jeff-convert \
+  --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
+  --output /Users/anemll/Models/jeff-coreai \
+  --ctx 2048 --prefill 256 --quant fp16 --dry-run
+
+# 2) Export FP16 backbone + 255-way readout (macOS + Core AI SDK)
+python forge.py jeff-convert \
+  --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
+  --output /Users/anemll/Models/jeff-coreai \
+  --ctx 2048 --prefill 256 --quant fp16
+
+# Light INT8 projections (optional; still no GPTQ/VQ):
+#   ... --quant int8
+
+# 3) Specialize for this Mac's ANE (no drafter)
+python forge.py compile --build /Users/anemll/Models/jeff-coreai/coreai
+
+# 4) Host prefill + readout (works without Core AI; needs torch + the checkpoint)
+python forge.py jeff-smoke \
+  --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
+  --state "The disk on db-02 is 97 percent full and still growing." \
+  --options page,wait,ignore
+
+# 5) Same prompt through the compiled Core AI package
+python forge.py jeff-smoke \
+  --model /Users/anemll/Models/jeff/jeff-base-v1.3 \
+  --build /Users/anemll/Models/jeff-coreai/coreai \
+  --state "The disk on db-02 is 97 percent full and still growing." \
+  --options page,wait,ignore
+```
+
+`--prefill` must be a multiple of 8 and greater than 8 (GDN sub-chunk). `--ctx` must be ≥ `--prefill`. Output layout:
+
+```
+jeff-coreai/
+  model/     config, tokenizer, decision_config, embed_tokens_fp16.npy, readout
+  coreai/    manifest.json, chunk_L00-03.aimodel, …, head_readout.aimodel
+```
+
+`manifest.json` has `"kind": "jeff-decision"`, `"dflash2": false`, FP16 KV, and a single `p{prefill}_{ctx}k` entry per chunk. First `compile` / smoke load compiles each package for the ANE once.
+
+Pass/fail for the Mac spike: convert writes packages; compile stays on the ANE; host smoke returns option probabilities; Core AI smoke on the same prompt returns a distribution (compare argmax, then ECE later).
+
 ## Recommended first spike (M5 Max / M6, no 27B VQ)
 
-Goal: prove ANE **compile + one-forward prefill** for a 0.8B-class hybrid, not product serving.
-
-1. On the Mac, download `mstrasser/jeff-base` revision `v1.3` (or `Jeff-Qwen3.5-0.8B` v1.2 if zero-shot is enough). Do not pull the 27B bundle for this. Record `config.json` `text_config` (layers, hidden, `layer_types`, GDN/attn heads).
-2. Export **backbone only**, FP16 dense (or INT8 per-channel if FP16 compile is ugly): 24 layers, host embedding table, **no** vocab `lm_head`. Reuse `qwen38_coreai_build.py` with a 24-layer plan (`0-3,…,20-23` or fewer packages). Stub the head as RMSNorm + a tiny linear over hidden (identity or zeros) so the package links.
-3. Compile for ANE (`forge.py compile` pattern or `coreai_compile.py`). Record package count, compile time, bonded mode, and whether every function stays on the ANE (existing placement probes).
-4. Time **prefill only** at 256 / 512 / 1024 / 2048 tokens. That *is* the decision cost. Do not start a decode loop.
-5. Wire Jeff readout as a second increment: gather answer-code hidden or logits, apply `decision_config.json` temperature, softmax. Compare option order vs MLX `jeff-serve` on a handful of synthetic `choice` rows. Then fit ECE.
-6. Only after that: live-last prefix cache via existing GDN snapshot, then a `/v1/systemone`-style stub. Adapters and Unsloth Clef head come later.
-
-Pass/fail for the spike: packages compile onto the ANE; one prefill of a ~512-token Jeff prompt returns; latency is in the same ballpark as the published MLX 0.8B figure (tens of milliseconds, not 27B prefill seconds). Quality and calibration are the next gate, not this one.
+Goal: prove ANE **compile + one-forward prefill** for a 0.8B-class hybrid, not product serving. The convert/smoke commands above are that spike. Remaining after a green Mac compile: time 256/512/1024/2048 prefill, compare option order vs MLX `jeff-serve`, fit ANE temperature/ECE, then live-last prefix cache and a SystemOne route. Adapters and Unsloth Clef head stay later.
 
 ## What this VM verified
 
-- Read the Forge Qwen entry points listed above on `main` (`e671153`).
+- Implemented the Jeff convert/smoke path and ran `python3 -m unittest tests.test_jeff_coreai tests.test_launcher` (no Core AI SDK, no Jeff weights).
 - Checked public Jeff / Unsloth / Qwen3.5-0.8B docs for task, head, and architecture. Did not download weights.
-- Did not run `forge.py`, Core AI, or any compile.
+- Did not run Core AI export, ANE compile, or on-device timing.
 
 ## See also
 
