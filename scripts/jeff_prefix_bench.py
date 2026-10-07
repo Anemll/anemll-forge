@@ -161,7 +161,19 @@ def run(a) -> int:
     for case in cases:
         groups.setdefault(case["group"], []).append(case)
     results = []
-    worst = 0.0
+    # A cached suffix is its own prefill call, so it is not the same FP16 reduction order as a cold
+    # prefill that fuses the prefix tail with the suffix. Repeats of one path stay bit-identical.
+    split_dp, same_dp = 5e-3, 1e-5
+    worst_split, worst_same = 0.0, 0.0
+
+    def _dump():
+        if not a.out:
+            return
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text(json.dumps({
+            "build": str(a.build), "widths": runtime.widths, "bridge": runtime._bridge,
+            "prefill_call_ms": None if costs is None else {str(k): v for k, v in costs.items()},
+            "results": results}, indent=1))
     for group, members in groups.items():
         prefix = tuple(members[0]["prefix"])
         if any(tuple(m["prefix"]) != prefix for m in members):
@@ -205,7 +217,8 @@ def run(a) -> int:
                 "vs_hf": _compare(ref, _probs(cached)),
                 "nocache_vs_hf": _compare(ref, _probs(cold)),
             }
-            worst = max(worst, row["vs_nocache"]["max_abs_dp"], resumed_vs["max_abs_dp"], same["max_abs_dp"])
+            worst_split = max(worst_split, row["vs_nocache"]["max_abs_dp"], resumed_vs["max_abs_dp"])
+            worst_same = max(worst_same, same["max_abs_dp"])
             if a.bench:
                 row["bench"] = {
                     "n": a.bench,
@@ -219,21 +232,19 @@ def run(a) -> int:
                 row["bench"]["nocache_decisions_per_s"] = round(1e3 / _median(colds, "prefill_ms"), 2)
                 back = _compare(_probs(cold), _probs(colds[0]))
                 row["bench"]["nocache_after_cache"] = back
-                worst = max(worst, back["max_abs_dp"])
+                worst_same = max(worst_same, back["max_abs_dp"])
             results.append(row)
+            _dump()
             print(json.dumps({"name": row["name"], "suffix": row["suffix_tokens"],
                               "vs_nocache": row["vs_nocache"], "vs_hf": row["vs_hf"],
                               "bench": row.get("bench"), "entries": cached["prefill_entries"],
                               "chunk_reuse": reused}), flush=True)
     if a.out:
-        a.out.parent.mkdir(parents=True, exist_ok=True)
-        a.out.write_text(json.dumps({
-            "build": str(a.build), "widths": runtime.widths,
-            "prefill_call_ms": None if costs is None else {str(k): v for k, v in costs.items()},
-            "results": results}, indent=1))
         print(f"wrote {a.out}")
-    if worst > 1e-3:
-        raise SystemExit(f"cache vs no-cache max |dp| {worst:.3e} exceeds 1e-3")
+    if worst_same > same_dp:
+        raise SystemExit(f"repeated decisions differ by max |dp| {worst_same:.3e}")
+    if worst_split > split_dp:
+        raise SystemExit(f"cache vs no-cache max |dp| {worst_split:.3e} exceeds {split_dp:.0e}")
     return 0
 
 

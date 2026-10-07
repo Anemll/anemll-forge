@@ -5,6 +5,11 @@ Used by jeff-smoke --build on macOS after jeff-convert + forge.py compile. A pro
 k / v rows go into the KV caches at its position and the history mask opens up to it, as in CoreAIQwen.prefill_block.
 The readout head then runs once on the last prompt row.
 
+When ``libcoreai_bridge.dylib`` is next to ``coreai_bridge.py`` (``coreai/swift_bridge/build.sh``), calls go through
+that bridge: each chunk's outputs are bound once and written in place, and DeltaNet state ping-pongs between two
+buffer sets. The Python binding remains for a machine without the dylib; it allocates a new IOSurface per output
+and will abort on a long run.
+
 Live-last prefix cache: ``prepare_prefix(token_ids)`` commits the shared prefix and snapshots GDN conv / recurrent
 state, attention KV and the position, keyed by those exact token ids (GDN state cannot be rewound, so a snapshot
 is taken at every committed call, including the prefix end). ``decide(handle, suffix)`` restores that snapshot and
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -25,11 +31,27 @@ from jeff_coreai import JeffCheckpoint, load_decision_config, load_text_config, 
 from jeff_prefix_cache import PrefixCache, PrefixHandle, longest_snapshot, mark_cut, plan_with_cuts, prefill_plan
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+BRIDGE_DIR = Path(__file__).resolve().parents[1] / "coreai" / "swift_bridge"
+for _p in (SCRIPTS, BRIDGE_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 import ane_compile_mode as SOC  # noqa: E402
+import coreai_bridge as BRIDGE  # noqa: E402
 from qwen38_coreai_model import _spec, buffer, pick_package, writable  # noqa: E402
 from qwen38_kv_cache import put_rows  # noqa: E402
+
+
+def _use_bridge() -> bool:
+    """The Swift bridge binds output IOSurfaces once. The Python binding allocates every output per call and the
+    Core AI pool does not take those surfaces back (NDArray+Pool.swift aborts after roughly a thousand calls)."""
+    if os.environ.get("COREAI_BRIDGE") == "0":
+        return False
+    return BRIDGE.available()
+
+
+def _pair(buf):
+    """(buffer object, numpy view). The view's base keeps the IOSurface alive."""
+    return buf, buf.np
 
 
 def _entry_widths(entries: list[str]) -> list[int]:
@@ -63,29 +85,18 @@ class JeffCoreAI:
         gshapes = {"conv": (self.P + 3, cdim), "rec": (nv, dk, dv), "pend": (nv, 3 * self.P + 1, dv)}
         rot = int(c["head_dim"] * c["rope_parameters"]["partial_rotary_factor"])
         self.inv = 1.0 / c["rope_parameters"]["rope_theta"] ** (np.arange(0, rot, 2) / rot)
-        self.loop = asyncio.new_event_loop()
+        self._bridge = _use_bridge()
+        self.loop = None if self._bridge else asyncio.new_event_loop()
+        self.par = 0
+        self._plans: dict[tuple, object] = {}
         t0 = time.time()
-
-        async def load(file, entries):
-            target, _ = pick_package(self.build, file, None, log)
-            m = await AIModel.load(target, specialization_options=_spec())
-            return m, {e: m.load_function(e) for e in entries}
-
         self.chunks = []
-        for ch in self.man["chunks"]:
-            t1 = time.time()
-            pkg, fns = self.loop.run_until_complete(load(ch["file"], ch["entries"]))
-            state = {f"{n}{j}": buffer(gshapes[n]) for j in ch["gdn_j"] for n in gshapes}
-            kv = {f"{s}{j}": buffer((self.nkv, self.L, self.hd)) for j in ch["att_j"] for s in ("k", "v")}
-            self.chunks.append({**ch, "pkg": pkg, "fns": fns, "state": state, "kv": kv})
-            log(f"loaded {ch['file']} in {time.time() - t1:.1f}s")
-        widths = _entry_widths(self.chunks[0]["entries"])
-        for ch in self.chunks[1:]:
-            if _entry_widths(ch["entries"]) != widths:
-                raise ValueError("Jeff chunks disagree on prefill entry widths")
-        self.widths = widths
-        self.TP = max(widths)
-        self.entry = f"p{self.TP}_{self.ctx // 1024}k"
+        if self._bridge:
+            self._load_bridge(hid, log)
+        else:
+            self._load_python(gshapes, hid, rot, log)
+            log("Python Core AI binding: each call allocates new output IOSurfaces "
+                "(the pool aborts on a long run; build coreai/swift_bridge)")
         self.prefill_cost: dict[int, float] | None = None
         self._snaps: dict[tuple[int, ...], dict] = {}
         self.prefix_cache = PrefixCache(self._snaps)
@@ -93,24 +104,99 @@ class JeffCoreAI:
         self.live_mark_ids: tuple[int, ...] | None = None
         self._token_ids: list[int] = []
         self._last_hidden: np.ndarray | None = None
+        self.load_s = time.time() - t0
+        self.pos = 0
+        via = "swift-bridge" if self._bridge else "python-binding"
+        log(f"prefill entries {['p' + str(w) for w in self.widths]} KV rows {self.L} via {via}")
+
+    def _widths_of(self, chunks) -> list[int]:
+        widths = _entry_widths(chunks[0]["entries"])
+        for ch in chunks[1:]:
+            if _entry_widths(ch["entries"]) != widths:
+                raise ValueError("Jeff chunks disagree on prefill entry widths")
+        return widths
+
+    def _load_python(self, gshapes, hid, rot, log):
+        async def load(file, entries):
+            target, _ = pick_package(self.build, file, None, log)
+            m = await AIModel.load(target, specialization_options=_spec())
+            return m, {e: m.load_function(e) for e in entries}
+
+        for ch in self.man["chunks"]:
+            t1 = time.time()
+            pkg, fns = self.loop.run_until_complete(load(ch["file"], ch["entries"]))
+            state = {f"{n}{j}": buffer(gshapes[n]) for j in ch["gdn_j"] for n in gshapes}
+            kv = {f"{s}{j}": buffer((self.nkv, self.L, self.hd)) for j in ch["att_j"] for s in ("k", "v")}
+            self.chunks.append({**ch, "pkg": pkg, "fns": fns, "state": state, "kv": kv})
+            log(f"loaded {ch['file']} in {time.time() - t1:.1f}s")
+        self.widths = self._widths_of(self.chunks)
+        self.TP = max(self.widths)
+        self.entry = f"p{self.TP}_{self.ctx // 1024}k"
         head = self.man["head"]
         self.head_pkg, hf = self.loop.run_until_complete(load(head["file"], [head.get("entry", "h1")]))
         self.head_fn = hf[head.get("entry", "h1")]
-        self.load_s = time.time() - t0
         self.pins = {w: {n: buffer(s) for n, s in (
             ("cos", (w, rot)), ("sin", (w, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
             ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, w + 3)), ("valid", (1, w, 1)),
-            ("x", (1, hid, 1, w)), ("xb", (1, hid, 1, w)))} for w in widths}
+            ("x", (1, hid, 1, w)), ("xb", (1, hid, 1, w)))} for w in self.widths}
         self.hx = buffer((1, hid, 1, 1))
         self.mask = buffer((1, self.L))
-        self.pos = 0
-        log(f"prefill entries {['p' + str(w) for w in widths]} KV rows {self.L}")
+
+    def _load_bridge(self, hid, log):
+        """Persistent IOSurface inputs and outputs. DeltaNet state has two sets; a call reads one and writes the other."""
+        pin_names = ("x", "cos", "sin", "conv_sel", "commit", "commit_last", "conv_sel_out", "valid")
+
+        def load(file, entries):
+            target, _ = pick_package(self.build, file, None, log)
+            t1 = time.time()
+            model = BRIDGE.Model(str(target), compute="ane")
+            fns = {e: model.function(e) for e in entries}
+            log(f"loaded {file} in {time.time() - t1:.1f}s")
+            return model, fns
+
+        for ch in self.man["chunks"]:
+            pkg, fns = load(ch["file"], ch["entries"])
+            base = fns[ch["entries"][0]]
+            names = [f"{n}{j}" for j in ch["gdn_j"] for n in ("conv", "rec", "pend")]
+            sets = [{n: _pair(base.buffer("input", n)) for n in names} for _ in range(2)]
+            kv = {f"{s}{j}": _pair(base.buffer("input", f"{s}{j}")) for j in ch["att_j"] for s in ("k", "v")}
+            outs = {}
+            for entry in ch["entries"]:
+                width = int(entry[1:].split("_", 1)[0])
+                fn = fns[entry]
+                outs[width] = {n: _pair(fn.buffer("output", n))
+                               for n in fn.output_names if not n.endswith("_out")}
+            self.chunks.append({**ch, "pkg": pkg, "fns": fns, "sets": sets, "state": sets[0], "kv": kv, "outs": outs})
+        self.widths = self._widths_of(self.chunks)
+        self.TP = max(self.widths)
+        self.entry = f"p{self.TP}_{self.ctx // 1024}k"
+        f0 = self.chunks[0]["fns"][self.entry]
+        self.pins = {}
+        for w in self.widths:
+            fn = self.chunks[0]["fns"][f"p{w}_{self.ctx // 1024}k"]
+            self.pins[w] = {n: _pair(fn.buffer("input", n)) for n in pin_names}
+        self.mask = _pair(f0.buffer("input", "mask"))
+        if self.mask[1].shape != (1, self.L):
+            raise ValueError(f"mask shape {self.mask[1].shape} != (1, {self.L})")
+        head = self.man["head"]
+        entry = head.get("entry", "h1")
+        self.head_pkg, hf = load(head["file"], [entry])
+        self.head_fn = hf[entry]
+        self.hx = _pair(self.head_fn.buffer("input", "x"))
+        if tuple(self.hx[1].shape) != (1, hid, 1, 1):
+            raise ValueError(f"readout input shape {self.hx[1].shape} != (1, {hid}, 1, 1)")
+        self._logits = _pair(self.head_fn.buffer("output", "logits"))
+        self._head_plan = BRIDGE.Plan([self.head_fn.bind({"x": self.hx[0]}, {"logits": self._logits[0]})])
 
     def reset(self):
         """Zero the live DeltaNet state and the position. Prefix snapshots are kept (KV rows in them are copies)."""
         for ch in self.chunks:
-            for _, w in ch["state"].values():
-                w[:] = 0
+            groups = ch["sets"] if "sets" in ch else [ch["state"]]
+            for group in groups:
+                for _, w in group.values():
+                    w[:] = 0
+            if "sets" in ch:
+                ch["state"] = ch["sets"][self.par]
         self.pos = 0
         self._token_ids = []
         self._last_hidden = None
@@ -211,6 +297,35 @@ class JeffCoreAI:
         cached = snap.get("token_ids")
         self._token_ids = [] if cached is None else [int(t) for t in cached]
 
+    def _flip(self):
+        """The set just written becomes the one the next call reads."""
+        self.par ^= 1
+        for ch in self.chunks:
+            ch["state"] = ch["sets"][self.par]
+
+    def _plan(self, width: int):
+        key = (width, self.par)
+        plan = self._plans.get(key)
+        if plan is None:
+            entry = f"p{width}_{self.ctx // 1024}k"
+            d = self.pins[width]
+            shared = {k: v[0] for k, v in d.items() if k != "x"}
+            shared["mask"] = self.mask[0]
+            x, bindings = d["x"][0], []
+            for ch in self.chunks:
+                fn = ch["fns"][entry]
+                cur = {n: pair[0] for n, pair in ch["sets"][self.par].items()}
+                nxt = ch["sets"][1 - self.par]
+                ins = {n: b for n, b in {**shared, "x": x, **cur,
+                                         **{k: v[0] for k, v in ch["kv"].items()}}.items() if n in fn.inputs}
+                outs = {n: pair[0] for n, pair in ch["outs"][width].items()}
+                outs.update({f"{n}_out": pair[0] for n, pair in nxt.items()})
+                bindings.append(fn.bind(ins, outs))
+                x = ch["outs"][width]["y"][0]
+            plan = BRIDGE.Plan(bindings)
+            self._plans[key] = plan
+        return plan
+
     def _block(self, ids, width: int, keep=None) -> np.ndarray:
         """Up to ``width`` prompt tokens at self.pos, all committed. Returns the last row's hidden state.
         keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
@@ -233,6 +348,18 @@ class JeffCoreAI:
         d["valid"][1][0, :n, 0] = 1
         self.mask[1][:] = -1e4
         self.mask[1][0, :p0] = 0
+        if self._bridge:
+            self._plan(width).run()
+            self._flip()
+            for ci, ch in enumerate(self.chunks):
+                y = ch["outs"][width]["y"][1]
+                for k, (_, w) in ch["kv"].items():
+                    put_rows(w, ch["outs"][width][f"{k}_new"][1][:, :n], p0, n)
+                if keep is not None:
+                    keep[ci].append(np.array(y[0, :, 0, :n].T, copy=True))
+            self.pos = p0 + n
+            return np.array(self.chunks[-1]["outs"][width]["y"][1][:, :, :, n - 1:n], copy=True)
+
         shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb")}
         shared["mask"] = self.mask[0]
 
@@ -250,6 +377,7 @@ class JeffCoreAI:
                 x = d["xb"][0]
                 if keep is not None:
                     keep[ci].append(d["xb"][1][0, :, 0, :n].T.copy())
+                del out
         self.loop.run_until_complete(run())
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
@@ -285,8 +413,13 @@ class JeffCoreAI:
     def _readout(self, last) -> tuple[np.ndarray, float]:
         t1 = time.perf_counter()
         self.hx[1][:] = last
-        out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.hx[0]}))
-        logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
+        if self._bridge:
+            self._head_plan.run()
+            logits = np.asarray(self._logits[1], np.float32).reshape(-1)
+        else:
+            out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.hx[0]}))
+            logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
+            del out
         return logits, 1e3 * (time.perf_counter() - t1)
 
     def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None) -> dict:
