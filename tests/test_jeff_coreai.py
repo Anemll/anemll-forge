@@ -284,6 +284,21 @@ class JeffLauncherTests(unittest.TestCase):
                 "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
                 "--prefill", "250"]))
 
+    def test_jeff_serve_bypasses_64x5120_gate(self):
+        with patch.dict(os.environ, {"COREAI_PYTHON": "/sdk/bin/python"}):
+            command, env = forge.prepare(forge.parser().parse_args([
+                "jeff-serve", "--model", str(self.model), "--build", str(self.root / "coreai"),
+                "--host", "127.0.0.1", "--port", "8799"]))
+        self.assertEqual(command[0], "/sdk/bin/python")
+        self.assertTrue(command[1].endswith("jeff_serve.py"))
+        self.assertEqual(command[command.index("--port") + 1], "8799")
+        self.assertEqual(env["TOKENIZER_PYTHON"], sys.executable)
+
+    def test_serve_still_rejects_jeff_shape(self):
+        with self.assertRaisesRegex(ValueError, "64 layers"):
+            forge.prepare(forge.parser().parse_args([
+                "serve", "--model", str(self.model), "--build", str(self.root / "coreai"), "--plain"]))
+
     def test_jeff_smoke_argv(self):
         cmd, _ = forge.prepare(forge.parser().parse_args([
             "jeff-smoke", "--model", str(self.model), "--ids", "1,2,3"]))

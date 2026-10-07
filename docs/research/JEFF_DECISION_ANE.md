@@ -1,7 +1,7 @@
 # Jeff / Unsloth decision models on the ANE
 
 - **Scope:** run Jeff (Qwen3.5-0.8B decision head) on the Apple Neural Engine through a prefill-only Core AI path.
-- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). Not done: LoRA adapters, ANE temperature/ECE fit, live-last prefix cache, a serving route.
+- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). `forge.py jeff-serve` answers Jeff's `/v1/systemone` route and serves a browser demo ([JEFF_SERVE.md](../JEFF_SERVE.md)). `JeffCoreAI.prefill(..., prefix=)` accepts a cached backbone snapshot; the live-last cache policy is still a separate piece. Not done: LoRA adapters, ANE temperature/ECE fit, the prefix-cache policy itself.
 - **Branch:** `cursor/jeff-decision-ane-85f5`.
 
 Evidence labels: **Source-verified** (this checkout), **External doc** (Jeff / Unsloth / Qwen cards, not fetched as weights), **Inferred**.
@@ -127,7 +127,9 @@ Packaging patterns that are model-size-agnostic: shared-weight multifunction pac
 | Runtime | [`coreai/jeff_coreai_runtime.py`](../../coreai/jeff_coreai_runtime.py) | IOSurface `NDArray` I/O. Prompts longer than the entry run as chained TP-row calls: DeltaNet conv/recurrent state carried, every call's `k/v_new` rows written to the KV cache at its position, history mask opened up to it. T=1 readout on the last prompt row |
 | Reference | [`scripts/jeff_reference.py`](../../scripts/jeff_reference.py) | Jeff's PyTorch forward (`Qwen3_5Model` FP32/bf16 + readout / temperature). Checks the prompt port against upstream `jeff/model.py` token for token. `--magnitudes` (DeltaNet FP16 headroom), `--chunk-dump` (per-chunk ANE error) |
 | CLI | [`scripts/jeff_coreai_convert.py`](../../scripts/jeff_coreai_convert.py), [`scripts/jeff_coreai_smoke.py`](../../scripts/jeff_coreai_smoke.py) | Convert / host + Core AI smoke; `--cases` parity (max \|dp\|, KL, argmax, hidden cosine), `--bench`, `--dump` |
-| Launcher | [`forge.py`](../../forge.py) `jeff-convert`, `jeff-smoke` | Bypasses the 27B 64 × 5120 gate **only** on these commands. `COREAI_PYTHON` names the Core AI SDK interpreter for convert, `--build` smoke and `compile` of a `jeff-decision` build |
+| Launcher | [`forge.py`](../../forge.py) `jeff-convert`, `jeff-smoke`, `jeff-serve` | Bypasses the 27B 64 × 5120 gate **only** on these commands. `COREAI_PYTHON` names the Core AI SDK interpreter for convert, `--build` smoke, `jeff-serve` and `compile` of a `jeff-decision` build. `jeff-serve` tokenizes with `TOKENIZER_PYTHON` (the interpreter that launched `forge.py`, which has transformers) |
+| Server | [`scripts/jeff_serve.py`](../../scripts/jeff_serve.py) | `POST /v1/systemone` (and `/v1/decide`), `GET /health`, `GET /v1/models`. One loaded package, one decision at a time. Optional `prefix_cache` calls `decide(..., prefix=)` |
+| Demo | [`scripts/jeff_demo.html`](../../scripts/jeff_demo.html) | Snake (one decision per move) and a message-routing panel, served at `/` |
 
 The 27B `convert` / `serve` / `hf_release` checks are unchanged. DFlash2 is not built. `--quant int8` is per-channel INT8 on large projections only (not GPTQ/VQ).
 
@@ -274,9 +276,9 @@ A `GDN_SQ=64` rebuild moved no chunk error (layer 3 last row 0.0268 vs 0.0264). 
 
 1. **LoRA adapters.** v1.3 is a base for adapters (per-adapter LoRA, readout and temperature). Merging an adapter into the FP16 weights before `jeff-convert` is the simplest path. A shared base with runtime LoRA is not built.
 2. **ANE temperature / ECE.** The FP32 temperature is reused. Fit it on holdout rows with the compiled build.
-3. **Live-last prefix cache.** The chained runtime already carries DeltaNet / KV state between calls. Snapshotting after the fixed part (question and options) and replaying only `Latest:` is the next runtime piece.
+3. **Live-last prefix cache.** `capture_state()` / `prefill(..., prefix=)` copy and resume GDN, KV and the last hidden row. The server forwards a snapshot when `App.prefix_cache` is set. Still open: the policy that snapshots the fixed question and options and replays only `Latest:`.
 4. **Longer prompts.** Jeff trains at up to 8,192 tokens. Build `--ctx 8192` (same 256-row entry, 8,192-row KV cache) and recheck placement and parity.
-5. **Serving route.** A SystemOne-style `state` / `questions` endpoint around `JeffCoreAI.decide`.
+5. **Serving route.** Done: `forge.py jeff-serve`. On the demo's prompts (133 and 213 tokens, one 256-row call) a decision is 65 ms, about 15.5/s, and the loaded packages stay `fully_ane`. See [JEFF_SERVE.md](../JEFF_SERVE.md). The runtime method a prefix cache should call is `JeffCoreAI.prefill(token_ids, prefix=capture_state())`.
 
 The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is not used here. Its normalization multiplies `amax` back in and is scale-incorrect; the Core AI head uses `rms_hidden`. The live-last layout comes from `decision_config.json` (the external feasibility note's "state-first" was wrong for v1.3).
 

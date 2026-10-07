@@ -3,7 +3,9 @@
 Used by jeff-smoke --build on macOS after jeff-convert + forge.py compile. A prompt longer than the prefill entry
 (TP rows) runs as consecutive TP-row calls: each chunk's DeltaNet conv / recurrent state is carried, every call's
 k / v rows go into the KV caches at its position and the history mask opens up to it, as in CoreAIQwen.prefill_block.
-The readout head then runs once on the last prompt row.
+The readout head then runs once on the last prompt row. ``prefill(..., prefix=capture_state())``
+resumes from a cached live-last prefix instead of resetting; the server forwards that
+when a prefix cache is installed.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import numpy as np
 from coreai.runtime import AIModel
 
 from jeff_coreai import JeffCheckpoint, load_decision_config, load_text_config, rms_last, softmax
+from jeff_prefix import resume_at
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -75,12 +78,57 @@ class JeffCoreAI:
             ("x", (1, hid, 1, TP)), ("xb", (1, hid, 1, TP)), ("hx", (1, hid, 1, 1)))}
         self.mask = buffer((1, self.L))
         self.pos = 0
+        self._token_ids: list[int] = []
+        self._last_hidden: np.ndarray | None = None
 
     def reset(self):
         for ch in self.chunks:
             for _, w in ch["state"].values():
                 w[:] = 0
         self.pos = 0
+        self._token_ids = []
+        self._last_hidden = None
+
+    def capture_state(self) -> dict:
+        """Copy position, token ids, last hidden row, GDN/conv state and KV.
+
+        A live-last prefix cache keeps this dict and passes it back as ``prefix``
+        to prefill or decide. Copies are independent of the live buffers. The cache
+        policy (what prefix to keep, when to reuse it) is not implemented here.
+        """
+        if self._last_hidden is None or self.pos <= 0:
+            raise RuntimeError("capture_state() needs a completed prefill")
+        return {
+            "pos": self.pos,
+            "token_ids": list(self._token_ids),
+            "hidden": self._last_hidden.copy(),
+            "chunks": [
+                {
+                    "state": {k: v[1].copy() for k, v in ch["state"].items()},
+                    "kv": {k: v[1].copy() for k, v in ch["kv"].items()},
+                }
+                for ch in self.chunks
+            ],
+        }
+
+    def _restore(self, prefix: dict) -> None:
+        chunks = prefix.get("chunks")
+        if not isinstance(chunks, list) or len(chunks) != len(self.chunks):
+            raise ValueError(f"prefix has {len(chunks) if isinstance(chunks, list) else 'no'} chunks; "
+                             f"this build has {len(self.chunks)}")
+        for ch, saved in zip(self.chunks, chunks):
+            state, kv = saved.get("state"), saved.get("kv")
+            if not isinstance(state, dict) or not isinstance(kv, dict):
+                raise ValueError("each prefix chunk needs state and kv dicts")
+            if set(state) != set(ch["state"]) or set(kv) != set(ch["kv"]):
+                raise ValueError("prefix state names do not match this build")
+            for k, arr in state.items():
+                ch["state"][k][1][:] = arr
+            for k, arr in kv.items():
+                ch["kv"][k][1][:] = arr
+        self.pos = int(prefix["pos"])
+        hidden = prefix.get("hidden")
+        self._last_hidden = None if hidden is None else np.asarray(hidden).reshape(self.pin["hx"][1].shape)
 
     def _block(self, ids, keep=None) -> np.ndarray:
         """Up to TP prompt tokens at self.pos, all committed. Returns the last row's hidden state (1, hid, 1, 1).
@@ -124,33 +172,53 @@ class JeffCoreAI:
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
 
-    def prefill(self, token_ids: list[int], keep_chunks: bool = False) -> dict:
-        """The whole prompt from position 0; returns readout logits (ANE head), the last hidden state and timings.
-        keep_chunks: also every chunk's output for every prompt row ("chunks": [(n, hid) fp16] per chunk)."""
+    def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None) -> dict:
+        """Readout logits (ANE head), the last hidden state and timings.
+
+        prefix=None resets and prefills every token (one independent decision).
+        prefix= a capture_state() dict resumes GDN/KV at prefix["pos"] and prefills
+        only the suffix. A prefix that already covers the prompt runs the readout
+        on the cached hidden row and does not call the backbone. keep_chunks records
+        fresh rows only, and needs at least one.
+        """
         ids = [int(t) for t in token_ids]
         if not ids:
             raise ValueError("token_ids must be non-empty")
-        self.reset()
+        start = resume_at(prefix, ids)
+        if prefix is None:
+            self.reset()
+            last = None
+        else:
+            self._restore(prefix)
+            last = self._last_hidden
+        self._token_ids = ids
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
         calls = []
-        for i in range(0, len(ids), self.TP):
+        for i in range(start, len(ids), self.TP):
             t1 = time.perf_counter()
             last = self._block(ids[i:i + self.TP], keep)
             calls.append(1e3 * (time.perf_counter() - t1))
+        if last is None:
+            raise ValueError("prefix covers the prompt but has no hidden state")
+        self._last_hidden = last
         t1 = time.perf_counter()
         self.pin["hx"][1][:] = last
         out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.pin["hx"][0]}))
         head_ms = 1e3 * (time.perf_counter() - t1)
         logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
         r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
-             "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0)}
+             "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0),
+             "prefix_tokens": start}
         if keep is not None:
+            if any(not rows for rows in keep):
+                raise ValueError("keep_chunks needs at least one fresh prefill row")
             r["chunks"] = [np.concatenate(rows, 0) for rows in keep]
         return r
 
-    def decide(self, token_ids: list[int], n_options: int, temperature: float | None = None) -> dict:
-        r = self.prefill(token_ids)
+    def decide(self, token_ids: list[int], n_options: int, temperature: float | None = None,
+               prefix: dict | None = None) -> dict:
+        r = self.prefill(token_ids, prefix=prefix)
         temp = float(self.decision["temperature"] if temperature is None else temperature)
         probs = softmax(r["logits"][:n_options] / temp)
         # the same readout applied on the host to the ANE hidden state: isolates head error from backbone error
@@ -168,5 +236,6 @@ class JeffCoreAI:
             "calls_ms": [round(t, 2) for t in r["calls_ms"]],
             "head_ms": round(r["head_ms"], 2),
             "prefill_ms": round(r["total_ms"], 2),
+            "prefix_tokens": int(r["prefix_tokens"]),
             "backend": f"coreai-ane {self.entry}",
         }

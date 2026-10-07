@@ -61,6 +61,12 @@ def parser():
     js.add_argument("--bench", type=int, default=0, help="extra timed Core AI prefills per case")
     js.add_argument("--out", type=path, help="results JSON")
     js.add_argument("--dry-run", action="store_true")
+    jv = sub.add_parser("jeff-serve", help="local Jeff decision server (POST /v1/systemone) plus the browser demo")
+    jv.add_argument("--model", type=path, required=True, help="local Jeff checkpoint directory")
+    jv.add_argument("--build", type=path, required=True, help="coreai/ directory from jeff-convert")
+    jv.add_argument("--host", default="127.0.0.1")
+    jv.add_argument("--port", type=int, default=8787)
+    jv.add_argument("--dry-run", action="store_true")
     for name in ("quantize", "convert", "chat", "serve"):
         q = sub.add_parser(name)
         q.add_argument("--model", type=path, required=True, help="original checkpoint directory")
@@ -117,7 +123,7 @@ def prepare_jeff(a):
         raise ValueError(f"Missing checkpoint config: {a.model / 'config.json'}")
     cfg = _text_config(a.model)
     if not _is_hybrid(cfg):
-        raise ValueError("jeff-convert / jeff-smoke expect a Qwen3.5 hybrid text config "
+        raise ValueError("jeff-convert / jeff-smoke / jeff-serve expect a Qwen3.5 hybrid text config "
                          "(layer_types with linear_attention and full_attention).")
     env = {"MODEL": str(a.model)}
     published_embedding = a.model / "embed_tokens_fp16.npy"
@@ -137,6 +143,12 @@ def prepare_jeff(a):
             args.append("--dry-run")
         python = sys.executable if a.dry_run else coreai_python()
         return [python, str(ROOT / "scripts" / "jeff_coreai_convert.py"), *args], env
+    if a.command == "jeff-serve":
+        args = ["--model", str(a.model), "--build", str(a.build), "--host", a.host, "--port", str(a.port)]
+        # The HTTP process is the Core AI interpreter (it loads the ANE packages). Tokenizing the Jeff
+        # chat template needs transformers, which lives in the interpreter that launched forge.py.
+        return [coreai_python(), str(ROOT / "scripts" / "jeff_serve.py"), *args], {
+            **env, "TOKENIZER_PYTHON": sys.executable}
     args = ["--model", str(a.model), "--state", a.state, "--options", a.options,
             "--instructions", a.instructions]
     for flag, value in (("--build", a.build), ("--ids", a.ids), ("--n-options", a.n_options), ("--cases", a.cases),
@@ -164,7 +176,7 @@ def is_jeff_build(build: Path) -> bool:
 
 def prepare(a):
     """Return argv and env overrides without importing ML packages or writing files."""
-    if a.command in ("jeff-convert", "jeff-smoke"):
+    if a.command in ("jeff-convert", "jeff-smoke", "jeff-serve"):
         return prepare_jeff(a)
     if not (a.model / "config.json").is_file():
         raise ValueError(f"Missing checkpoint config: {a.model / 'config.json'}")

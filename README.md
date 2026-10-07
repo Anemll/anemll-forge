@@ -252,6 +252,20 @@ For Droid, see the [ANE Qwen reasoning configuration example](docs/DROID_CODING.
 
 The quantized export behind the published packages is on Hugging Face: **[anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI)** (18 GB). It holds the quantized `mix25in_mixr_lr64mix` layers and LM head and the quantized DFlash2 drafter, plus the small BF16 tensors, configuration and tokenizer the converter also reads, so a rebuild of the target and the drafter needs neither original checkpoint (52 GB and 3.6 GB). The drafter derives from [ProCreations/Ternary-Bonsai-2-27B-DFlash2](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2); that repository's card credits it and its upstream donors. Its [EXPORT.md](release/huggingface-export/EXPORT.md) gives the conversion environment (`requirements-conversion.txt`), the export command for the published packages and variants, and a check that the converter receives the published weights exactly (`scripts/qwen38_weights_digest.py`, `--drafter` for the drafter). `scripts/qwen38_small_checkpoint.py` extracts those small tensors from an original checkpoint.
 
+## Jeff decision server
+
+Jeff (`jeff-base` v1.3) is a separate, prefill-only decision model. It does not use the 27B server above. One command loads the compiled Core AI package and serves Jeff's decision API plus a browser demo (snake, and a routing panel):
+
+```sh
+export COREAI_PYTHON=/path/to/coreai-sdk/bin/python   # interpreter with coreai.runtime
+python forge.py jeff-serve \
+  --model "$HOME/Models/jeff/jeff-base-v1.3" \
+  --build "$HOME/Models/jeff-coreai/coreai" \
+  --host 127.0.0.1 --port 8787
+```
+
+Open http://127.0.0.1:8787/. The request shape is Jeff's `POST /v1/systemone`. Details, the prefix-cache hook, and measured latency are in [docs/JEFF_SERVE.md](docs/JEFF_SERVE.md). The 27B `serve` command still requires 64 layers and hidden size 5120.
+
 ## Research, evaluation, and limitations
 
 The repository includes mixed-bit GPTQ, scalar/vector LUT quantization, per-channel scaling, online rotations, low-rank corrections, calibration and KL evaluation, Core ML/Core AI conversion, and the speculative runtime. It also preserves failed experiments and compiler/ANE findings from the original research, with source provenance recorded in [docs/provenance.json](docs/provenance.json).
@@ -268,6 +282,7 @@ KL divergence is the current distributional-fidelity evaluation; it does not est
 - [Session lessons and troubleshooting](docs/SESSION_LESSONS.md)
 - [Quality benchmark plan](docs/BENCHMARK_PLAN.md)
 - [Serving-session performance analysis](docs/PERFORMANCE_SESSION.md)
+- [Jeff decision server and demo](docs/JEFF_SERVE.md) and [Jeff on the ANE](docs/research/JEFF_DECISION_ANE.md)
 - [Experiment guide](docs/EXPERIMENTS.md) and [M3U pipeline archive](pipelines/m3u/README.md)
 - [Release checklist](docs/RELEASE.md) and [validation records](docs/VALIDATION.md)
 
