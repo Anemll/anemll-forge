@@ -8,6 +8,70 @@ including the closing instruction and the generation-prompt tail, which sit afte
 from __future__ import annotations
 
 LIVE_MARK = "\n\nLatest:\n"
+# Qwen tokenization of LIVE_MARK inside a Jeff live-last prompt (verified on jeff-base v1.3). Recompute with
+# live_mark_ids(tokenizer) if the tokenizer changes. Absent or ambiguous in a prompt: do not insert a cut.
+QWEN_LATEST_MARK = (271, 30938, 25, 198)
+
+
+def live_mark_ids(tokenizer) -> tuple[int, ...]:
+    return tuple(int(t) for t in tokenizer(LIVE_MARK, add_special_tokens=False)["input_ids"])
+
+
+def mark_cut(token_ids, mark) -> int | None:
+    """Index just after the only copy of ``mark`` in ``token_ids``, or None when it is missing or repeated."""
+    needle = tuple(int(t) for t in mark)
+    if not needle:
+        return None
+    ids = tuple(int(t) for t in token_ids)
+    hits = [i for i in range(len(ids) - len(needle) + 1) if ids[i:i + len(needle)] == needle]
+    if len(hits) != 1:
+        return None
+    return hits[0] + len(needle)
+
+
+def plan_with_cuts(n: int, width: int, cuts) -> list[tuple[int, int]]:
+    """``(width, count)`` calls covering ``n`` tokens, splitting early at each cut so that position is committed."""
+    if n <= 0 or width <= 0:
+        raise ValueError("length and width must be positive")
+    points = sorted({int(c) for c in cuts if 0 < int(c) < n})
+    plan, pos = [], 0
+    while pos < n:
+        end = min(pos + width, n)
+        inner = [c for c in points if pos < c < end]
+        if inner:
+            end = inner[0]
+        plan.append((width, end - pos))
+        pos = end
+    return plan
+
+
+class PrefixCache:
+    """``lookup(token_ids)`` / ``store(token_ids, snapshot)`` for the Jeff server.
+
+    The longest cached token-id prefix wins. An exact prompt hit (the same decision again) is returned as-is.
+    Snapshots are the dicts ``JeffCoreAI.capture_state`` returns; this object does not copy them.
+    """
+
+    def __init__(self, snaps: dict | None = None):
+        self.snaps = snaps if snaps is not None else {}
+
+    def lookup(self, token_ids):
+        ids = tuple(int(t) for t in token_ids)
+        if ids in self.snaps:
+            return self.snaps[ids]
+        best = longest_snapshot(ids, self.snaps)
+        return None if best is None else self.snaps[best]
+
+    def store(self, token_ids, snapshot: dict):
+        pos = snapshot.get("pos")
+        if isinstance(pos, bool) or not isinstance(pos, int) or pos <= 0:
+            raise ValueError("snapshot pos must be a positive int")
+        raw = snapshot.get("token_ids", token_ids)
+        key = tuple(int(t) for t in list(raw)[:pos])
+        if len(key) != pos or tuple(int(t) for t in token_ids[:pos]) != key:
+            raise ValueError("snapshot tokens are not a prefix of token_ids")
+        self.snaps[key] = snapshot
+        return snapshot
 
 
 class PrefixHandle:

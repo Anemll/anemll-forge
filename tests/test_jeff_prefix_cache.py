@@ -9,8 +9,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "coreai"))
 
 from jeff_coreai import JEFF_DEFAULT, load_decision_config, prompt_ids, split_live_last  # noqa: E402
-from jeff_prefix_cache import (longest_snapshot, prefill_plan, snake_row, tetris_row,  # noqa: E402
-                               token_cut)
+from jeff_prefix_cache import (PrefixCache, QWEN_LATEST_MARK, longest_snapshot, mark_cut,  # noqa: E402
+                               plan_with_cuts, prefill_plan, snake_row, tetris_row, token_cut)
 
 JEFF_SRC_TOK = Path(os.environ.get("JEFF_MODEL", str(JEFF_DEFAULT)))
 
@@ -38,6 +38,24 @@ class CutTests(unittest.TestCase):
         self.assertEqual(prefill_plan(41, [32, 64, 256], {32: 40, 64: 70, 256: 63}), [(256, 41)])
         with self.assertRaises(ValueError):
             prefill_plan(0, [64])
+
+    def test_mark_cut_and_plan(self):
+        ids = [0, 1, *QWEN_LATEST_MARK, 9]
+        self.assertEqual(mark_cut(ids, QWEN_LATEST_MARK), 2 + len(QWEN_LATEST_MARK))
+        self.assertIsNone(mark_cut(ids + list(QWEN_LATEST_MARK), QWEN_LATEST_MARK))
+        self.assertEqual(plan_with_cuts(2018, 256, [1977]),
+                         [(256, 256)] * 7 + [(256, 185), (256, 41)])
+        self.assertEqual(plan_with_cuts(40, 256, []), [(256, 40)])
+
+    def test_prefix_cache_lookup_is_longest_exact_prefix(self):
+        cache = PrefixCache()
+        cache.store([1, 2, 3, 4], {"pos": 2, "token_ids": [1, 2]})
+        cache.store([1, 2, 3, 9], {"pos": 4, "token_ids": [1, 2, 3, 9], "hidden": [0.0]})
+        self.assertEqual(cache.lookup([1, 2, 3, 4])["pos"], 2)
+        self.assertEqual(cache.lookup([1, 2, 3, 9])["pos"], 4)
+        self.assertIsNone(cache.lookup([9, 9]))
+        with self.assertRaises(ValueError):
+            cache.store([1, 2, 3], {"pos": 2, "token_ids": [8, 8]})
 
 
 class LiveLastSplitTests(unittest.TestCase):

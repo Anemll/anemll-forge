@@ -283,7 +283,9 @@ A `GDN_SQ=64` rebuild moved no chunk error (layer 3 last row 0.0268 vs 0.0264). 
 
 `JeffCoreAI.prepare_prefix(token_ids, n_options=)` runs that prefix (reusing the longest cached strict prefix, which is a previous chunk boundary or prefix end) and stores, per layer, the GDN conv / recurrent / pending state, the attention KV rows `[0, pos)` and the position. The key is the prefix token ids. `JeffCoreAI.decide(handle, suffix_ids)` restores that snapshot and prefills only the suffix: the last field, the closing instruction and the generation-prompt tail. A cold `decide(token_ids, n_options)` is unchanged.
 
-`split_live_last` returns `prefix` and `suffix` whose concatenation is `prompt_ids`. On the Qwen tokenizer the cut after `Latest:\n` is a token boundary, so two decisions that differ only in the last field share the prefix ids exactly.
+`split_live_last` returns `prefix` and `suffix` whose concatenation is `prompt_ids`. On the Qwen tokenizer the cut after `Latest:\n` is a token boundary (`271, 30938, 25, 198`), so two decisions that differ only in the last field share the prefix ids exactly.
+
+The Jeff server's hook is the same store: `runtime.prefix_cache.lookup(token_ids)` returns the longest snapshot whose token ids are a prefix of the prompt, and `decide(token_ids, n_options, prefix=snapshot)` resumes there. `enable_prefix_cache(live_mark)` records every committed call, and splits a cold prefill at that `Latest:` mark so the next decision restores the shared prefix rather than a 256-token boundary. `capture_state()` is what `store` keeps.
 
 ```python
 split = split_live_last(model, row)          # prefix, suffix, ids

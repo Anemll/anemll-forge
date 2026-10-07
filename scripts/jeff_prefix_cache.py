@@ -181,11 +181,17 @@ def run(a) -> int:
         for case in members:
             cold = runtime.decide(case["ids"], case["n_options"])
             handle = runtime.prepare_prefix(prefix, n_options=case["n_options"])
+            via = runtime.prefix_cache.lookup(case["ids"])
+            if via is None or int(via["pos"]) != len(prefix):
+                raise SystemExit(f"{case['name']}: lookup resumed at {None if via is None else via['pos']}, "
+                                 f"prefix is {len(prefix)}")
+            resumed = runtime.decide(case["ids"], case["n_options"], prefix=via)
             warm = [runtime.decide(handle, case["suffix"]) for _ in range(1 + a.bench)]
             cached = warm[-1]
             ref = (case.get("hf_fp32") or {}).get("probabilities")
             bench_runs = warm[1:] or warm
             same = _compare(_probs(warm[0]), _probs(cached))
+            resumed_vs = _compare(_probs(cold), _probs(resumed))
             row = {
                 "name": case["name"], "group": group, "tokens": case["tokens"],
                 "prefix_tokens": case["prefix_tokens"], "suffix_tokens": case["suffix_tokens"],
@@ -195,11 +201,12 @@ def run(a) -> int:
                            "restore_ms": cached["restore_ms"], "suffix_ms": cached["suffix_ms"],
                            "head_ms": cached["head_ms"], "total_ms": cached["total_ms"]},
                 "vs_nocache": _compare(_probs(cold), _probs(cached)),
+                "lookup_vs_nocache": resumed_vs,
                 "repeat_match": same,
                 "vs_hf": _compare(ref, _probs(cached)),
                 "nocache_vs_hf": _compare(ref, _probs(cold)),
             }
-            worst = max(worst, row["vs_nocache"]["max_abs_dp"], same["max_abs_dp"])
+            worst = max(worst, row["vs_nocache"]["max_abs_dp"], resumed_vs["max_abs_dp"], same["max_abs_dp"])
             if a.bench:
                 row["bench"] = {
                     "n": a.bench,

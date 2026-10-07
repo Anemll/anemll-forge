@@ -22,7 +22,7 @@ import numpy as np
 from coreai.runtime import AIModel
 
 from jeff_coreai import JeffCheckpoint, load_decision_config, load_text_config, rms_last, softmax
-from jeff_prefix_cache import PrefixHandle, longest_snapshot, prefill_plan
+from jeff_prefix_cache import PrefixCache, PrefixHandle, longest_snapshot, mark_cut, plan_with_cuts, prefill_plan
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -88,6 +88,11 @@ class JeffCoreAI:
         self.entry = f"p{self.TP}_{self.ctx // 1024}k"
         self.prefill_cost: dict[int, float] | None = None
         self._snaps: dict[tuple[int, ...], dict] = {}
+        self.prefix_cache = PrefixCache(self._snaps)
+        self.record_prefixes = False
+        self.live_mark_ids: tuple[int, ...] | None = None
+        self._token_ids: list[int] = []
+        self._last_hidden: np.ndarray | None = None
         head = self.man["head"]
         self.head_pkg, hf = self.loop.run_until_complete(load(head["file"], [head.get("entry", "h1")]))
         self.head_fn = hf[head.get("entry", "h1")]
@@ -107,9 +112,19 @@ class JeffCoreAI:
             for _, w in ch["state"].values():
                 w[:] = 0
         self.pos = 0
+        self._token_ids = []
+        self._last_hidden = None
 
     def clear_prefixes(self):
         self._snaps.clear()
+
+    def enable_prefix_cache(self, live_mark=None) -> PrefixCache:
+        """Record a snapshot at every committed prefill call so ``prefix_cache.lookup`` can resume a later prompt.
+        ``live_mark`` (token ids of ``\\n\\nLatest:\\n``) also commits exactly at that cut."""
+        self.record_prefixes = True
+        if live_mark is not None:
+            self.live_mark_ids = tuple(int(t) for t in live_mark)
+        return self.prefix_cache
 
     def set_prefill_costs(self, call_ms: dict[int, float]):
         """Milliseconds for one call of each prefill width (a partial call costs the same). Used to plan suffixes."""
@@ -137,30 +152,64 @@ class JeffCoreAI:
         self.log("prefill call ms: " + ", ".join(f"p{w} {costs[w]:.1f}" for w in self.widths))
         return costs
 
-    def _snapshot(self, token_ids: tuple[int, ...]):
-        """Copy GDN conv / recurrent / pending state, attention KV rows ``[0, pos)`` and the position.
-        The key is the exact committed token ids: GDN state cannot be rewound to any other cut."""
-        if self.pos != len(token_ids) or self.pos <= 0:
-            raise RuntimeError(f"snapshot position {self.pos} does not match {len(token_ids)} tokens")
-        self._snaps[tuple(token_ids)] = {
+    def _snapshot(self, token_ids, hidden) -> dict:
+        """Copy GDN conv / recurrent / pending state, attention KV rows ``[0, pos)``, the last hidden row and
+        the position. The key is the exact committed token ids: GDN state cannot be rewound to any other cut."""
+        ids = tuple(int(t) for t in token_ids)
+        if self.pos != len(ids) or self.pos <= 0:
+            raise RuntimeError(f"snapshot position {self.pos} does not match {len(ids)} tokens")
+        snap = {
             "pos": self.pos,
-            "states": [{name: arr.copy() for name, (_, arr) in ch["state"].items()} for ch in self.chunks],
-            "kv": [{name: arr[:, :self.pos].copy() for name, (_, arr) in ch["kv"].items()} for ch in self.chunks],
+            "token_ids": list(ids),
+            "hidden": np.asarray(hidden).copy(),
+            "chunks": [
+                {
+                    "state": {name: arr.copy() for name, (_, arr) in ch["state"].items()},
+                    "kv": {name: arr[:, :self.pos].copy() for name, (_, arr) in ch["kv"].items()},
+                }
+                for ch in self.chunks
+            ],
         }
+        self._snaps[ids] = snap
+        self._last_hidden = snap["hidden"]
+        self._token_ids = list(ids)
+        return snap
 
-    def _restore(self, token_ids: tuple[int, ...]):
-        snap = self._snaps.get(tuple(token_ids))
+    def capture_state(self) -> dict:
+        """The live recurrent state, for ``prefix_cache.store`` after a decision."""
+        if self._last_hidden is None or self.pos <= 0 or len(self._token_ids) != self.pos:
+            raise RuntimeError("capture_state() needs a completed prefill")
+        return self._snapshot(self._token_ids, self._last_hidden)
+
+    def _restore(self, prefix):
+        snap = prefix if isinstance(prefix, dict) else self._snaps.get(tuple(prefix))
         if snap is None:
-            raise KeyError(f"no prefix snapshot for {len(token_ids)} tokens")
-        pos = snap["pos"]
-        if pos != len(token_ids) or pos > self.L:
-            raise RuntimeError(f"snapshot at {pos} does not fit this {self.L}-row cache")
-        for ch, states, kv in zip(self.chunks, snap["states"], snap["kv"]):
-            for name, saved in states.items():
-                ch["state"][name][1][:] = saved
-            for name, saved in kv.items():
-                ch["kv"][name][1][:, :pos] = saved
+            raise KeyError(f"no prefix snapshot for {len(prefix) if not isinstance(prefix, dict) else '?'} tokens")
+        pos = int(snap["pos"])
+        chunks = snap.get("chunks")
+        if pos <= 0 or pos > self.L or not isinstance(chunks, list) or len(chunks) != len(self.chunks):
+            raise ValueError(f"prefix at {pos} does not fit this {len(self.chunks)}-chunk, {self.L}-row cache")
+        for ch, saved in zip(self.chunks, chunks):
+            state, kv = saved.get("state"), saved.get("kv")
+            if not isinstance(state, dict) or not isinstance(kv, dict):
+                raise ValueError("each prefix chunk needs state and kv dicts")
+            if set(state) != set(ch["state"]) or set(kv) != set(ch["kv"]):
+                raise ValueError("prefix state names do not match this build")
+            for name, saved_state in state.items():
+                ch["state"][name][1][:] = saved_state
+            for name, saved_kv in kv.items():
+                buf = ch["kv"][name][1]
+                if saved_kv.shape == buf.shape:
+                    buf[:] = saved_kv
+                elif saved_kv.ndim == buf.ndim and saved_kv.shape[1] == pos:
+                    buf[:, :pos] = saved_kv
+                else:
+                    raise ValueError(f"prefix KV {name} has shape {saved_kv.shape}, cache is {buf.shape}")
         self.pos = pos
+        hidden = snap.get("hidden")
+        self._last_hidden = None if hidden is None else np.asarray(hidden).copy()
+        cached = snap.get("token_ids")
+        self._token_ids = [] if cached is None else [int(t) for t in cached]
 
     def _block(self, ids, width: int, keep=None) -> np.ndarray:
         """Up to ``width`` prompt tokens at self.pos, all committed. Returns the last row's hidden state.
@@ -205,17 +254,33 @@ class JeffCoreAI:
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
 
-    def _run(self, ids, plan, keep=None):
-        """Run ``plan`` (entry width, token count) over ``ids``. Returns the last hidden state and per-call timings."""
+    def _run(self, ids, plan, keep=None, snapshot_from=None):
+        """Run ``plan`` (entry width, token count) over ``ids``. Returns the last hidden state and per-call timings.
+        ``snapshot_from`` is the token ids already committed at ``self.pos``; each call is then snapshotted."""
         if sum(count for _, count in plan) != len(ids):
             raise RuntimeError(f"prefill plan covers {sum(c for _, c in plan)} tokens, prompt has {len(ids)}")
+        prior = tuple(snapshot_from) if snapshot_from is not None else None
+        if prior is not None and len(prior) != self.pos:
+            raise RuntimeError(f"snapshot base is {len(prior)} tokens, position is {self.pos}")
         last, calls, off = None, [], 0
         for width, count in plan:
             t1 = time.perf_counter()
             last = self._block(ids[off:off + count], width, keep)
             calls.append({"width": width, "tokens": count, "ms": 1e3 * (time.perf_counter() - t1)})
             off += count
+            if prior is not None:
+                prior = prior + tuple(int(t) for t in ids[off - count:off])
+                self._snapshot(prior, last)
         return last, calls
+
+    def _cold_plan(self, ids, start: int):
+        """Largest-entry chunks of ``ids[start:]``. With a live-last mark and recording on, also commit at that cut."""
+        rest = len(ids) - start
+        if self.record_prefixes and self.live_mark_ids:
+            cut = mark_cut(ids, self.live_mark_ids)
+            cuts = [cut - start] if cut is not None and cut > start else []
+            return plan_with_cuts(rest, self.TP, cuts)
+        return prefill_plan(rest, [self.TP])
 
     def _readout(self, last) -> tuple[np.ndarray, float]:
         t1 = time.perf_counter()
@@ -224,21 +289,47 @@ class JeffCoreAI:
         logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
         return logits, 1e3 * (time.perf_counter() - t1)
 
-    def prefill(self, token_ids: list[int], keep_chunks: bool = False) -> dict:
-        """The whole prompt from position 0; returns readout logits (ANE head), the last hidden state and timings.
-        keep_chunks: also every chunk's output for every prompt row ("chunks": [(n, hid) fp16] per chunk).
-        Always chunks on the largest prefill entry (the fast path for a long cold prompt)."""
+    def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None) -> dict:
+        """Readout logits (ANE head), the last hidden state and timings.
+
+        prefix=None resets and prefills every token on the largest entry (the cold path).
+        prefix= a capture_state() dict resumes GDN/KV at prefix["pos"] and prefills only the rest.
+        A prefix that already covers the prompt runs the readout on the cached hidden row.
+        keep_chunks: also every fresh chunk output ("chunks": [(n, hid) fp16] per chunk).
+        """
         ids = [int(t) for t in token_ids]
         if not ids:
             raise ValueError("token_ids must be non-empty")
-        self.reset()
+        if prefix is None:
+            self.reset()
+            start, last = 0, None
+        else:
+            cached = prefix.get("token_ids")
+            if cached is not None and [int(t) for t in cached] != ids[:int(prefix["pos"])]:
+                raise ValueError("cached prefix tokens do not match this prompt")
+            self._restore(prefix)
+            start = self.pos
+            if start > len(ids):
+                raise ValueError(f"prefix pos {start} is past the {len(ids)}-token prompt")
+            last = self._last_hidden
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
-        last, calls = self._run(ids, prefill_plan(len(ids), [self.TP]), keep)
+        if start == len(ids):
+            if last is None:
+                raise ValueError("prefix covers the prompt but has no hidden state")
+            calls = []
+        else:
+            base = tuple(ids[:start]) if self.record_prefixes else None
+            last, calls = self._run(ids[start:], self._cold_plan(ids, start), keep, snapshot_from=base)
+        if keep is not None and any(not rows for rows in keep):
+            raise ValueError("keep_chunks needs at least one fresh prefill row")
+        self._token_ids = list(ids)
+        self._last_hidden = last
         logits, head_ms = self._readout(last)
         r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32),
              "calls_ms": [c["ms"] for c in calls], "calls": calls,
-             "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0)}
+             "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0),
+             "prefix_tokens": start}
         if keep is not None:
             r["chunks"] = [np.concatenate(rows, 0) for rows in keep]
         return r
@@ -267,11 +358,11 @@ class JeffCoreAI:
             fed = reused
             while fed < len(ids):
                 count = min(self.TP, len(ids) - fed)
-                self._block(list(ids[fed:fed + count]), self.TP)
+                hidden = self._block(list(ids[fed:fed + count]), self.TP)
                 fed += count
                 if self.pos != fed:
                     raise RuntimeError(f"prefill position {self.pos} != {fed} committed prefix tokens")
-                self._snapshot(ids[:fed])
+                self._snapshot(ids[:fed], hidden)
         return PrefixHandle(ids, n_options=n_options, temperature=temperature, reused_tokens=reused,
                             prefilled_tokens=len(ids) - reused, prepare_ms=1e3 * (time.perf_counter() - t0))
 
@@ -284,6 +375,7 @@ class JeffCoreAI:
         best = int(np.argmax(probs))
         out = {
             "probabilities": {codes[i]: float(probs[i]) for i in range(n_options)},
+            "option_probabilities": [float(probs[i]) for i in range(n_options)],
             "answer": codes[best],
             "confidence": float(probs[best]),
             "host_head_probabilities": softmax(host_logits / temp).tolist(),
@@ -299,18 +391,21 @@ class JeffCoreAI:
             out.update(extra)
         return out
 
-    def decide(self, prompt, n_options=None, temperature: float | None = None) -> dict:
+    def decide(self, prompt, n_options=None, temperature: float | None = None, prefix: dict | None = None) -> dict:
         """Full prompt: ``decide(token_ids, n_options)``. Cached: ``decide(handle, suffix_ids)`` after
-        ``prepare_prefix``. The suffix is the live field plus the generation-prompt tail."""
+        ``prepare_prefix``. Server: ``decide(token_ids, n_options, prefix=capture)`` resumes a lookup hit.
+        The suffix is the live field plus the generation-prompt tail."""
         if isinstance(prompt, PrefixHandle):
+            if prefix is not None:
+                raise TypeError("decide(handle, suffix) does not take a prefix snapshot")
             if isinstance(n_options, (str, bytes)) or not isinstance(n_options, (list, tuple)):
                 raise TypeError("decide(handle, suffix) expects the live suffix token ids")
             return self._decide_cached(prompt, n_options, temperature)
         if n_options is None:
             raise TypeError("decide(token_ids, n_options) needs n_options")
-        r = self.prefill(prompt)
+        r = self.prefill(prompt, prefix=prefix)
         return self._pack(r["logits"], r["hidden"], int(n_options), temperature, len(prompt), r["calls"],
-                          r["head_ms"], r["total_ms"])
+                          r["head_ms"], r["total_ms"], {"prefix_tokens": int(r["prefix_tokens"])})
 
     def _decide_cached(self, handle: PrefixHandle, suffix, temperature: float | None) -> dict:
         suffix = [int(t) for t in suffix]
@@ -330,6 +425,8 @@ class JeffCoreAI:
         t1 = time.perf_counter()
         last, calls = self._run(suffix, plan)
         suffix_ms = 1e3 * (time.perf_counter() - t1)
+        self._token_ids = list(handle.token_ids) + suffix
+        self._last_hidden = last
         logits, head_ms = self._readout(last)
         total_ms = 1e3 * (time.perf_counter() - t0)
         temp = handle.temperature if temperature is None else temperature
