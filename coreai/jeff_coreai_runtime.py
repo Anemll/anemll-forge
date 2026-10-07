@@ -82,8 +82,9 @@ class JeffCoreAI:
                 w[:] = 0
         self.pos = 0
 
-    def _block(self, ids) -> np.ndarray:
-        """Up to TP prompt tokens at self.pos, all committed. Returns the last row's hidden state (1, hid, 1, 1)."""
+    def _block(self, ids, keep=None) -> np.ndarray:
+        """Up to TP prompt tokens at self.pos, all committed. Returns the last row's hidden state (1, hid, 1, 1).
+        keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
         d, TP, n, p0 = self.pin, self.TP, len(ids), self.pos
         if not 0 < n <= TP or p0 + n > self.L:
             raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {self.entry}")
@@ -107,7 +108,7 @@ class JeffCoreAI:
 
         async def run():
             x = d["x"][0]
-            for ch in self.chunks:
+            for ci, ch in enumerate(self.chunks):
                 ins = {**shared, "x": x, **{k: v[0] for k, v in ch["state"].items()},
                        **{k: v[0] for k, v in ch["kv"].items()}}
                 out = await ch["fns"][self.entry](inputs=ins)
@@ -117,29 +118,36 @@ class JeffCoreAI:
                     put_rows(w, out[f"{k}_new"].numpy()[:, :n], p0, n)
                 d["xb"][1][:] = writable(out["y"])
                 x = d["xb"][0]
+                if keep is not None:
+                    keep[ci].append(d["xb"][1][0, :, 0, :n].T.copy())
         self.loop.run_until_complete(run())
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
 
-    def prefill(self, token_ids: list[int]) -> dict:
-        """The whole prompt from position 0; returns readout logits (ANE head), the last hidden state and timings."""
+    def prefill(self, token_ids: list[int], keep_chunks: bool = False) -> dict:
+        """The whole prompt from position 0; returns readout logits (ANE head), the last hidden state and timings.
+        keep_chunks: also every chunk's output for every prompt row ("chunks": [(n, hid) fp16] per chunk)."""
         ids = [int(t) for t in token_ids]
         if not ids:
             raise ValueError("token_ids must be non-empty")
         self.reset()
+        keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
         calls = []
         for i in range(0, len(ids), self.TP):
             t1 = time.perf_counter()
-            last = self._block(ids[i:i + self.TP])
+            last = self._block(ids[i:i + self.TP], keep)
             calls.append(1e3 * (time.perf_counter() - t1))
         t1 = time.perf_counter()
         self.pin["hx"][1][:] = last
         out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.pin["hx"][0]}))
         head_ms = 1e3 * (time.perf_counter() - t1)
         logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
-        return {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
-                "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0)}
+        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
+             "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0)}
+        if keep is not None:
+            r["chunks"] = [np.concatenate(rows, 0) for rows in keep]
+        return r
 
     def decide(self, token_ids: list[int], n_options: int, temperature: float | None = None) -> dict:
         r = self.prefill(token_ids)

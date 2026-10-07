@@ -44,6 +44,8 @@ def parser():
     p.add_argument("--host", action="store_true", help="also run the host DecodeLayer reference")
     p.add_argument("--bench", type=int, default=0, help="time this many extra Core AI prefills per case")
     p.add_argument("--out", type=Path, help="write the results JSON here")
+    p.add_argument("--dump", type=Path, help="write every chunk's Core AI output rows to <dir>/<case>.npz "
+                                             "(jeff_reference.py --chunk-dump compares them per layer)")
     return p
 
 
@@ -112,9 +114,16 @@ def main(argv=None) -> int:
                                                "backend")}
             res["coreai"].update(compare(ref, probs))
             res["coreai"]["host_head"] = compare(ref, c["host_head_probabilities"])
-            if case.get("hf_fp32", {}).get("hidden_normed") is not None:
-                normed = rms_last(runner.prefill(ids)["hidden"], runner.norm, runner.eps)
-                res["coreai"]["hidden_cos_vs_hf"] = cosine(normed, case["hf_fp32"]["hidden_normed"])
+            if case.get("hf_fp32", {}).get("hidden_normed") is not None or a.dump:
+                r = runner.prefill(ids, keep_chunks=bool(a.dump))
+                if case.get("hf_fp32", {}).get("hidden_normed") is not None:
+                    normed = rms_last(r["hidden"], runner.norm, runner.eps)
+                    res["coreai"]["hidden_cos_vs_hf"] = cosine(normed, case["hf_fp32"]["hidden_normed"])
+                if a.dump:
+                    a.dump.mkdir(parents=True, exist_ok=True)
+                    np.savez(a.dump / f"{case['name']}.npz", ids=np.asarray(ids),
+                             layers=np.asarray([ch["layers"][1] for ch in runner.chunks]),
+                             **{f"chunk{k}": y for k, y in enumerate(r["chunks"])})
             if a.bench:
                 runs = [runner.prefill(ids) for _ in range(a.bench)]
                 res["coreai"]["bench"] = {
