@@ -53,6 +53,13 @@ def parser():
     js.add_argument("--options", default="page,wait,ignore")
     js.add_argument("--instructions", default="Choose the best next action.")
     js.add_argument("--ids", help="comma-separated token ids; skips tokenizer + prompt render")
+    js.add_argument("--n-options", type=int, help="options of the --ids prompt")
+    js.add_argument("--cases", type=path, help="scripts/jeff_reference.py output (ids + FP32 reference probabilities)")
+    js.add_argument("--only", help="comma-separated case names from --cases")
+    js.add_argument("--row", type=path, help="JSON decision row {state, question}")
+    js.add_argument("--host", action="store_true", help="also run the host DecodeLayer reference")
+    js.add_argument("--bench", type=int, default=0, help="extra timed Core AI prefills per case")
+    js.add_argument("--out", type=path, help="results JSON")
     js.add_argument("--dry-run", action="store_true")
     for name in ("quantize", "convert", "chat", "serve"):
         q = sub.add_parser(name)
@@ -128,14 +135,24 @@ def prepare_jeff(a):
                 "--prefill", str(a.prefill), "--quant", a.quant, "--chunk-layers", str(a.chunk_layers)]
         if a.dry_run:
             args.append("--dry-run")
-        return [sys.executable, str(ROOT / "scripts" / "jeff_coreai_convert.py"), *args], env
+        python = sys.executable if a.dry_run else coreai_python()
+        return [python, str(ROOT / "scripts" / "jeff_coreai_convert.py"), *args], env
     args = ["--model", str(a.model), "--state", a.state, "--options", a.options,
             "--instructions", a.instructions]
-    if a.build:
-        args += ["--build", str(a.build)]
-    if a.ids:
-        args += ["--ids", a.ids]
-    return [sys.executable, str(ROOT / "scripts" / "jeff_coreai_smoke.py"), *args], env
+    for flag, value in (("--build", a.build), ("--ids", a.ids), ("--n-options", a.n_options), ("--cases", a.cases),
+                        ("--only", a.only), ("--row", a.row), ("--out", a.out)):
+        if value is not None:
+            args += [flag, str(value)]
+    args += ["--host"] if a.host else []
+    args += ["--bench", str(a.bench)] if a.bench else []
+    python = coreai_python() if a.build else sys.executable
+    return [python, str(ROOT / "scripts" / "jeff_coreai_smoke.py"), *args], env
+
+
+def coreai_python() -> str:
+    """The interpreter with the Core AI conversion SDK and runtime (coreai_torch, coreai.runtime): COREAI_PYTHON, else
+    this one. The forge .venv has neither; the SDK ships its own environment."""
+    return os.environ.get("COREAI_PYTHON") or sys.executable
 
 
 def prepare(a):
