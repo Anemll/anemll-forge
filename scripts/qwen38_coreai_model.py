@@ -206,15 +206,15 @@ ATT8_WORDS = [  # ATT_INT8MM forms (qwen38_coreai_build.py) in words, in reading
     (("s8r",), "scores relative to the block maximum"),
     (("s8", "s8b"), "INT8 scores{s8}"),
     (("t8",), "INT8 s - max"),
-    (("sm8",), "FP8 softmax (weights and sum{pf8})"),
-    (("pvf8",), "FP8 PV weights"),
-    (("pvtu",), "UINT8 PV weights"),
-    (("pvt", "pvn", "pv"), "INT8 PV weights"),
+    (("sm8",), "FP8 softmax (probabilities and sum{pf8})"),
+    (("pvf8",), "FP8 PV probabilities"),
+    (("pvtu",), "UINT8 PV probabilities"),
+    (("pvt", "pvn", "pv"), "INT8 PV probabilities"),
 ]
 
 
 def att8_words(forms: str, nums: dict) -> str:
-    """ATT_INT8MM forms in words, e.g. INT8 scores (step 1/4), FP8 softmax (weights and sum, FP8 scale 1/64), ..."""
+    """ATT_INT8MM forms in words, e.g. INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), ..."""
     def frac(x):
         return f"1/{round(1 / x)}" if x and abs(1 / x - round(1 / x)) < 1e-6 else f"{x}"
     have = set(filter(None, forms.split(",")))

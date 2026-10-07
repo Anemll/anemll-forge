@@ -203,7 +203,7 @@ Builder research switches (environment, recorded in each chunk's manifest numeri
 
 | Switch | Meaning |
 | --- | --- |
-| `ATT_INT8MM` | 8-bit attention forms, comma-separated. V8: `s8` (INT8 pair on the QK output), `s8b` (after the mask), `t8` (`s - tile max`), `sm8` (FP8 exp output and the softmax sum from it), `pvtu` / `pvf8` (UINT8 / FP8 PV weights per tile), `s8r` (scores relative to the block's row maximum). M6 form C2: `s8,s8b,sm8,pvf8` |
+| `ATT_INT8MM` | 8-bit attention forms, comma-separated. V8: `s8` (INT8 pair on the QK output), `s8b` (after the mask), `t8` (`s - tile max`), `sm8` (FP8 exp output and the softmax sum from it), `pvtu` / `pvf8` (UINT8 / FP8 PV probabilities per tile), `s8r` (scores relative to the block's row maximum). M6 form C2: `s8,s8b,sm8,pvf8` |
 | `ATT_INT8MM_BY_LAYER` | per-layer override, `63:s8,s8b;59:` (empty: production attention) |
 | `ATT_S8_UNIT`, `ATT_S8B_UNIT` | INT8 score steps (default 1/4) |
 | `ATT_PF8_UNIT` | FP8 scale of `sm8` / `pvf8` (default 1/64) |

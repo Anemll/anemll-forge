@@ -45,7 +45,23 @@ To compile for this Mac's ANE while the export runs, start this first, in the **
 python forge.py compile --follow --build "$OUT/mix25in_mixr_lr64mix_kvv8" &
 ```
 
-Variants: drop `ATT_INT8MM_M5` for an M6-only build; drop the `ATT_*` and `KV_KEYS_T` settings for the plain V8 graph; `--ctx` / `--pctx` choose the context entries. The settings are recorded in each chunk's `numerics` in `manifest.json`, and the server prints them at startup.
+**Build without FP8 (M5 and M6).** A package without FP8 runs on both chips. On M5-family Macs it compiles directly, with no first-start derivation, no second copy of the chunks and no `coreai-core` at run time; on M6 it gives up the FP8 speedup but is the base for combinations not yet validated with the FP8 forms (kv8, contexts above 64K). Use `ATT_INT8MM=s8,s8b` (INT8 scores, FP16 softmax and PV) and leave out `ATT_INT8MM_M5`, with its own `OUT`:
+
+```sh
+MODEL="$Q/model" EXPORT_DIR="$Q/export/mix25in_mixr_lr64mix" OUT="$HOME/coreai-builds-nofp8" \
+SILU=tanh MLP_SILU=tanh GDN_SQ=16 GDN_SV=64 MLP_DS=1 QCONV_INT8=0 \
+ATT_S8_UNIT=0.25 ATT_S8B_UNIT=0.25 ATT_INT8MM=s8,s8b KV_KEYS_T=1 \
+  .venv-convert/bin/python coreai/qwen38_coreai_build.py all --kv-cache-dtype v8 \
+  --ctx 8192,16384,32768,49152,65536 --pctx 8192,16384,32768,49152,65536
+```
+
+Measured on an M5 Max against the previous V8 packages: prefill +1.2% at 8K to +7.4% at 64K, decode +3.7 to +8.2%.
+
+**More context on Macs with more memory.** `--ctx` / `--pctx` take any list of entries; the runtime grows through them as a conversation does. Entries above 64K are research builds so far (an 80K-only package used 25.7 GB of wired memory on a 32 GB M6), and every entry adds compile time and wired memory, so check memory on your Mac first.
+
+**INT8 keys and values.** `--kv-cache-dtype kv8` stores keys as INT8 too (about half the cache of FP16, against a quarter saved by V8). It has been measured as a research build; the 8-bit attention forms and the transposed key cache were validated with V8, so check quality (the long-context evals) before relying on that combination.
+
+Other variants: drop `ATT_INT8MM_M5` for an M6-only build; drop the `ATT_*` and `KV_KEYS_T` settings for the plain V8 graph; `--ctx` / `--pctx` choose the context entries. The settings are recorded in each chunk's `numerics` in `manifest.json`, and the server prints them at startup.
 
 ## 4. Drafter (optional)
 

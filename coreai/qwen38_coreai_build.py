@@ -82,7 +82,7 @@ KV_KEYS_T = os.environ.get("KV_KEYS_T", "0") == "1"
 # (the tensor the max and exp passes read; on v8, without key scales, s8 and s8b sit on the same true scores),
 # t8 an INT8 pair (step 1/8) on s - m_t before the exp of the pvt forms;
 # sm8 (FP8, M6 only) quantizes the exp output of the pvt forms to FP8 e4m3 (scale ATT_PF8_UNIT) and takes the softmax sum
-# from it, an 8-bit sum without the UINT8 underflow bias; the PV weights are then those FP8 weights times the value
+# from it, an 8-bit sum without the UINT8 underflow bias; the PV probabilities are then those FP8 probabilities times the value
 # scales; s8r subtracts each row's block maximum plus ATT_S8R_SHIFT from all scores before the pairs (softmax is
 # shift-invariant), so the fixed INT8 range covers [m_b - 32 + shift, m_b + 32 + shift] per row instead of +-32
 # absolute (long contexts reach scores above 32). Forms combine as a comma-separated list (e.g. s8r,s8,s8b,sm8,pvf8)
@@ -612,7 +612,7 @@ class AttnW(nn.Module):
                         if has("t8"):
                             t_ = dequant8(quant8(t_, self.t8_unit, self.v8_zero), self.t8_unit, self.v8_zero)
                         e_ = torch.exp(t_)
-                        if has("sm8"):  # FP8 softmax weights; the sum below reads them
+                        if has("sm8"):  # FP8 softmax probabilities; the sum below reads them
                             e_ = dequant8(quant8(e_, self.pf8_unit, None, torch.float8_e4m3fn), self.pf8_unit, None)
                         w_t = torch.exp(m_t - m)
                         den = den + e_.sum(-1, keepdim=True) * w_t

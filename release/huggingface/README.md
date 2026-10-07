@@ -1,7 +1,5 @@
 ---
-base_model:
-  - Qwen/Qwen3.8-27B
-  - ProCreations/Ternary-Bonsai-2-27B-DFlash2
+base_model: Qwen/Qwen3.8-27B
 base_model_relation: quantized
 license: apache-2.0
 pipeline_tag: text-generation
@@ -17,7 +15,7 @@ tags:
 
 # ANEMLL Forge · Qwen3.8-27B for ANE
 
-**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update replaces the 16 target chunks with **8-bit attention** and a **transposed key cache**, with an **M6 and an M5 function set in the same packages**. On M6 the attention scores are INT8 and the softmax and PV weights FP8; the M5 functions keep the INT8 scores and run the softmax in FP16, because the M5 ANE compiler does not support FP8. Model-weight quantization is unchanged and quality matches the previous packages. Full server on M6: prefill **237 to 306 tok/s** from 64K to 8K. On an M5 Max the M5 set prefills **3 to 7% faster** than the previous packages at 32K to 64K.
+**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update replaces the 16 target chunks with **8-bit attention** and a **transposed key cache**, with an **M6 and an M5 function set in the same packages**. On M6 the attention scores are INT8 and the softmax and PV probabilities FP8; the M5 functions keep the INT8 scores and run the softmax in FP16, because the M5 ANE compiler does not support FP8. Model-weight quantization is unchanged and quality matches the previous packages. Full server on M6: prefill **237 to 306 tok/s** from 64K to 8K. On an M5 Max the M5 set prefills **3 to 7% faster** than the previous packages at 32K to 64K.
 
 The normal inference path uses the included, tested **Core AI DFlash2 speculative drafter**. Each T=8 verifier cycle checks one anchor and seven draft proposals. T=8 target functions are verification functions; the separate `drafter/` package generates the proposals. Do not substitute a Core ML or unpaired drafter.
 
@@ -45,7 +43,7 @@ This update replaces the 16 target chunks, the manifest and the output head (re-
 
 The 16 full-attention layers now run most of their history attention in 8-bit, with every 8-bit operand as an explicit quantize / dequantize pair so the ANE compiler fuses it:
 
-- **M6 functions:** scores in INT8 (step 1/4) and the softmax weights, softmax sum and PV weights in FP8 e4m3 (scale 1/64).
+- **M6 functions:** scores in INT8 (step 1/4) and the softmax probabilities, softmax sum and PV probabilities in FP8 e4m3 (scale 1/64). These are attention activations computed at run time; the model weights are the same in both function sets.
 - **M5 functions** (`<entry>_m5`, mapped in the manifest's `entries_by_soc`): the same INT8 scores, softmax and PV in FP16. The M5 ANE compiler rejects FP8: the M6 functions would fail to compile there and run on the GPU at about 2 s per call.
 - **Transposed key cache:** keys are stored as (KV head, head dimension, token), the operand QK reads, so the ANE no longer transposes every key tile before QK.
 
@@ -166,4 +164,4 @@ The default Core AI download includes the paired drafter and selector assets. Th
 
 [MODIFICATIONS.md](MODIFICATIONS.md) describes the converted derivatives and V8 graph changes. The original BF16 drafter checkpoint was rehashed against the pinned upstream LFS digest, and compact selector tables retain identical tensor bytes. The Core AI drafter body has not been independently rebuilt from that checkpoint and GPTQ export; calibration and head linkage remain supported by its sidecar/export metadata. Reusing this tested pairing does not resolve that reconstruction gap.
 
-**Model-derived assets follow their upstream Apache-2.0 licenses and notices. ANEMLL Forge source code and documentation are MIT-licensed.** Preserve the applicable model licenses, copyright and modification notices when redistributing derivatives.
+**Model-derived assets follow their upstream Apache-2.0 licenses and notices. ANEMLL Forge source code and documentation are MIT-licensed.** Why Apache-2.0: these packages are converted from Apache-2.0 models (Qwen3.8-27B and the ProCreations drafter), so they keep that license; LICENSE, NOTICE and MODIFICATIONS.md carry the license, the upstream notices and what ANEMLL changed. The MIT license covers the ANEMLL Forge code, not the weights. Preserve the applicable model licenses, copyright and modification notices when redistributing derivatives.

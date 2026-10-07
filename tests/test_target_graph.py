@@ -41,7 +41,7 @@ class TargetGraphTests(unittest.TestCase):
         self.assertEqual(g["att_int8mm"], "s8,s8b,sm8,pvf8")
         self.assertEqual(g["att_int8mm_by_layer"], {"63": "s8,s8b"})
         line = runtime.graph_line(man, Path("/b"))
-        self.assertIn("| 8-bit attention: INT8 scores, FP8 softmax (weights and sum, FP8 scale 1/64), FP8 PV weights "
+        self.assertIn("| 8-bit attention: INT8 scores, FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities "
                       "[ATT_INT8MM=s8,s8b,sm8,pvf8] per-layer 63:s8,s8b |", line)
         n2 = {**n, "ATT_S8_UNIT": 0.25, "ATT_S8B_UNIT": 0.25}
         self.assertIn("INT8 scores (step 1/4), FP8 softmax", runtime.graph_line(manifest(n2), Path("/b")))

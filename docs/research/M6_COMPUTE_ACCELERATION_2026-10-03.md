@@ -475,9 +475,9 @@ These errors are pooled over layers (root of summed squared errors over summed s
 
 On V8 the keys are FP16, so there is no key-scale pass and QK writes the true scores: the INT8 pair sits directly on the QK output and again after the mask (`s8` and `s8b` on the same scores, step 1/4). The forms tested, each a full graph with every 8-bit operand as a quantize / dequantize pair:
 
-- A: INT8 scores, UINT8 PV weights (`s8,s8b,pvtu`); M5 and M6.
+- A: INT8 scores, UINT8 PV probabilities (`s8,s8b,pvtu`); M5 and M6.
 - B: A plus the FP8 softmax sum (`s8,s8b,sm8,pvtu`); M6.
-- C: INT8 scores, FP8 softmax sum, FP8 PV weights (`s8,s8b,sm8,pvf8`); M6.
+- C: INT8 scores, FP8 softmax sum, FP8 PV probabilities (`s8,s8b,sm8,pvf8`); M6.
 
 **Accuracy on real text** (host simulation, 26,160 tokens of KL-trace chats and wikitext, error of the attention output against FP32, mean over the 16 attention layers; the V8 value codes alone cost 1.06%):
 
@@ -487,7 +487,7 @@ On V8 the keys are FP16, so there is no key-scale pass and QK writes the true sc
 | A | 5.41% (7.2% on wikitext) | 84% of entries (6.95% of the mass) |
 | B | 5.47% | the same |
 | C | 2.81% | 22% (0.02%) |
-| FP8 PV weights, exact sum | 2.77% | 22% (0.02%) |
+| FP8 PV probabilities, exact sum | 2.77% | 22% (0.02%) |
 | Per-tile value scales, UINT8 weights (cache-format change) | 3.74% | 73% (2.31%) |
 
 Folding the per-token value scales into the weights makes most UINT8 codes zero and drops about 7% of the softmax mass; FP8 weights keep it. Per-tile value scales double the value error by themselves (2.38% against 1.06%) and only help an INT8-only path.
@@ -501,7 +501,7 @@ Folding the per-token value scales into the weights makes most UINT8 codes zero 
 | B | 0.187369 | 85.92% | 2.4349 | 0.0113 | 96.3% |
 | **C** | **0.184021** | **86.02%** | **2.4135** | **0.00037** | **99.3%** |
 
-C matches V8 (for scale, `kv8` against V8 measured 0.00007). A and B move the model measurably; the INT8-only path needs better PV weights before it is usable.
+C matches V8 (for scale, `kv8` against V8 measured 0.00007). A and B move the model measurably; the INT8-only path needs better PV probabilities before it is usable.
 
 **Chunk 0** (3 DeltaNet layers and one attention layer) against the V8 chunk, idle machine, two interleaved runs:
 
@@ -524,7 +524,7 @@ The full build of C matched V8 on KL-512 but failed the long-context evals, whic
 | Cr (C plus `s8r`, shift 8) | 0.0451, 92.8%, 8.4143 | 0.0676, 92.6%, 5.3995 |
 | **C2 (FP8 scale 1/64)** | **0.00021, 98.8%, 8.0957** | **0.00048, 98.9%, 5.0685** |
 
-Cr tested whether the fixed INT8 score range clipped (`s8r` re-centres each row before the pairs); it was no better. Bisection with hybrid builds (`scripts/m6_hybrid_build.py`: the forms in some chunks, V8 in the rest) and real captured attention inputs (`scripts/m6_capture_attn_inputs.py`, `scripts/m6_attn_core_check.py`: device against host simulation, per head) found one head, layer 63 head 19, whose FP8 PV operand reached about 200 at scale 1/256. The M6 ANE computed that INT8 x FP8 PV wrongly, although e4m3 holds 448, and matched the host at 100 and below. C2 is C with FP8 scale 1/64 (`ATT_PF8_UNIT`, now the default): softmax weights in [0, 1] become at most 64.
+Cr tested whether the fixed INT8 score range clipped (`s8r` re-centres each row before the pairs); it was no better. Bisection with hybrid builds (`scripts/m6_hybrid_build.py`: the forms in some chunks, V8 in the rest) and real captured attention inputs (`scripts/m6_capture_attn_inputs.py`, `scripts/m6_attn_core_check.py`: device against host simulation, per head) found one head, layer 63 head 19, whose FP8 PV operand reached about 200 at scale 1/256. The M6 ANE computed that INT8 x FP8 PV wrongly, although e4m3 holds 448, and matched the host at 100 and below. C2 is C with FP8 scale 1/64 (`ATT_PF8_UNIT`, now the default): softmax probabilities in [0, 1] become at most 64.
 
 C2 quality against V8: verify path (64 + 4,096) KL 0.00028, top-1 99.3%, perplexity 6.6452 against 6.6441; KL-512 0.183763 to BF16 (V8 0.184168), top-1 86.02%, perplexity 2.4144, direct KL to V8 0.00039, same top token 99.3%. Prefill in the long-context evals (target only, no drafter): 8K 292.5 to 310.8 tok/s (+6.3%), 64K 199.6 to 223.9 tok/s (+12.2%).
 
@@ -596,7 +596,7 @@ Splash's API returns no logits, so its model file was scored through llama.cpp (
 
 | Item | Use for attention |
 | --- | --- |
-| FP8 activations (`fp8_e4m3fn`, `fp8_e5m2`; upstream adds `e8m0fnu` power-of-two scales) | FP8 softmax weights (`sm8`, `pvf8`, measured above); FP8 scores are too coarse |
+| FP8 activations (`fp8_e4m3fn`, `fp8_e5m2`; upstream adds `e8m0fnu` power-of-two scales) | FP8 softmax probabilities (`sm8`, `pvf8`, measured above); FP8 scores are too coarse |
 | `minval` mode | Takes the no-fusion path, like zero point -128 |
 | Per-axis scales | Constant scales only; a runtime per-row scale fails ANEC |
 | int4 / uint4 activations | Too coarse for scores or weights |

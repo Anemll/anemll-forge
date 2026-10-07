@@ -19,7 +19,7 @@ The M5 ANE compiler rejects FP8 (C2T falls to the GPU at about 1.9 s per call). 
 +8.2% from 8K to 64K (research note, "The M5 version"). One download serves both chips: the dual package
 (`ATT_INT8MM_M5`), from which an M5 derives its build on first start (22 s on the M5 Max, measured at full speed). Next for release: the runtime picks the package folder by chip, the release ships
 both chunk sets, a quality check of the M5 version (8K / 64K evals, KL-512; the math is chip-independent, run on the
-M6). Still open: an INT8 softmax for the M5 (UINT8 PV weights lose about 7% of the softmax mass; needs per-tile value
+M6). Still open: an INT8 softmax for the M5 (UINT8 PV probabilities lose about 7% of the softmax mass; needs per-tile value
 scales or a LoRA retrain with it simulated).
 
 ### 4. Contexts above 64K: production ladder

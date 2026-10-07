@@ -164,7 +164,8 @@ With DFlash2, server cold prefill was 26 to 41% faster and decode 21 to 25% fast
 ### 8-bit attention for M6 and M5 in one download (research build)
 
 A research build, not yet the published packages, runs most of the attention in 8-bit. **C2T** (M6) computes the
-scores in INT8 and the softmax weights, softmax sum and PV weights in FP8, and stores the key cache transposed
+scores in INT8 and the softmax probabilities, softmax sum and PV probabilities in FP8 (attention activations at run time; the model
+weights are the same in every build), and stores the key cache transposed
 (head dimension x token) so the ANE no longer transposes every key tile before QK. Its conversion settings are
 `ATT_INT8MM=s8,s8b,sm8,pvf8`, `ATT_S8_UNIT=ATT_S8B_UNIT=0.25` and `KV_KEYS_T=1`; quality matches the V8 build
 (KL-512 against BF16 0.1838 against 0.1842; 64K perplexity 5.0685 against 5.0673). Whole server on M6 against
@@ -189,7 +190,7 @@ only its M5 functions, written to `$ANEMLL_FORGE_STATE/builds/` (the download is
 16 chunks on an M5 Max, and one more copy of the chunks, about 10 GB, on disk), then compiled as usual. Deriving needs
 the Core AI authoring package `coreai-core`, included in `requirements-inference.txt`. The M6 uses the package as it is. The startup
 line names the attention the loaded build uses, for example
-`8-bit attention: INT8 scores (step 1/4), FP8 softmax (...), FP8 PV weights` on M6 and `INT8 scores (step 1/4)` on M5.
+`8-bit attention: INT8 scores (step 1/4), FP8 softmax (...), FP8 PV probabilities` on M6 and `INT8 scores (step 1/4)` on M5.
 
 ### Pi compaction runs without thinking
 

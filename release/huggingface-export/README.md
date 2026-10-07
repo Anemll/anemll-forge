@@ -1,7 +1,5 @@
 ---
-base_model:
-  - Qwen/Qwen3.8-27B
-  - ProCreations/Ternary-Bonsai-2-27B-DFlash2
+base_model: Qwen/Qwen3.8-27B
 base_model_relation: quantized
 license: apache-2.0
 pipeline_tag: text-generation
@@ -51,6 +49,19 @@ Mixed precision with GPTQ, per weight matrix ([recipe and math](https://github.c
 
 **Drafter.** The DFlash2 speculative drafter (5 layers, a 2,048-token sliding window) proposes 7 tokens per cycle for the target to verify. It reads the target's hidden features at layers 5, 19, 33, 47 and 61 and uses this export's LM head, so it pairs with this target only. Its linear weights are LUT4 GPTQ with `q7_cal` calibration; the published Core AI drafter scales the mask-token row by 0.7.
 
+## Builds to try
+
+The same weights give several Core AI builds; [EXPORT.md](EXPORT.md) has the commands. The 8-bit attention forms (INT8 scores, FP8 softmax and PV) and the KV-cache format apply to activations at run time, not to the weights: every build below uses these weights unchanged.
+
+- **One package for M6 and M5** (the published build): M6 functions with INT8 scores and FP8 softmax and PV, M5 functions with FP16 softmax; an M5 derives its own build on first start.
+- **Package without FP8, for M5 and M6:** INT8 scores with FP16 softmax and PV (`ATT_INT8MM=s8,s8b`, `KV_KEYS_T=1`). It compiles directly on M5 Macs (no first-start derivation, no second copy of the chunks; the M5 ANE compiler has no FP8) and runs on M6 too, where it trades the FP8 speedup for a base that combinations not yet validated with FP8 can start from (kv8, contexts above 64K). On an M5 Max, against the previous V8 packages: prefill up to +7.4% at 64K, decode +3.7 to +8.2%.
+- **M6-only package with FP8:** the published M6 functions without the M5 set, so nothing extra to compile on an M6.
+- **Longer context ladders on Macs with more memory:** `--ctx` / `--pctx` take any list of entries. Entries above 64K are research so far (an 80K-only package used 25.7 GB of wired memory on a 32 GB M6).
+- **INT8 keys and values** (`--kv-cache-dtype kv8`): about half the cache of FP16. Not yet validated together with the 8-bit attention forms and the transposed key cache; run the long-context evals first.
+- **The plain V8 graph** as a baseline for comparisons, and **the drafter** from its own export.
+
+Results from other Macs (chip, memory, context, prefill and decode tok/s) are welcome in this repository's Community tab.
+
 ## Quality
 
 Teacher-forced KL divergence against the BF16 model, on a short trace (64 sequences, 40,023 positions), for the Core AI target built from this export: mean KL **0.184**, top-1 agreement **86.0%**, perplexity 2.414 against the teacher's 2.136. This is not a coding, reasoning, retrieval or long-context evaluation.
@@ -67,4 +78,4 @@ Converting this repository with the published settings gives the published packa
 
 Qwen, Alibaba Cloud, ProCreations, z-lab, Prism ML and Apple are named for credit and context; no affiliation or endorsement is claimed.
 
-The weights remain under their upstream Apache-2.0 licenses. The [ANEMLL Forge](https://github.com/Anemll/anemll-forge) source code that produces and converts them is MIT-licensed. Retain LICENSE, NOTICE, MODIFICATIONS.md and the drafter's LICENSE and NOTICE when redistributing.
+**Why Apache-2.0:** these weights are a quantized derivative of Apache-2.0 models (Qwen3.8-27B and the ProCreations drafter), so they keep that license. Apache-2.0 asks a redistributed derivative to include the license, keep the upstream notices and mark what was changed; LICENSE, NOTICE and MODIFICATIONS.md do that here. The MIT license of the [ANEMLL Forge](https://github.com/Anemll/anemll-forge) source code that produces and converts the weights covers that code, not the weights. Retain LICENSE, NOTICE, MODIFICATIONS.md and the drafter's LICENSE and NOTICE when redistributing.

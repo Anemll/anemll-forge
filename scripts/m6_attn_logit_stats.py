@@ -1,4 +1,4 @@
-"""Range of the full-attention scores of Qwen3.8-27B on real text, and the error of 8-bit scores / softmax weights.
+"""Range of the full-attention scores of Qwen3.8-27B on real text, and the error of 8-bit scores / softmax probabilities.
 
 Host research (CPU torch, no ANE): the streamed reference of dflash2_target_ref.py (the quantized export via
 EXPORT_DIR, or the bf16 checkpoint) runs a teacher-forced prefill over a few real sequences; its attention is
@@ -17,7 +17,7 @@ Per layer, over causal-valid entries:
       a_s<step>   s itself quantized to INT8 at a constant step 1/16, 1/8, 1/4 (no kv8 keys); a_s1/8z: asymmetric,
                   range [-8, 23.875]
       b_s         s as FP8 e4m3 with scale 1/16 (clip +-448 / 16 = +-28); b_kv8: the same on s_kv8
-      c / c_nofold  softmax weights as UINT8 the pvtu way: per 2048-key tile e = exp(s - m_t) times the value
+      c / c_nofold  softmax probabilities as UINT8 the pvtu way: per 2048-key tile e = exp(s - m_t) times the value
                   scales over their tile maximum (c_nofold: e alone), codes at step 1/255; denominator exact
       d           a_r at 1/8 combined with c; d_r1/32: a_r at 1/32 with c; d_s1/4: a_s at 1/4 with c
   Values stay fp32 in the variants above (only the scores / weights are quantized); --no-kv8k skips the kv8-key
