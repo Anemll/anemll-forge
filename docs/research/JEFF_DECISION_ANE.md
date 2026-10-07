@@ -1,7 +1,7 @@
 # Jeff / Unsloth decision models on the ANE
 
 - **Scope:** run Jeff (Qwen3.5-0.8B decision head) on the Apple Neural Engine through a prefill-only Core AI path.
-- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). The live-last prefix cache snapshots GDN, conv and KV after the shared prefix and prefills only the changing suffix; see [Live-last prefix cache](#live-last-prefix-cache). Not done: LoRA adapters, ANE temperature/ECE fit, a serving route.
+- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). The live-last prefix cache snapshots GDN, conv and KV after the shared prefix and prefills only the changing suffix. With a 64-row entry that suffix is one call: about 18 ms, 54–56 decisions/s, against 2.1 decisions/s for a cold 2,018-token prefill. See [Live-last prefix cache](#live-last-prefix-cache). Not done: LoRA adapters, ANE temperature/ECE fit, a serving route.
 - **Branch:** `cursor/jeff-decision-ane-85f5`.
 
 Evidence labels: **Source-verified** (this checkout), **External doc** (Jeff / Unsloth / Qwen cards, not fetched as weights), **Inferred**.
@@ -293,7 +293,31 @@ handle = runtime.prepare_prefix(split["prefix"], n_options=n)
 out = runtime.decide(handle, split["suffix"])  # probabilities, restore_ms, suffix_ms, total_ms
 ```
 
-A short suffix still occupies a whole prefill call. `--prefill-extra 32,64` compiles those widths into the same packages as the 256-row entry. Without measured call times the suffix uses the smallest width that can hold it in one call; `measure_prefill_calls` / `set_prefill_costs` picks the width whose call count times measured milliseconds is smallest. The 256-row entry stays the one used to build a long prefix. Whether a 32- or 64-row call is faster, and whether it stays fully on the ANE, is measured on the M5 Max build (see the results below once filled in).
+A short suffix still occupies a whole prefill call. `--prefill-extra 64` (and, if wanted, `32`) compiles those widths into the same packages as the 256-row entry. Weights stay shared: six chunks are still 159 MB each. Without measured call times the suffix uses the smallest width that can hold it in one call; `measure_prefill_calls` / `set_prefill_costs` picks the width whose call count times measured milliseconds is smallest. The 256-row entry stays the one used to build a long prefix.
+
+Calls use `libcoreai_bridge.dylib` (`coreai/swift_bridge/build.sh`) when it is present. Outputs are bound once and DeltaNet state ping-pongs between two IOSurface sets. The Python binding allocates a new output surface on every call; that pool is not reclaimed and the process aborts (`NDArray+Pool.swift`, a 100 KB allocate) after a long bench. `COREAI_BRIDGE=0` forces the Python binding.
+
+### M5 Max, 7 October 2026
+
+Build `/Users/anemll/Models/jeff-coreai-prefix/coreai`: `p32_2k`, `p64_2k`, `p256_2k`, context 2,048, bonded mode 1. `inspect_coreai_cache.py --strict` reports `fully_ane` for every entry (one ANE region each, no GPU region). An idle 27B Core AI server was resident on port 8766; a `jeff_serve.py` process was alive during convert/compile and had exited before this timing run. The 256-row call is 58.4 ms, the same as the single-width build (57.8 ms).
+
+One call, median of three: **p32 15.1 ms, p64 17.9 ms, p256 58.4 ms**. Every measured suffix is 36–88 tokens, so the planner never picks p32: a 41-token suffix is one p64 call (17.9 ms), not two p32 calls (30 ms). An 85-token Tetris suffix is two p64 calls (36 ms), which beats one p256 call (58 ms). p64 is the width to ship beside 256.
+
+Cache versus a cold prefill of the same ids. The suffix is its own call, so the FP16 reduction order differs from a cold prefill that fuses the prefix tail with the suffix. Worst max |Δp| is 0.0026, under the 0.005 gate, and the argmax matches on every row. Repeats, and a cold prefill after cached decisions, are bit-identical (max |Δp| 0). Median of five decisions. JSON: `/Users/anemll/Models/jeff/spike/parity/prefix_cache_p32_p64_p256.json`.
+
+| Case | Tokens | Prefix | Suffix | Suffix entries | Cached | Cold | max \|Δp\| vs cold | max \|Δp\| vs HF FP32 |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: |
+| readme, 3 options | 175 | 134 | 41 | p64 | 17.7 ms, 56.5/s | 58.6 ms, 17.1/s | 0.0021 | 0.0070 |
+| 5 options | 238 | 197 | 41 | p64 | 17.9 ms, 55.9/s | 59.4 ms, 16.8/s | 0.0018 | 0.0009 |
+| 30 options | 1,008 | 967 | 41 | p64 | 17.8 ms, 56.2/s | 234 ms, 4.3/s | 0.0024 | 0.0067 |
+| 100 options | 2,018 | 1,977 | 41 | p64 | 18.6 ms, 53.7/s | 467 ms, 2.1/s | 0.0026 | 0.0157 |
+| 100 options, message changed | 2,023 | 1,977 | 46 | p64 | 18.3 ms, 54.6/s | 468 ms, 2.1/s | 0.0019 | 0.0038 |
+| Snake A | 170 | 134 | 36 | p64 | 18.0 ms, 55.6/s | 58.1 ms, 17.2/s | 0.0014 | 0.0033 |
+| Snake B | 171 | 134 | 37 | p64 | 17.8 ms, 56.1/s | 58.2 ms, 17.2/s | 0.0011 | 0.0035 |
+| Tetris A | 242 | 157 | 85 | p64+p64 | 35.7 ms, 28.0/s | 58.4 ms, 17.1/s | 0.0010 | 0.0059 |
+| Tetris B | 245 | 157 | 88 | p64+p64 | 35.8 ms, 27.9/s | 58.2 ms, 17.2/s | 0.0022 | 0.0047 |
+
+Argmax matches HF FP32 on every row except the 2,018-token 100-option prompt, where both the cached path and the cold path answer B and FP32 does not. That is the published near-tie (FP32 A 0.2460 vs B 0.2448); cold vs FP32 max |Δp| is 0.013. Snake A/B both answer A, Tetris A/B both answer D, and the second 100-option message answers D on both paths. Restoring the snapshot is 0.3 ms (short prefix) to 0.7 ms (1,977 tokens). A prefix longer than 256 tokens reuses the first 256-token snapshot (`chunk_reuse` 256 on the 1,008- and 2,018-token rows).
 
 `scripts/jeff_prefix_bench.py prepare` writes Snake, Tetris and the published parity rows (including a second ~2K-token, 100-option message) with the split and HF FP32 probabilities. `run` checks cache against a cold prefill and against that reference, and reports decisions/sec.
 
@@ -302,7 +326,7 @@ The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is
 ## What was verified where
 
 - **Linux cloud VM:** implemented Path B and ran the unit tests (no Core AI SDK, no Jeff weights).
-- **M5 Max (this section):** convert, compile, placement audit, prefill timing and FP32 parity with the local weights. Unit tests: `python -m unittest tests.test_jeff_coreai tests.test_launcher tests.test_checkpoint` (34 tests, including the upstream token-id check).
+- **M5 Max (this section):** convert, compile, placement audit, prefill timing and FP32 parity with the local weights. Unit tests: `python -m unittest tests.test_jeff_coreai tests.test_launcher tests.test_checkpoint` (34 tests, including the upstream token-id check). The prefix-cache tests (`tests.test_jeff_prefix_cache`) cover the `Latest:` cut, Snake/Tetris shared prefixes and the ~2K-token split; the M5 bench is the table above.
 
 ## See also
 
