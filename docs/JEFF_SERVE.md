@@ -17,7 +17,7 @@ python forge.py jeff-serve \
   --host 127.0.0.1 --port 8787
 ```
 
-Then open http://127.0.0.1:8787/.
+Then open http://127.0.0.1:8787/. Adding `?sample=1` also classifies the sample refund message on load.
 
 | Page | What it does |
 | --- | --- |
