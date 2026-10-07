@@ -338,7 +338,10 @@ class GDNW(nn.Module):
 
         def heads(t):
             t = t.reshape(nk, dk, T).permute(0, 2, 1)
-            return t.reshape(nk, 1, T, dk).repeat(1, nv // nk, 1, 1).reshape(nv, T, dk)
+            g = nv // nk
+            if g == 1:  # one value head per key head (Jeff): nothing to repeat
+                return t
+            return t.reshape(nk, 1, T, dk).repeat(1, g, 1, 1).reshape(nv, T, dk)
 
         def l2n(t, s):
             return t * torch.rsqrt((t * t).sum(-1, keepdim=True) + 1e-6) * s
@@ -473,7 +476,10 @@ class AttnW(nn.Module):
         kt, vt = rope(kh).permute(1, 0, 2), vh.permute(1, 0, 2)                              # (nkv, T, hd)
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
-        sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
+        # Broadcast the (T, T) mask across the grp query groups. repeat() lowers to mps.tile, which this ANE
+        # rejects once the mask is large (a 1024-row entry: one GPU region, "Unsupported mps.tile").
+        scores = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp, T, T)
+        sc_b = (scores + causal.reshape(1, 1, T, T)).reshape(nkv, grp * T, T)  # rows (g, t)
         forms = _FORMS_OVERRIDE if _FORMS_OVERRIDE is not None else \
             ATT_INT8MM_BY_LAYER.get(getattr(self, "layer_index", -1), ATT_INT8MM)
         mm8 = set(filter(None, forms.split(","))) if cache_v8 else set()  # INT8 values: v8 and kv8
