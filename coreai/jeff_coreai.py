@@ -24,6 +24,7 @@ DENSE = (
     "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight",
 )
 PREFIXES = ("model.language_model.", "language_model.", "model.")
+SKIP_PREFIXES = ("visual.", "model.visual.", "mtp.")
 READOUT_KEYS = ("weight", "readout.weight", "score.weight", "classifier.weight")
 JEFF_DEFAULT = Path("/Users/anemll/Models/jeff/jeff-base-v1.3")
 
@@ -86,35 +87,38 @@ def load_decision_config(model: Path) -> dict:
             "prompt_layout": raw.get("prompt_layout") or "live-last"}
 
 
+def _read_safetensors(path: Path, names=None):
+    """Yield (name, ndarray) from one file; bf16 (numpy has no dtype for it) is upcast to fp32."""
+    from safetensors import safe_open
+    try:
+        import torch
+    except ImportError:
+        torch = None
+    with safe_open(path, framework="pt" if torch is not None else "np") as f:
+        for name in (names if names is not None else f.keys()):
+            if name.startswith(SKIP_PREFIXES):
+                continue
+            t = f.get_tensor(name)
+            if torch is not None:
+                t = t.float() if t.dtype == torch.bfloat16 else t
+                t = t.numpy()
+            yield name, np.asarray(t)
+
+
 def _open_tensors(model: Path):
-    """Yield (name, tensor) from a single file or a sharded index. Prefers numpy; falls back to torch."""
+    """Yield (name, tensor) from a single file or a sharded index, skipping vision / MTP tensors."""
     index = model / "model.safetensors.index.json"
     single = model / "model.safetensors"
-    try:
-        from safetensors import safe_open
-    except ImportError as e:
-        raise ImportError("safetensors is required to read a Jeff checkpoint") from e
-
     if index.is_file():
-        wmap = load_json(index)["weight_map"]
         by_file: dict[str, list[str]] = {}
-        for name, shard in wmap.items():
+        for name, shard in load_json(index)["weight_map"].items():
             by_file.setdefault(shard, []).append(name)
         for shard, names in by_file.items():
-            with safe_open(model / shard, framework="np") as f:
-                for name in names:
-                    yield name, np.asarray(f.get_tensor(name))
+            yield from _read_safetensors(model / shard, names)
         return
     if not single.is_file():
         raise FileNotFoundError(f"Missing {single} or {index}")
-    try:
-        with safe_open(single, framework="np") as f:
-            for name in f.keys():
-                yield name, np.asarray(f.get_tensor(name))
-    except (RuntimeError, ValueError):
-        from safetensors.torch import load_file
-        for name, tensor in load_file(single).items():
-            yield name, tensor.detach().float().numpy()
+    yield from _read_safetensors(single)
 
 
 def _detect_prefix(names: list[str]) -> str:
@@ -142,18 +146,13 @@ class JeffCheckpoint:
         path = self.model / "readout.safetensors"
         if not path.is_file():
             raise FileNotFoundError(f"Missing decision readout: {path}")
-        from safetensors import safe_open
-        with safe_open(path, framework="np") as f:
-            keys = list(f.keys())
-            name = next((k for k in READOUT_KEYS if k in keys), None)
+        arrays = dict(_read_safetensors(path))
+        name = next((k for k in READOUT_KEYS if k in arrays), None)
+        if name is None:
+            name = next((k for k, a in arrays.items() if a.ndim == 2), None)
             if name is None:
-                arrays = {k: np.asarray(f.get_tensor(k)) for k in keys}
-                name = next((k for k, a in arrays.items() if a.ndim == 2), None)
-                if name is None:
-                    raise ValueError(f"readout.safetensors has no 2-D weight (keys {keys})")
-                weight = arrays[name]
-            else:
-                weight = np.asarray(f.get_tensor(name))
+                raise ValueError(f"readout.safetensors has no 2-D weight (keys {list(arrays)})")
+        weight = arrays[name]
         hid = int(self.cfg["hidden_size"])
         if weight.shape == (hid, weight.shape[1]):
             weight = weight.T
