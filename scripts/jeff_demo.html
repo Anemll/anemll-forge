@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jeff on the ANE</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #10140f;
+    --panel: #1a2118;
+    --ink: #e7f0df;
+    --muted: #93a58a;
+    --line: #2c3828;
+    --accent: #d6ff4a;
+    --food: #ffb15a;
+    --body: #6ea356;
+    --danger: #ff6b5a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.45 ui-sans-serif, system-ui, sans-serif;
+  }
+  header, main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    align-items: end;
+    padding: 28px 0 18px;
+  }
+  .kicker { margin: 0; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; }
+  h1 { margin: 4px 0 0; font-size: 40px; font-weight: 650; letter-spacing: -0.03em; }
+  h2 { margin: 0 0 8px; font-size: 22px; }
+  #health { color: var(--muted); text-align: right; font-size: 14px; }
+  #health strong { color: var(--ink); font-weight: 600; }
+  main { display: grid; gap: 16px; padding-bottom: 40px; }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px;
+  }
+  #game { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: start; }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(8, 36px);
+    grid-template-rows: repeat(8, 36px);
+    gap: 4px;
+    background: #0c100c;
+    padding: 8px;
+    border-radius: 12px;
+  }
+  .cell { border-radius: 6px; background: #232b21; }
+  .cell.h { background: var(--accent); }
+  .cell.b { background: var(--body); }
+  .cell.f { background: var(--food); }
+  .latency { font-variant-numeric: tabular-nums; }
+  .latency span { font-size: 64px; letter-spacing: -0.04em; line-height: 0.9; }
+  .latency small { color: var(--muted); margin-left: 6px; font-size: 16px; }
+  .meta { color: var(--muted); margin: 6px 0 12px; min-height: 1.4em; }
+  .bar { display: grid; grid-template-columns: 72px 1fr 52px; gap: 8px; align-items: center; margin: 6px 0; }
+  .track { height: 10px; background: #0c100c; border-radius: 99px; overflow: hidden; }
+  .fill { height: 100%; background: var(--accent); width: 0; }
+  .bar.chosen .name { color: var(--accent); }
+  button, .examples button {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  textarea {
+    width: 100%;
+    min-height: 88px;
+    resize: vertical;
+    background: #0c100c;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    font: inherit;
+  }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  #route-choice { margin-top: 12px; font-size: 18px; }
+  @media (max-width: 760px) {
+    #game { grid-template-columns: 1fr; }
+    header { flex-direction: column; align-items: start; }
+    #health { text-align: left; }
+    .board { grid-template-columns: repeat(8, minmax(0, 1fr)); width: min(100%, 360px); }
+    .cell { aspect-ratio: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <p class="kicker">Core AI · Apple Neural Engine</p>
+    <h1>Jeff decides</h1>
+  </div>
+  <div id="health">Loading the decision model…</div>
+</header>
+<main>
+  <section id="game">
+    <div>
+      <h2>Snake</h2>
+      <p class="meta">Every move is one decision. The base model has no adapter, so the bars can be soft.</p>
+      <div class="board" id="board" aria-label="Snake board"></div>
+    </div>
+    <div>
+      <div class="latency"><span id="ms">—</span><small>ms total</small></div>
+      <p class="meta" id="timing">Waiting for the first decision.</p>
+      <div id="bars"></div>
+      <p class="meta" id="status"></p>
+      <button id="toggle" type="button">Pause</button>
+    </div>
+  </section>
+  <section id="route">
+    <h2>Route a message</h2>
+    <p class="meta">One choice question. Same server, same ANE package.</p>
+    <textarea id="ticket">I sent the jacket back two weeks ago and still have not seen the money.</textarea>
+    <div class="examples">
+      <button type="button" data-text="I sent the jacket back two weeks ago and still have not seen the money.">Refund</button>
+      <button type="button" data-text="The tracking page has said in transit for nine days. Where is the parcel?">Shipping</button>
+      <button type="button" data-text="Checkout returns a 500 error when I click pay.">Technical</button>
+      <button type="button" data-text="Can I change the name on the gift receipt?">Other</button>
+    </div>
+    <div class="row">
+      <button id="classify" type="button">Classify</button>
+      <span class="meta" id="route-ms"></span>
+    </div>
+    <div id="route-bars"></div>
+    <div id="route-choice"></div>
+  </section>
+</main>
+<script>
+const SIZE = 8;
+const DIRS = {
+  up: { r: -1, c: 0 },
+  down: { r: 1, c: 0 },
+  left: { r: 0, c: -1 },
+  right: { r: 0, c: 1 },
+};
+const ROUTES = {
+  refunds: "The customer wants money back.",
+  shipping: "A delivery or tracking question.",
+  technical: "The site or the product is broken.",
+  other: "Anything else.",
+};
+
+let snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
+let food = { r: 1, c: 6 };
+let score = 0;
+let playing = true;
+let inflight = false;
+let routing = false;
+
+function occupied(r, c, ignoreHead) {
+  return snake.some((cell, index) => (ignoreHead && index === 0 ? false : cell.r === r && cell.c === c));
+}
+
+function placeFood() {
+  const open = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (!occupied(r, c, false)) open.push({ r, c });
+    }
+  }
+  food = open[Math.floor(Math.random() * open.length)];
+}
+
+function boardText() {
+  const rows = [];
+  for (let r = 0; r < SIZE; r++) {
+    let line = "";
+    for (let c = 0; c < SIZE; c++) {
+      if (snake[0].r === r && snake[0].c === c) line += "H";
+      else if (occupied(r, c, true)) line += "#";
+      else if (food.r === r && food.c === c) line += "F";
+      else line += ".";
+    }
+    rows.push(line);
+  }
+  return rows.join("\n");
+}
+
+function draw() {
+  const board = document.getElementById("board");
+  board.replaceChildren();
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      if (snake[0].r === r && snake[0].c === c) cell.classList.add("h");
+      else if (occupied(r, c, true)) cell.classList.add("b");
+      else if (food.r === r && food.c === c) cell.classList.add("f");
+      board.appendChild(cell);
+    }
+  }
+}
+
+function bars(target, probabilities, chosen) {
+  const host = document.getElementById(target);
+  host.replaceChildren();
+  const entries = Object.entries(probabilities);
+  for (const [key, value] of entries) {
+    const row = document.createElement("div");
+    row.className = "bar" + (key === chosen ? " chosen" : "");
+    const pct = Math.round(value * 1000) / 10;
+    row.innerHTML = `<span class="name">${key}</span><div class="track"><div class="fill" style="width:${pct}%"></div></div><span>${pct.toFixed(1)}%</span>`;
+    host.appendChild(row);
+  }
+}
+
+function snakeRequest() {
+  return {
+    model: "jeff-latest",
+    state: {
+      rules: "8 by 8 grid. H is the head, # is the body, F is food, a dot is empty. Eat F. Never move onto # or off the board.",
+      latest: { board: boardText(), head: `${snake[0].r},${snake[0].c}`, food: `${food.r},${food.c}` },
+    },
+    questions: {
+      move: {
+        type: "choice",
+        instructions: "Pick the snake's next move.",
+        criteria: {
+          up: "move the head one cell up",
+          down: "move the head one cell down",
+          left: "move the head one cell left",
+          right: "move the head one cell right",
+        },
+      },
+    },
+  };
+}
+
+async function decide(body) {
+  const response = await fetch("/v1/systemone", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const detail = payload.detail;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return payload;
+}
+
+function showTiming(payload, label) {
+  const timing = payload.timings || {};
+  const calls = (timing.calls_ms || []).join(" + ");
+  document.getElementById("ms").textContent = Math.round(timing.total_ms ?? 0);
+  document.getElementById("timing").textContent =
+    `${label} · ${payload.usage.input_tokens} tokens · tokenize ${timing.tokenize_ms} ms · prefill ${calls || "—"} ms · head ${timing.head_ms} ms`;
+}
+
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+async function step() {
+  if (!playing || inflight || routing) return;
+  inflight = true;
+  try {
+    const payload = await decide(snakeRequest());
+    const answer = payload.answers.move;
+    showTiming(payload, `score ${score}`);
+    bars("bars", answer.probabilities, answer.choice);
+    const delta = DIRS[answer.choice];
+    const next = { r: snake[0].r + delta.r, c: snake[0].c + delta.c };
+    const ontoTail = next.r === snake[snake.length - 1].r && next.c === snake[snake.length - 1].c;
+    const hit = next.r < 0 || next.c < 0 || next.r >= SIZE || next.c >= SIZE || (occupied(next.r, next.c, false) && !ontoTail);
+    if (hit) {
+      document.getElementById("status").textContent = `Jeff chose ${answer.choice}. That hits a wall or the body. Restarting.`;
+      snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
+      score = 0;
+      placeFood();
+    } else {
+      snake.unshift(next);
+      if (next.r === food.r && next.c === food.c) {
+        score += 1;
+        placeFood();
+        document.getElementById("status").textContent = `Jeff chose ${answer.choice} and ate the food.`;
+      } else {
+        snake.pop();
+        document.getElementById("status").textContent = `Jeff chose ${answer.choice}.`;
+      }
+    }
+    draw();
+  } catch (error) {
+    document.getElementById("status").textContent = String(error.message || error);
+  } finally {
+    inflight = false;
+    if (playing) setTimeout(step, 160);
+  }
+}
+
+document.getElementById("toggle").addEventListener("click", () => {
+  playing = !playing;
+  document.getElementById("toggle").textContent = playing ? "Pause" : "Play";
+  if (playing) step();
+});
+
+document.getElementById("classify").addEventListener("click", async () => {
+  const button = document.getElementById("classify");
+  button.disabled = true;
+  routing = true;
+  while (inflight) await sleep(20);
+  try {
+    const payload = await decide({
+      model: "jeff-latest",
+      state: document.getElementById("ticket").value,
+      questions: {
+        route: {
+          type: "choice",
+          instructions: "Which team should handle this message?",
+          criteria: ROUTES,
+        },
+      },
+    });
+    const answer = payload.answers.route;
+    bars("route-bars", answer.probabilities, answer.choice);
+    const timing = payload.timings || {};
+    document.getElementById("route-choice").textContent = `${answer.choice} · confidence ${Math.round(answer.confidence * 100)}%`;
+    document.getElementById("route-ms").textContent =
+      `${payload.usage.input_tokens} tokens · ${Math.round(timing.total_ms)} ms total · prefill ${(timing.calls_ms || []).join(" + ")} ms · head ${timing.head_ms} ms`;
+  } catch (error) {
+    document.getElementById("route-choice").textContent = String(error.message || error);
+  } finally {
+    button.disabled = false;
+    routing = false;
+    if (playing) step();
+  }
+});
+
+for (const button of document.querySelectorAll(".examples button")) {
+  button.addEventListener("click", () => {
+    document.getElementById("ticket").value = button.dataset.text;
+    document.getElementById("classify").click();
+  });
+}
+
+fetch("/health").then((response) => response.json()).then((health) => {
+  document.getElementById("health").innerHTML =
+    `<strong>${health.model}</strong><br>${health.backend}<br>${health.status} · text · prefix cache ${health.prefix_cache ? "on" : "off"}`;
+}).catch(() => {
+  document.getElementById("health").textContent = "Health check failed.";
+});
+
+draw();
+step();
+</script>
+</body>
+</html>
