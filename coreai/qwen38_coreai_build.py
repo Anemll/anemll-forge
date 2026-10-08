@@ -155,14 +155,25 @@ def layer_arrays(ck, i: int) -> dict:
     return arrs
 
 
+def _act_qdq(x, unit, zero):
+    """Per-tensor symmetric INT8 around a matmul. Constant scale and zero point 0 is the pair the ANE fuses into an
+    INT8 multiply-add; a zero point of -128 or a runtime per-row scale does not."""
+    q = torch.ops.coreai.quantize(x, unit, torch.int8, zero_point=zero)
+    return torch.ops.coreai.dequantize(q, unit, zero_point=zero, output_dtype=torch.float16)
+
+
 class QConv(nn.Module):
     """1x1 conv with an exported weight: LUT (dense lut[idx], registered for exact palettization) + per-channel scale as
     a mul after the conv, int8 (a compile-time INT8 constant with its per-channel scales; QCONV_INT8=0: dequantized to
-    dense fp16) or dense."""
+    dense fp16) or dense. Optional ``act_unit`` / ``out_unit`` wrap the activation and the result in ``_act_qdq``
+    (W8A8)."""
 
     def __init__(self, W: dict, key: str) -> None:
         super().__init__()
+        self.key = key
         self.register_buffer("scale", None)
+        if (f"{key}/int8" in W and QCONV_INT8) or f"{key}/act_unit" in W:
+            import coreai_torch._compression.custom_layers  # noqa: F401  registers quantize / constexpr_blockwise_shift_scale
         if f"{key}/lut" in W:
             lut, idx = W[f"{key}/lut"], W[f"{key}/idx"]
             cd = lut.shape[1]
@@ -171,7 +182,6 @@ class QConv(nn.Module):
             if f"{key}/scale" in W:
                 self.register_buffer("scale", torch.from_numpy(W[f"{key}/scale"].astype(np.float16)).view(1, -1, 1, 1))
         elif f"{key}/int8" in W and QCONV_INT8:
-            import coreai_torch._compression.custom_layers  # noqa: F401  registers coreai::constexpr_blockwise_shift_scale
             codes = np.ascontiguousarray(W[f"{key}/int8"])
             self.register_buffer("w8", torch.from_numpy(codes).view(codes.shape[0], codes.shape[1], 1, 1))
             self.register_buffer("w8_scale", torch.from_numpy(np.asarray(W[f"{key}/scale"], np.float16)).view(-1, 1, 1, 1))
@@ -191,14 +201,24 @@ class QConv(nn.Module):
             self.lr_b.weight = nn.Parameter(torch.from_numpy(b.copy()).view(b.shape[0], b.shape[1], 1, 1), requires_grad=False)
             self.lr_a = nn.Conv2d(a.shape[1], a.shape[0], 1, bias=False)
             self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
+        if f"{key}/act_unit" in W:
+            self.register_buffer("act_unit", torch.tensor(float(np.asarray(W[f"{key}/act_unit"]).reshape(())), dtype=torch.float16))
+            out_unit = W[f"{key}/out_unit"] if f"{key}/out_unit" in W else W[f"{key}/act_unit"]
+            self.register_buffer("out_unit", torch.tensor(float(np.asarray(out_unit).reshape(())), dtype=torch.float16))
+            self.register_buffer("act_zero", torch.tensor(0, dtype=torch.int8))
 
     def forward(self, x):
+        raw = x
+        if getattr(self, "act_unit", None) is not None:
+            x = _act_qdq(x, self.act_unit, self.act_zero)
         if self.conv is None:  # INT8 constant: never expanded to an FP16 weight in the program
             y = F.conv2d(x, torch.ops.coreai.constexpr_blockwise_shift_scale(self.w8, self.w8_scale, None, None, torch.int8))
         else:
             y = self.conv(x)
         y = y if self.scale is None else y * self.scale
-        return y if self.lr_a is None else y + self.lr_a(self.lr_b(x))
+        if getattr(self, "out_unit", None) is not None:
+            y = _act_qdq(y, self.out_unit, self.act_zero)
+        return y if self.lr_a is None else y + self.lr_a(self.lr_b(raw))
 
 
 class Hadamard(nn.Module):

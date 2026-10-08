@@ -2,7 +2,7 @@
 """Convert a local Jeff / Qwen3.5-0.8B decision checkpoint to a prefill-only Core AI package.
 
     python forge.py jeff-convert --model /Users/anemll/Models/jeff/jeff-base-v1.3 --output ~/Models/jeff-coreai
-    python scripts/jeff_coreai_convert.py --model ... --output ... [--quant fp16|int8] [--dry-run]
+    python scripts/jeff_coreai_convert.py --model ... --output ... [--quant fp16|int8|w8a8] [--dry-run]
 
 Does not download weights. Does not run GPTQ/VQ or build DFlash2. Core AI export needs the
 conversion SDK (macOS). --dry-run only prints the config-driven plan.
@@ -30,7 +30,7 @@ def parser():
     p.add_argument("--prefill", type=int, default=256, help="largest prefill rows (multiple of 8, > 8)")
     p.add_argument("--prefill-extra", default="",
                    help="extra prefill widths compiled in the same packages, comma-separated (e.g. 32,64)")
-    p.add_argument("--quant", choices=("fp16", "int8"), default="fp16",
+    p.add_argument("--quant", choices=("fp16", "int8", "w8a8"), default="fp16",
                    help="fp16 dense (default) or per-channel INT8 projections; not GPTQ/VQ")
     p.add_argument("--chunk-layers", type=int, default=4)
     p.add_argument("--dry-run", action="store_true")

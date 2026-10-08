@@ -305,20 +305,31 @@ def int8_per_channel(weight: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return codes, scale.astype(np.float16)
 
 
-def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16") -> dict:
-    """Keys the Core AI LayerW / QConv graph already understands, but dense (or INT8) — no LUT/VQ."""
+def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16", act_scales: dict | None = None) -> dict:
+    """Keys the Core AI LayerW / QConv graph already understands, but dense (or INT8) — no LUT/VQ.
+
+    ``w8a8`` stores the same per-channel INT8 weights as ``int8`` and, when ``act_scales`` has this projection,
+    a constant per-tensor input scale and output scale (abs-max / 127 from calibration).
+    """
     w = ck.layer(i)
     arrs = {f"{i}/{k}": np.asarray(w[k], np.float32) for k in SMALL if k in w}
     for name in DENSE:
         if name not in w:
             continue
         mat = np.asarray(w[name], np.float32)
-        if quant == "int8":
+        key = f"{i}/{name}"
+        if quant in ("int8", "w8a8"):
             codes, scale = int8_per_channel(mat)
-            arrs[f"{i}/{name}/int8"] = codes
-            arrs[f"{i}/{name}/scale"] = scale
+            arrs[f"{key}/int8"] = codes
+            arrs[f"{key}/scale"] = scale
+            if quant == "w8a8":
+                if not act_scales or key not in act_scales:
+                    raise ValueError(f"w8a8 is missing a calibrated activation scale for {key}")
+                spec = act_scales[key]
+                arrs[f"{key}/act_unit"] = np.float16(spec["in"])
+                arrs[f"{key}/out_unit"] = np.float16(spec["out"])
         else:
-            arrs[f"{i}/{name}/dense"] = np.asarray(mat, np.float16)
+            arrs[f"{key}/dense"] = np.asarray(mat, np.float16)
     return arrs
 
 

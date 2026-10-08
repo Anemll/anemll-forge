@@ -118,12 +118,156 @@ class ReadoutHead:
         return Head().eval().to(torch.float16)
 
 
+def _calibration_rows() -> list[tuple[str, list[int]]]:
+    """Real Jeff prompts whose projection ranges set the W8A8 scales. Override with JEFF_CALIB_CASES / JEFF_CALIB_PROMPTS."""
+    path = Path(os.environ.get(
+        "JEFF_CALIB_CASES", "/Users/anemll/Models/jeff/spike/parity/prefix_cases.json"))
+    names = [n for n in os.environ.get("JEFF_CALIB_PROMPTS", "t256_5opt,t1024_30opt,t2048_100opt").split(",") if n]
+    payload = json.loads(path.read_text())
+    rows = []
+    for name in names:
+        case = next((c for c in payload["cases"] if c["name"] == name), None)
+        if case is None:
+            raise ValueError(f"calibration prompt {name} is not in {path}")
+        rows.append((name, [int(t) for t in case["ids"]]))
+    if not rows:
+        raise ValueError("no calibration prompts")
+    return rows
+
+
+def _fresh_state(B, entry):
+    import torch
+    f = torch.float16
+    gdn = [[torch.zeros(B.P + 3, B.cdim, dtype=f), torch.zeros(B.nv, B.dk, B.dv, dtype=f),
+            torch.zeros(B.nv, 3 * B.P + 1, B.dv, dtype=f)] for _ in entry.gdn_j]
+    att = [[torch.zeros(B.nkv, entry.ctx, B.hd, dtype=f), torch.zeros(B.nkv, entry.ctx, B.hd, dtype=f)]
+           for _ in entry.att_j]
+    return gdn, att
+
+
+def _call_entry(B, entry, x, pos: int, n: int, gdn, att, inv: np.ndarray):
+    """One 256-row prefill step of the torch graph, with the same masks the runtime uses. Returns the hidden buffer."""
+    import torch
+    T = entry.T
+    f = torch.float16
+    pos_idx = np.minimum(np.arange(pos, pos + T), pos + n - 1)
+    ang = np.concatenate([np.outer(pos_idx, inv)] * 2, axis=1).astype(np.float32)
+    cos = torch.from_numpy(np.cos(ang).astype(np.float16))
+    sin = torch.from_numpy(np.sin(ang).astype(np.float16))
+    mask = torch.full((1, entry.ctx), -1e4, dtype=f)
+    if pos:
+        mask[0, :pos] = 0
+    conv_sel = torch.zeros(3, B.P + 3, dtype=f)
+    conv_sel[torch.arange(3), torch.arange(3)] = 1
+    commit = torch.zeros(1, B.P, 1, dtype=f)
+    commit_last = torch.zeros(1, B.P, 1, dtype=f)
+    conv_sel_out = torch.zeros(3, T + 3, dtype=f)
+    idx = torch.arange(3)
+    conv_sel_out[idx, n + idx] = 1
+    valid = torch.zeros(1, T, 1, dtype=f)
+    valid[0, :n, 0] = 1
+    args = [x, cos, sin, mask, conv_sel, commit, commit_last, conv_sel_out, valid]
+    for conv, rec, pend in gdn:
+        args += [conv, rec, pend]
+    for k, v in att:
+        args += [k, v]
+    with torch.inference_mode():
+        out = entry(*args)
+    rest = out[1:]
+    cursor = 0
+    for i in range(len(gdn)):
+        gdn[i][0] = rest[cursor].detach().clone()
+        gdn[i][1] = rest[cursor + 1].detach().clone()
+        gdn[i][2] = rest[cursor + 2].detach().clone()
+        cursor += 3
+    for i in range(len(att)):
+        kt, vt = rest[cursor], rest[cursor + 1]
+        cursor += 2
+        att[i][0][:, pos:pos + n] = kt[:, :n]
+        att[i][1][:, pos:pos + n] = vt[:, :n]
+    return out[0]
+
+
+def calibrate_activation_scales(B, ck: JeffCheckpoint, ctx: int, width: int = 256) -> dict:
+    """Per-tensor abs-max/127 of each dense projection's input and output, over a few real prompts on the FP16 graph."""
+    import torch
+    import torch.nn as nn
+    rows = _calibration_rows()
+    layers = list(range(int(ck.cfg["num_hidden_layers"])))
+    W = {}
+    for i in layers:
+        W.update(layer_arrays(ck, i, "fp16"))
+    mods = [B.LayerW(W, i).eval().to(torch.float16) for i in layers]
+    del W
+    gc.collect()
+    peaks: dict[str, list[float]] = {}
+
+    def pre(mod, inputs):
+        peaks.setdefault(mod.key, [0.0, 0.0])
+        peaks[mod.key][0] = max(peaks[mod.key][0], float(inputs[0].detach().abs().amax()))
+
+    def post(mod, _inputs, output):
+        peaks[mod.key][1] = max(peaks[mod.key][1], float(output.detach().abs().amax()))
+
+    handles = []
+    dense_suffixes = (
+        "in_proj_qkv.weight", "in_proj_z.weight", "out_proj.weight",
+        "q_proj.weight", "k_proj.weight", "v_proj.weight", "o_proj.weight",
+        "gate_proj.weight", "up_proj.weight", "down_proj.weight",
+    )
+    for layer in mods:
+        for mod in layer.modules():
+            if mod.__class__.__name__ == "QConv" and any(mod.key.endswith(name) for name in dense_suffixes):
+                handles.append(mod.register_forward_pre_hook(pre))
+                handles.append(mod.register_forward_hook(post))
+    chunks = []
+    for start in range(0, len(layers), 4):
+        entry = B.Entry(nn.ModuleList(mods[start:start + 4]), ctx, width, kv_cache_dtype="fp16")
+        chunks.append((entry, *_fresh_state(B, entry)))
+    rope = ck.cfg["rope_parameters"]
+    rot = int(ck.cfg["head_dim"] * rope["partial_rotary_factor"])
+    inv = 1.0 / rope["rope_theta"] ** (np.arange(0, rot, 2) / rot)
+    emb = torch.from_numpy(np.asarray(ck.embed_table()))
+    hid = int(ck.cfg["hidden_size"])
+    for name, ids in rows:
+        if len(ids) > ctx:
+            raise ValueError(f"{name} has {len(ids)} tokens, context is {ctx}")
+        for entry, gdn, att in chunks:
+            gdn_z, att_z = _fresh_state(B, entry)
+            for i in range(len(gdn)):
+                gdn[i][:] = [t.clone() for t in gdn_z[i]]
+            for i in range(len(att)):
+                att[i][:] = [t.clone() for t in att_z[i]]
+        pos = 0
+        print(f"calibrate {name}: {len(ids)} tokens", flush=True)
+        while pos < len(ids):
+            n = min(width, len(ids) - pos)
+            x = torch.zeros(1, hid, 1, width, dtype=torch.float16)
+            x[0, :, 0, :n] = emb[ids[pos:pos + n]].T
+            for entry, gdn, att in chunks:
+                x = _call_entry(B, entry, x, pos, n, gdn, att, inv)
+            pos += n
+    for handle in handles:
+        handle.remove()
+    scales = {}
+    for key, (in_max, out_max) in peaks.items():
+        scales[key] = {"in": max(in_max, 1e-3) / 127.0, "out": max(out_max, 1e-3) / 127.0,
+                       "in_max": in_max, "out_max": out_max}
+    if not scales:
+        raise RuntimeError("calibration saw no dense projections")
+    print(f"calibrated {len(scales)} projections, input scale "
+          f"{min(s['in'] for s in scales.values()):.4g} .. {max(s['in'] for s in scales.values()):.4g}", flush=True)
+    del mods
+    gc.collect()
+    return scales
+
+
 def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, widths: list[int],
-                        quant: str, out: Path) -> dict:
+                        quant: str, out: Path, act_scales: dict | None = None) -> dict:
     import torch.nn as nn
     W = {}
     for i in layers:
-        W.update(layer_arrays(ck, i, quant))
+        W.update(layer_arrays(ck, i, quant, act_scales))
     mods = nn.ModuleList(B.LayerW(W, i) for i in layers).eval()
     import torch
     mods = mods.to(torch.float16)
@@ -199,10 +343,14 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
         "numerics": {"SILU": B.SILU, "MLP_SILU": B.MLP_SILU, "GDN_FAST": B.GDN_FAST},
     }
     man_path = coreai / "manifest.json"
+    act_scales = None
+    if quant == "w8a8":
+        act_scales = calibrate_activation_scales(B, ck, ctx, width=min(widths))
+        (coreai / "act_scales.json").write_text(json.dumps(act_scales, indent=1))
     chunks = []
     for layers in chunk_plan_from(plan):
         dest = coreai / f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
-        info = build_prefill_chunk(B, ck, layers, ctx, widths, quant, dest)
+        info = build_prefill_chunk(B, ck, layers, ctx, widths, quant, dest, act_scales)
         chunks.append(info)
         man["chunks"] = chunks
         man_path.write_text(json.dumps(man, indent=1))
