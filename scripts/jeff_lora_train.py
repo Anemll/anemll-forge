@@ -3,9 +3,14 @@
 
 The default task is Snake, labeled by a shortest-path oracle and rendered with the
 same prompt the browser demo sends. Any other task is a JSONL file of rows
-``{state, options, label, instructions}``. Loss is cross-entropy on Jeff's readout
-over the option codes, divided by ``decision_config`` temperature, which is how
-``JeffCoreAI.decide`` turns logits into probabilities.
+``{state, options, label, instructions}``, or ``--task tetris``. Loss matches
+upstream ``jeff-train``: cross-entropy on the masked readout logits, with no
+temperature inside the loss. ``JeffCoreAI.decide`` still divides those logits by
+``decision_config`` temperature before the softmax. Argmax does not change.
+
+LoRA and the readout use different learning rates, as in
+``jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6`` (alpha defaults to
+``2 * rank``).
 
     python forge.py jeff-train-lora \\
         --model ~/Models/jeff/jeff-base-v1.3 \\
@@ -16,15 +21,16 @@ accepts), and ``report.json``. Deploy the merged tree with the usual convert and
 compile into its own Core AI directory. The ANE package has the LoRA already folded
 into the weights.
 
-``--device auto`` uses MPS when it is available and no Core AI compile or bench
-process is running, otherwise CPU. A one-step MPS graph warmup is expected.
+``--device auto`` is MPS when it is available, else CPU. An ANE compile does not
+move this job off the GPU. The first two steps are timed and then discarded so
+the run still starts from the base readout.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import random
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -40,41 +46,22 @@ sys.path.insert(0, str(ROOT / "coreai"))
 from jeff_coreai import load_decision_config, prompt_ids  # noqa: E402
 from jeff_lora import attach_lora, save_lora, save_merged_checkpoint, trainable_parameters  # noqa: E402
 from jeff_snake import as_decision, generate_snake_rows, opening_states, play_game, snake_row, summarize_games  # noqa: E402
-
-BENCH_NEEDLES = (
-    "jeff_coreai_convert", "jeff_coreai_smoke", "coreai_compile.py", "forge.py compile",
-    "m6_chunk", "m6_attn_bench", "m6_compare_bench", "m6_entry_sweep",
-    "ANECompilerService",
-)
+from jeff_tetris import generate_tetris_rows  # noqa: E402
 
 
-def competing_bench() -> list[str]:
-    """Other forge / Core AI compile or bench commands. An idle server is not one of these."""
-    try:
-        listing = subprocess.check_output(["ps", "-ax", "-o", "command="], text=True)
-    except (OSError, subprocess.CalledProcessError):
-        return []
-    hits = []
-    for line in listing.splitlines():
-        if any(needle in line for needle in BENCH_NEEDLES):
-            hits.append(line.strip()[:180])
-    return hits
+def pick_device(requested: str) -> str:
+    if requested == "auto":
+        return "mps" if torch.backends.mps.is_available() else "cpu"
+    if requested == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError("MPS was requested and is not available")
+    return requested
 
 
-def pick_device(requested: str) -> tuple[str, list[str]]:
-    hits = competing_bench()
-    if requested == "cpu":
-        return "cpu", hits
-    if requested == "mps":
-        if not torch.backends.mps.is_available():
-            raise RuntimeError("MPS was requested and is not available")
-        return "mps", hits
-    if hits or not torch.backends.mps.is_available():
-        return "cpu", hits
-    return "mps", hits
-
-
-def load_rows(path: Path | None, train_n: int, heldout_n: int, seed: int) -> tuple[list[dict], list[dict], str]:
+def load_rows(path: Path | None, train_n: int, heldout_n: int, seed: int, task: str) -> tuple[list[dict], list[dict], str]:
+    if path is None and task == "tetris":
+        train = generate_tetris_rows(train_n, seed)
+        held = generate_tetris_rows(heldout_n, seed + 1)
+        return train, held, "tetris"
     if path is None:
         train = generate_snake_rows(train_n, seed)
         held = generate_snake_rows(heldout_n, seed + 1)
@@ -127,23 +114,31 @@ def collate(batch: list[dict], pad_id: int, device: str) -> tuple[torch.Tensor, 
     return ids.to(device), mask.to(device), index.to(device), labels.to(device)
 
 
-def forward_logits(model, readout: nn.Linear, ids, mask, index) -> torch.Tensor:
-    hidden = model(input_ids=ids, attention_mask=mask, use_cache=False).last_hidden_state
+def forward_logits(model, readout: nn.Linear, ids, mask, index, device: str) -> torch.Tensor:
+    autocast = torch.autocast(device_type="mps", dtype=torch.bfloat16) if device == "mps" else contextlib.nullcontext()
+    with autocast:
+        hidden = model(input_ids=ids, attention_mask=mask, use_cache=False).last_hidden_state
     picked = hidden[torch.arange(hidden.shape[0], device=hidden.device), index]
     return readout(picked.float())
 
 
-def option_logits(logits: torch.Tensor, batch: list[dict], temperature: float) -> torch.Tensor:
-    """Jeff's head: logits over the option codes, unused slots at -1e9, then divide by temperature."""
-    n_max = max(row["n"] for row in batch)
-    scaled = logits[:, :n_max] / temperature
+def masked_logits(logits: torch.Tensor, batch: list[dict]) -> torch.Tensor:
+    """Jeff's training head: one logit per answer code, unused codes set to -1e9.
+
+    The loss is cross-entropy on these logits with no temperature, matching
+    ``jeff-train``. Serving divides by ``decision_config`` temperature afterwards.
+    The label index is the option's position, which is also its answer-code index.
+    """
+    out = logits.clone()
+    width = out.shape[1]
     for i, row in enumerate(batch):
-        if row["n"] < n_max:
-            scaled[i, row["n"]:] = -1e9
-    return scaled
+        n = row["n"]
+        if n < width:
+            out[i, n:] = -1e9
+    return out
 
 
-def run_epoch(model, readout, rows, batch_size, pad_id, device, temperature, optimizer=None) -> dict:
+def run_epoch(model, readout, rows, batch_size, pad_id, device, optimizer=None) -> dict:
     train = optimizer is not None
     model.train(False)
     readout.train(train)
@@ -151,26 +146,36 @@ def run_epoch(model, readout, rows, batch_size, pad_id, device, temperature, opt
     correct = 0
     seen = 0
     steps = 0
+    step_seconds = []
     order = torch.randperm(len(rows)).tolist() if train else list(range(len(rows)))
     for start in range(0, len(order), batch_size):
         batch = [rows[i] for i in order[start:start + batch_size]]
         ids, mask, index, labels = collate(batch, pad_id, device)
+        began = time.perf_counter()
         if train:
             optimizer.zero_grad(set_to_none=True)
-            logits = option_logits(forward_logits(model, readout, ids, mask, index), batch, temperature)
+            logits = masked_logits(forward_logits(model, readout, ids, mask, index, device), batch)
             loss = torch.nn.functional.cross_entropy(logits, labels)
             loss.backward()
             torch.nn.utils.clip_grad_norm_([p for group in optimizer.param_groups for p in group["params"]], 1.0)
             optimizer.step()
+            if device == "mps":
+                torch.mps.synchronize()
         else:
             with torch.no_grad():
-                logits = option_logits(forward_logits(model, readout, ids, mask, index), batch, temperature)
+                logits = masked_logits(forward_logits(model, readout, ids, mask, index, device), batch)
                 loss = torch.nn.functional.cross_entropy(logits, labels)
+        elapsed = time.perf_counter() - began
+        step_seconds.append(elapsed)
         total_loss += float(loss.detach()) * len(batch)
         correct += int((logits.detach().argmax(-1) == labels).sum())
         seen += len(batch)
         steps += 1
-    return {"loss": total_loss / max(1, seen), "accuracy": correct / max(1, seen), "n": seen, "steps": steps}
+        if train and (steps <= 2 or steps % 8 == 0):
+            print(f"    step {steps}  {elapsed:.2f}s  loss {total_loss / seen:.3f}  acc {correct / seen:.3f}", flush=True)
+    steady = step_seconds[1:] or step_seconds
+    return {"loss": total_loss / max(1, seen), "accuracy": correct / max(1, seen), "n": seen, "steps": steps,
+            "seconds_per_step": round(sum(steady) / len(steady), 3)}
 
 
 def hint_rows(rows: list[dict]) -> list[dict]:
@@ -189,7 +194,7 @@ def play_split(model, readout, tokenizer, decision, model_path, device, temperat
         encoded = encode(model_path, [row], decision, tokenizer)
         ids, mask, index, _labels = collate(encoded, pad_id, device)
         with torch.no_grad():
-            logits = option_logits(forward_logits(model, readout, ids, mask, index), encoded, temperature)
+            logits = masked_logits(forward_logits(model, readout, ids, mask, index, device), encoded)
         names = list(row["options"])
         return names[int(logits.argmax(-1)[0])]
 
@@ -207,14 +212,16 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", type=Path, required=True, help="jeff-base checkpoint directory")
     p.add_argument("--output", type=Path, required=True, help="new directory for adapter/, merged/, and report.json")
-    p.add_argument("--dataset", type=Path, help="JSONL of {state, options, label}. Default: synthetic snake")
-    p.add_argument("--rank", type=int, default=8)
-    p.add_argument("--alpha", type=float, default=16)
+    p.add_argument("--dataset", type=Path, help="JSONL of {state, options, label}. Default: synthetic snake or tetris")
+    p.add_argument("--task", choices=("snake", "tetris"), default="snake")
+    p.add_argument("--rank", type=int, default=16)
+    p.add_argument("--alpha", type=float, default=32)
     p.add_argument("--train", type=int, default=256, help="synthetic snake rows (ignored with --dataset)")
     p.add_argument("--heldout", type=int, default=64)
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--batch", type=int, default=4)
-    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--lr", type=float, default=2e-4, help="LoRA learning rate")
+    p.add_argument("--readout-lr", type=float, default=5e-6, dest="readout_lr")
     p.add_argument("--device", choices=("auto", "cpu", "mps"), default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--play", type=int, default=0,
@@ -228,21 +235,13 @@ def main(argv: list[str] | None = None) -> int:
     if output.exists() and any(output.iterdir()):
         p.error(f"Use a new or empty --output directory: {output}")
     model_path = a.model.expanduser().resolve()
-    device, hits = pick_device(a.device)
-    if hits and device == "cpu" and a.device == "auto":
-        print("jeff-train-lora: Core AI compile or bench is running, so this job stays on CPU.", flush=True)
-        for line in hits[:6]:
-            print(f"  {line}", flush=True)
-    elif hits and device == "mps":
-        print("jeff-train-lora: MPS was requested while another compile or bench is running.", flush=True)
-        for line in hits[:6]:
-            print(f"  {line}", flush=True)
+    device = pick_device(a.device)
     print(f"jeff-train-lora: device {device}", flush=True)
 
     torch.manual_seed(a.seed)
     decision = load_decision_config(model_path)
     temperature = float(decision["temperature"])
-    train_rows, held_rows, task = load_rows(a.dataset, a.train, a.heldout, a.seed)
+    train_rows, held_rows, task = load_rows(a.dataset, a.train, a.heldout, a.seed, a.task)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path))
     pad_id = tokenizer.pad_token_id
     if pad_id is None:
@@ -266,9 +265,30 @@ def main(argv: list[str] | None = None) -> int:
         readout.weight.copy_(readout_weight.float())
     readout.to(device)
     params = trainable_parameters(layers, readout)
-    optimizer = torch.optim.AdamW(params, lr=a.lr)
+    lora_params = [layer.A for layer in layers] + [layer.B for layer in layers]
+
+    def make_optimizer():
+        return torch.optim.AdamW(
+            [{"params": lora_params, "lr": a.lr}, {"params": [readout.weight], "lr": a.readout_lr}],
+            weight_decay=0.0)
+
     n_train = sum(parameter.numel() for parameter in params)
-    print(f"LoRA layers {len(layers)}  trainable {n_train}  temperature {temperature:.4f}", flush=True)
+    print(f"LoRA layers {len(layers)}  trainable {n_train}  rank {a.rank}  "
+          f"lora lr {a.lr:g}  readout lr {a.readout_lr:g}  temperature {temperature:.4f} (inference only)",
+          flush=True)
+    # Two timed steps, then put the weights back. Step 1 includes the MPS graph warmup.
+    snapshot = ([layer.A.detach().clone() for layer in layers],
+                [layer.B.detach().clone() for layer in layers],
+                readout.weight.detach().clone())
+    timed = run_epoch(backbone, readout, train_enc[:max(a.batch * 2, a.batch)], a.batch, pad_id, device, make_optimizer())
+    print(f"timed {device} steps: {timed['seconds_per_step']:.3f} s/step "
+          f"(steady, batch {a.batch}; first step is the warmup)", flush=True)
+    with torch.no_grad():
+        for layer, saved_a, saved_b in zip(layers, snapshot[0], snapshot[1]):
+            layer.A.copy_(saved_a)
+            layer.B.copy_(saved_b)
+        readout.weight.copy_(snapshot[2])
+    optimizer = make_optimizer()
 
     started = time.perf_counter()
     report = {
@@ -278,20 +298,22 @@ def main(argv: list[str] | None = None) -> int:
         "rank": a.rank,
         "alpha": a.alpha,
         "lr": a.lr,
+        "readout_lr": a.readout_lr,
         "epochs": a.epochs,
         "batch": a.batch,
         "temperature": temperature,
+        "loss": "cross_entropy on masked readout logits, temperature applied only at inference",
         "trainable": n_train,
         "lora_layers": len(layers),
-        "bench_processes": hits,
+        "timed_seconds_per_step": timed["seconds_per_step"],
         "base": {},
         "adapter": {},
     }
     print("base accuracy", flush=True)
-    report["base"]["train"] = run_epoch(backbone, readout, train_enc, a.batch, pad_id, device, temperature)
-    report["base"]["heldout"] = run_epoch(backbone, readout, held_enc, a.batch, pad_id, device, temperature)
+    report["base"]["train"] = run_epoch(backbone, readout, train_enc, a.batch, pad_id, device)
+    report["base"]["heldout"] = run_epoch(backbone, readout, held_enc, a.batch, pad_id, device)
     if hint_enc is not None:
-        report["base"]["heldout_hint"] = run_epoch(backbone, readout, hint_enc, a.batch, pad_id, device, temperature)
+        report["base"]["heldout_hint"] = run_epoch(backbone, readout, hint_enc, a.batch, pad_id, device)
     _print_split("base", report["base"])
 
     states = opening_states(a.play, a.seed) if task == "snake" and a.play else []
@@ -305,15 +327,15 @@ def main(argv: list[str] | None = None) -> int:
     history = []
     for epoch in range(a.epochs):
         t0 = time.perf_counter()
-        stats = run_epoch(backbone, readout, train_enc, a.batch, pad_id, device, temperature, optimizer)
+        stats = run_epoch(backbone, readout, train_enc, a.batch, pad_id, device, optimizer)
         elapsed = time.perf_counter() - t0
         stats["seconds"] = round(elapsed, 1)
         history.append(stats)
         print(f"  epoch {epoch + 1}/{a.epochs}  loss {stats['loss']:.3f}  acc {stats['accuracy']:.3f}  {elapsed:.0f}s",
               flush=True)
     report["history"] = history
-    report["adapter"]["train"] = run_epoch(backbone, readout, train_enc, a.batch, pad_id, device, temperature)
-    report["adapter"]["heldout"] = run_epoch(backbone, readout, held_enc, a.batch, pad_id, device, temperature)
+    report["adapter"]["train"] = run_epoch(backbone, readout, train_enc, a.batch, pad_id, device)
+    report["adapter"]["heldout"] = run_epoch(backbone, readout, held_enc, a.batch, pad_id, device)
     _print_split("adapter", report["adapter"])
     if states:
         print(f"adapter self-play x{len(states)}", flush=True)
@@ -335,12 +357,12 @@ def main(argv: list[str] | None = None) -> int:
     sample = held_enc[:4]
     with torch.no_grad():
         ids, mask, index, _labels = collate(sample, pad_id, device)
-        logits = option_logits(forward_logits(backbone, readout, ids, mask, index), sample, temperature)
-        probs = torch.softmax(logits, dim=-1).cpu()
-    for row, encoded, prob in zip(held_rows[:4], sample, probs):
+        logits = masked_logits(forward_logits(backbone, readout, ids, mask, index, device), sample)
+    for i, encoded in enumerate(sample):
         n = encoded["n"]
+        prob = torch.softmax(logits[i, :n] / temperature, dim=-1).detach().cpu()
         parity.append({"ids": encoded["ids"], "n": n, "label": encoded["label"],
-                       "probabilities": [float(value) for value in prob[:n]]})
+                       "probabilities": [float(value) for value in prob]})
     (output / "parity_rows.json").write_text(json.dumps(parity))
     if not a.skip_merge:
         print(f"writing merged checkpoint to {output / 'merged'}", flush=True)

@@ -94,7 +94,7 @@ jeff.choose("The disk is full.", {"page": "Page someone.", "wait": "Wait."})
 
 ## Sample LoRA (Snake)
 
-Base Jeff has no Snake adapter, so the demo's first moves are soft (top probability about 0.34) and the snake misses the food. `jeff-train-lora` is a copyable sample: it builds rows of `{state, options, label, instructions}`, renders them with the same Jeff prompt the server uses, and trains a rank-8 LoRA plus the readout. Loss is cross-entropy on the option-code logits divided by `decision_config` temperature.
+Base Jeff has no Snake adapter, so the demo's first moves are soft (top probability about 0.34) and the snake misses the food. `jeff-train-lora` is a copyable sample: it builds rows of `{state, options, label, instructions}`, renders them with the same Jeff prompt the server uses, and trains a rank-16 LoRA (alpha 32) plus the readout. LoRA and the readout are separate AdamW groups (`2e-4` and `5e-6`). Loss is cross-entropy on the masked option-code logits. Temperature is applied only when the probabilities are formed, the same way `JeffCoreAI.decide` divides by `decision_config` temperature.
 
 Snake rows are synthetic. An oracle plays a shortest safe path to the food (walls and the body are illegal; the tail cell is free because it vacates). The board text matches the demo: `H` head, `#` body, `F` food, `.` empty, and the state object's last field is `latest`.
 
@@ -114,7 +114,7 @@ python forge.py jeff-train-lora \
   --output "$HOME/Models/jeff-snake"
 ```
 
-Default is 256 train rows, 64 held-out, rank 8, alpha 16, 2 epochs, batch 4. `--device auto` uses MPS when it is free and no Core AI convert, compile, or bench process is running; otherwise it stays on CPU. The run prints train and held-out accuracy for the base and the adapter. On Snake it also scores the base model with a hint prompt (food direction and the safe-move list added in front of `latest`). `--play N` adds PyTorch self-play; the default is 0 because each move is a full forward. Game scores for the served builds come from `scripts/jeff_snake_eval.py`.
+Default is 256 train rows, 64 held-out, rank 16, alpha 32, LoRA learning rate `2e-4`, readout learning rate `5e-6`, 2 epochs, batch 4. That split matches upstream `jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6`. The loss is cross-entropy on the masked readout logits and does not divide by temperature; `JeffCoreAI.decide` still divides by `decision_config` temperature before the softmax. `--device auto` is MPS when it is available. An ANE compile does not move the job to CPU. The run prints train and held-out accuracy for the base and the adapter, and seconds per step. On Snake it also scores the base model with a hint prompt (food direction and the safe-move list added in front of `latest`). `--task tetris` uses the El-Tetris placement oracle instead. `--play N` adds PyTorch self-play; the default is 0 because each move is a full forward. Game scores for the served builds come from `scripts/jeff_snake_eval.py`.
 
 The script writes:
 

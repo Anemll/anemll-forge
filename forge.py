@@ -72,14 +72,16 @@ def parser():
     jt = sub.add_parser("jeff-train-lora", help="sample LoRA on a Jeff checkpoint (snake oracle, or a JSONL dataset)")
     jt.add_argument("--model", type=path, required=True, help="local Jeff checkpoint directory")
     jt.add_argument("--output", type=path, required=True, help="new directory for adapter/, merged/, and report.json")
-    jt.add_argument("--dataset", type=path, help="JSONL of {state, options, label, instructions}; default is synthetic snake")
-    jt.add_argument("--rank", type=int, default=8)
-    jt.add_argument("--alpha", type=float, default=16)
+    jt.add_argument("--dataset", type=path, help="JSONL of {state, options, label, instructions}; default is the synthetic task")
+    jt.add_argument("--task", choices=("snake", "tetris"), default="snake")
+    jt.add_argument("--rank", type=int, default=16)
+    jt.add_argument("--alpha", type=float, default=32)
     jt.add_argument("--train", type=int, default=256)
     jt.add_argument("--heldout", type=int, default=64)
     jt.add_argument("--epochs", type=int, default=2)
     jt.add_argument("--batch", type=int, default=4)
-    jt.add_argument("--lr", type=float, default=1e-3)
+    jt.add_argument("--lr", type=float, default=2e-4, help="LoRA learning rate")
+    jt.add_argument("--readout-lr", type=float, default=5e-6)
     jt.add_argument("--device", choices=("auto", "cpu", "mps"), default="auto")
     jt.add_argument("--seed", type=int, default=0)
     jt.add_argument("--play", type=int, default=0, help="PyTorch self-play games per model; 0 skips them")
@@ -164,9 +166,10 @@ def prepare_jeff(a):
         return [python, str(ROOT / "scripts" / "jeff_coreai_convert.py"), *args], env
     if a.command == "jeff-train-lora":
         # Training is PyTorch in this interpreter (transformers + MPS or CPU). It does not load Core AI.
-        args = ["--model", str(a.model), "--output", str(a.output), "--rank", str(a.rank),
-                "--alpha", str(a.alpha), "--train", str(a.train), "--heldout", str(a.heldout),
-                "--epochs", str(a.epochs), "--batch", str(a.batch), "--lr", str(a.lr),
+        args = ["--model", str(a.model), "--output", str(a.output), "--task", a.task,
+                "--rank", str(a.rank), "--alpha", str(a.alpha), "--train", str(a.train),
+                "--heldout", str(a.heldout), "--epochs", str(a.epochs), "--batch", str(a.batch),
+                "--lr", str(a.lr), "--readout-lr", str(a.readout_lr),
                 "--device", a.device, "--seed", str(a.seed), "--play", str(a.play),
                 "--max-steps", str(a.max_steps)]
         if a.dataset is not None:
