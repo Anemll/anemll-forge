@@ -3,6 +3,11 @@
 Layout is plain matmul (the placement probe: dynamic conv weights leave the ANE,
 dynamic matmul of A [in, rank] and sB [rank, out] stays on it). One input pair per
 adapted projection. Rank may be padded with zeros.
+
+A 4-layer chunk executes at most about 8 streamed projections. At 12 the graph is
+still marked fully on the ANE, but the runtime has no procedureInfo and the call
+fails. One layer (6 GDN projections or 7 attention projections) executes. See
+scripts/jeff_lora_layer_chain.py.
 """
 from __future__ import annotations
 
@@ -38,10 +43,16 @@ def _modules(B, ck, layers: list[int]):
     return mods.to(torch.float16)
 
 
-def make_stream_entry(ck, factors, layers, layout: str, rank: int, ctx: int, width: int):
-    """Build the streamed entry. Leaves B.STREAM_LORA set: forward and export read it."""
+def make_stream_entry(ck, factors, layers, layout: str, rank: int, ctx: int, width: int,
+                      max_proj: int | None = None):
+    """Build the streamed entry. Leaves B.STREAM_LORA set: forward and export read it.
+
+    max_proj keeps the first projections in sorted key order. The rest stay constant base weights.
+    """
     B = _builder(ck)
     keys = chunk_keys(factors, layers)
+    if max_proj is not None:
+        keys = set(sorted(keys)[:max_proj])
     plan = StreamPlan(keys, layout, rank)
     B.STREAM_LORA = plan
     mods = _modules(B, ck, layers)
@@ -100,10 +111,47 @@ def eager_parity(ck, factors, layers, layout: str, rank: int, ctx: int = 2048, w
             "lora_bytes": plan.meta()["lora_bytes"], "n_proj": len(plan.order)}
 
 
-def save_chunk(B, entry, out: Path, width: int, ctx: int) -> None:
+def prefill_entry_name(width: int, ctx: int) -> str:
+    return f"p{width}_{ctx // 1024}k"
+
+
+def stream_entry_name(width: int, ctx: int, layers: list[int] | None = None) -> str:
+    """Distinct from the const prefill name. A streamed graph that reuses p256_2k does not get an
+    ANE procedure. The layer span is part of the name so per-layer packages do not share one key."""
+    name = f"lora{width}_{ctx // 1024}k"
+    if layers:
+        name = f"{name}_L{layers[0]:02d}_{layers[-1]:02d}"
+    return name
+
+
+def save_chunk(B, entry, out: Path, width: int, ctx: int, entry_name: str | None = None) -> str:
     from jeff_coreai_build import save_dense_program
-    name = f"p{width}_{ctx // 1024}k"
+    name = entry_name or prefill_entry_name(width, ctx)
     save_dense_program(B, [(name, entry, entry.input_names(), entry.output_names())], out)
+    return name
+
+
+def export_stream(ck, factors, layers, layout: str, rank: int, stream_path: Path,
+                 ctx: int, width: int, parity: dict | None = None, max_proj: int | None = None) -> dict:
+    """Write only the streamed package. Its function name is not the const prefill name."""
+    t1 = time.perf_counter()
+    stream, plan, B = make_stream_entry(ck, factors, layers, layout, rank, ctx, width, max_proj=max_proj)
+    try:
+        name = stream_entry_name(width, ctx, layers)
+        if max_proj is not None:
+            name = f"{name}_n{max_proj}"
+        name = save_chunk(B, stream, stream_path, width, ctx, entry_name=name)
+        meta = plan.meta()
+    finally:
+        B.STREAM_LORA = None
+    meta.update({"entry": name, "activation_entry": prefill_entry_name(width, ctx),
+                 "layers": [layers[0], layers[-1]], "ctx": ctx, "width": width,
+                 "file": stream_path.name, "eager_parity": parity})
+    (stream_path.parent / "lora.json").write_text(json.dumps(meta, indent=1))
+    del stream
+    gc.collect()
+    print(f"stream exported in {time.perf_counter() - t1:.1f}s", flush=True)
+    return meta
 
 
 def build_pair(ck, factors, layers, layout: str, rank: int, out_dir: Path,
@@ -126,20 +174,7 @@ def build_pair(ck, factors, layers, layout: str, rank: int, out_dir: Path,
     gc.collect()
     print(f"merged exported in {time.perf_counter() - t0:.1f}s", flush=True)
     print("export streamed ...", flush=True)
-    t1 = time.perf_counter()
-    stream, plan, B = make_stream_entry(ck, factors, layers, layout, rank, ctx, width)
-    try:
-        save_chunk(B, stream, stream_path, width, ctx)
-        meta = plan.meta()
-    finally:
-        B.STREAM_LORA = None
-    meta.update({"entry": f"p{width}_{ctx // 1024}k", "layers": [layers[0], layers[-1]],
-                 "ctx": ctx, "width": width, "file": stream_path.name,
-                 "eager_parity": parity})
-    (stream_path.parent / "lora.json").write_text(json.dumps(meta, indent=1))
-    del stream
-    gc.collect()
-    print(f"stream exported in {time.perf_counter() - t1:.1f}s", flush=True)
+    meta = export_stream(ck, factors, layers, layout, rank, stream_path, ctx, width, parity)
     return {"merged": str(merged_path), "stream": str(stream_path), "eager": parity, "meta": meta}
 
 
@@ -274,13 +309,14 @@ def median(samples: list[float]) -> float:
 
 def bench_chunks(base_pkg: Path, merged_pkg: Path, stream_pkg: Path, meta: dict, factors,
                  rank: int, repeats: int = 50, warmup: int = 10) -> dict:
+    act = meta.get("activation_entry") or prefill_entry_name(int(meta["width"]), int(meta["ctx"]))
     entry = meta["entry"]
     width = int(meta["width"])
-    print("load base", flush=True)
-    base = open_entry(base_pkg, entry)
-    print("load merged", flush=True)
-    merged = open_entry(merged_pkg, entry)
-    print("load stream", flush=True)
+    print("load base", act, flush=True)
+    base = open_entry(base_pkg, act)
+    print("load merged", act, flush=True)
+    merged = open_entry(merged_pkg, act)
+    print("load stream", entry, flush=True)
     stream = open_entry(stream_pkg, entry)
     _, _, b_in, b_out, b_plan = base
     _, _, m_in, m_out, m_plan = merged
@@ -316,6 +352,7 @@ def bench_chunks(base_pkg: Path, merged_pkg: Path, stream_pkg: Path, meta: dict,
     y_reswap = y_stats(s_out)
     report = {
         "entry": entry,
+        "activation_entry": act,
         "repeats": repeats,
         "latency_ms": {
             "A_base": {"median": median(base_ms), "min": min(base_ms), "max": max(base_ms)},

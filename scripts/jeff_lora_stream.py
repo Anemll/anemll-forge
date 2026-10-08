@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
 
 from jeff_coreai import JEFF_DEFAULT, JeffCheckpoint  # noqa: E402
-from jeff_lora_stream import ADAPTER, BASE_BUILD, bench_chunks, build_pair, placement_of  # noqa: E402
+from jeff_lora_stream import (ADAPTER, BASE_BUILD, bench_chunks, build_pair, eager_parity,  # noqa: E402
+                              export_stream, placement_of)
 from jeff_lora_weights import bytes_for, read_adapter  # noqa: E402
 
 
@@ -33,6 +34,9 @@ def main():
     ex.add_argument("--rank", type=int, default=16, help="graph rank; pad with zeros when above the adapter rank")
     ex.add_argument("--ctx", type=int, default=2048)
     ex.add_argument("--width", type=int, default=256)
+    ex.add_argument("--only", choices=("both", "stream"), default="both")
+    ex.add_argument("--max-proj", type=int, default=0, help="stream only the first N projections (0 = all)")
+    ex.add_argument("--skip-eager", action="store_true")
     b = sub.add_parser("bench")
     b.add_argument("--out", type=Path, required=True)
     b.add_argument("--base", type=Path, default=BASE_BUILD / "chunk_L00-03.aimodel")
@@ -47,6 +51,19 @@ def main():
         ck = JeffCheckpoint(args.model)
         scale, factors = read_adapter(args.adapter)
         print(f"scale {scale} factors {len(factors)} chunk bytes {bytes_for(factors, layers)}", flush=True)
+        if args.only == "stream":
+            stream_path = args.out / "stream" / f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
+            cap = args.max_proj or None
+            parity = None
+            if not args.skip_eager:
+                parity = eager_parity(ck, factors, layers, args.layout, args.rank, args.ctx, args.width)
+                print("eager", json.dumps(parity), flush=True)
+                if parity["cosine"] < 0.99 or parity["max_abs"] > 1.0:
+                    raise SystemExit(f"eager streamed vs merged failed: {parity}")
+            meta = export_stream(ck, factors, layers, args.layout, args.rank, stream_path,
+                                 args.ctx, args.width, parity, max_proj=cap)
+            print(json.dumps({"entry": meta["entry"], "eager": parity}), flush=True)
+            return
         result = build_pair(ck, factors, layers, args.layout, args.rank, args.out, args.ctx, args.width)
         result["scale"] = scale
         result["all_chunks_bytes"] = bytes_for(factors)
