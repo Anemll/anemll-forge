@@ -286,6 +286,10 @@ python scripts/jeff_lora_parity.py \
   --rows "$HOME/Models/jeff-published/triage/parity_rows.json"
 ```
 
-`--task tetris` uses `coreai/jeff_tetris.py`. A 256/64 El-Tetris dataset is generated with `generate_tetris_rows`; Tetris LoRA training is the next run, after this Snake adapter.
+`--task tetris` uses `coreai/jeff_tetris.py`. One decision drops one piece. Each option is a legal rotation and column, written as a sentence (`T piece, rotated right, columns 4-6, lands on row 3, clears 1 line, leaves 0 holes`). The board is text in `latest`. Labels are the El-Tetris maximum. `generate_tetris_rows` builds the 256/64 split, and `generate_tetris_kit_rows` writes the same positions in the adapter-kit `rows.jsonl` shape. The demo Tetris controls sit above that board. The top-5 placement bars and the move log are fixed-height scroll boxes, same as Snake. `scripts/jeff_tetris_eval.py` plays identical seeds for the heuristic, base, and the `tetris` adapter.
+
+The older checkpoint `~/Models/jeff/Jeff-Qwen3.5-0.8B` is prompt layout `state-first` with its own temperature. This server renders every prompt with the v1.3 live-last layout, and a second full ANE compile is another gigabyte, so that checkpoint is not a dropdown entry.
+
+The prefix cache on `cursor/jeff-prefix-cache` (PR #7) measured a Tetris suffix of about 85 tokens at 35.7 ms cached versus 58 ms cold. Wiring it in waits until that branch and this one have both landed. This server still ships with the cache off.
 
 Placement audit of the base build this server loads (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).

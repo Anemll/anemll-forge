@@ -97,7 +97,7 @@ def _paint(board, shape, row: int, col: int) -> list[list[int]]:
     return nxt
 
 
-def _clear(board, shape, row: int, col: int) -> tuple[list[list[int]], int]:
+def _clear(board, shape, row: int, col: int) -> tuple[list[list[int]], int, int]:
     """Remove full lines. ``eroded`` counts cells of this piece that sat in a cleared line."""
     kept = []
     cleared_rows = set()
@@ -109,8 +109,9 @@ def _clear(board, shape, row: int, col: int) -> tuple[list[list[int]], int]:
     while len(kept) < HEIGHT:
         kept.insert(0, [0] * WIDTH)
     # El-Tetris eroded piece cells: cells of this piece in cleared lines, times the number of cleared lines.
+    n_lines = len(cleared_rows)
     piece_cells_cleared = sum(1 for dr, _dc in shape if (row + dr) in cleared_rows)
-    return kept, piece_cells_cleared * len(cleared_rows)
+    return kept, piece_cells_cleared * n_lines, n_lines
 
 
 def _column_height(board, col: int) -> int:
@@ -122,7 +123,7 @@ def _column_height(board, col: int) -> int:
 
 def features(board, shape, row: int, col: int) -> dict:
     painted = _paint(board, shape, row, col)
-    cleared, eroded = _clear(painted, shape, row, col)
+    cleared, eroded, n_lines = _clear(painted, shape, row, col)
     landing = max(HEIGHT - (row + dr) for dr, _ in shape)
     row_transitions = 0
     for line in cleared:
@@ -160,7 +161,7 @@ def features(board, shape, row: int, col: int) -> dict:
             cumulative += depth * (depth + 1) // 2
     return {"landing_height": landing, "eroded": eroded, "row_transitions": row_transitions,
             "column_transitions": column_transitions, "holes": holes, "cumulative_wells": cumulative,
-            "board": cleared}
+            "lines": n_lines, "board": cleared}
 
 
 def rating(feats: dict) -> float:
@@ -178,8 +179,8 @@ def placements(board, piece: str) -> list[dict]:
                 continue
             feats = features(board, shape, row, col)
             key = f"r{rotation}c{col}"
-            found.append({"key": key, "rotation": rotation, "column": col, "rating": rating(feats),
-                          "board": feats["board"], "features": {k: feats[k] for k in WEIGHTS}})
+            found.append({"key": key, "rotation": rotation, "column": col, "row": row, "rating": rating(feats),
+                          "board": feats["board"], "features": {k: feats[k] for k in (*WEIGHTS, "lines")}})
     return found
 
 
@@ -198,11 +199,29 @@ def render_state(board, piece: str) -> dict:
     }
 
 
+TURNS = ("unrotated", "rotated right", "rotated twice", "rotated left")
+
+
+def describe_placement(piece: str, item: dict) -> str:
+    """One option, in words. Column numbers are the board's 0-based columns."""
+    shape = PIECES[piece][item["rotation"]]
+    cols = [item["column"] + dc for _dr, dc in shape]
+    lo, hi = min(cols), max(cols)
+    span = f"column {lo}" if lo == hi else f"columns {lo}-{hi}"
+    bottom = item["row"] + max(dr for dr, _dc in shape)
+    lines = int(item["features"]["lines"])
+    holes = int(item["features"]["holes"])
+    line_word = "line" if lines == 1 else "lines"
+    hole_word = "hole" if holes == 1 else "holes"
+    return (f"{piece} piece, {TURNS[item['rotation']]}, {span}, lands on row {bottom}, "
+            f"clears {lines} {line_word}, leaves {holes} {hole_word}")
+
+
 def tetris_row(board, piece: str, label: str, options: list[dict] | None = None) -> dict:
     options = placements(board, piece) if options is None else options
     return {
         "state": render_state(board, piece),
-        "options": {item["key"]: f"rotation {item['rotation']}, column {item['column']}" for item in options},
+        "options": {item["key"]: describe_placement(piece, item) for item in options},
         "label": label,
         "instructions": INSTRUCTIONS,
         "piece": piece,
@@ -237,9 +256,54 @@ def generate_tetris_rows(n: int, seed: int) -> list[dict]:
             key = (board_text(board), piece)
             if key not in seen:
                 seen.add(key)
-                rows.append(tetris_row(board, piece, label, options))
+                row = tetris_row(board, piece, label, options)
+                row["family"] = f"game-{guard:04d}"
+                rows.append(row)
                 if len(rows) >= n:
                     break
             move = label if rng.random() < 0.75 else options[rng.randrange(len(options))]["key"]
             board = apply_key(board, piece, move)
     return rows
+
+
+def tetris_kit_row(row: dict, row_id: str) -> dict:
+    """One Tetris row in the adapter-kit ``rows.jsonl`` shape."""
+    label = str(row["label"])
+    return {
+        "id": row_id,
+        "suite": "tetris",
+        "family": str(row.get("family") or "game-0000"),
+        "state": row["state"],
+        "question": {"type": "choice", "instructions": row["instructions"], "criteria": dict(row["options"])},
+        "label": label,
+        "target": label,
+        "source": {"dataset": "tetris-oracle", "round": "el-tetris-v1"},
+    }
+
+
+def generate_tetris_kit_rows(n: int, seed: int) -> list[dict]:
+    """Official rows. One family is one generated game, so a split can hold that game out together."""
+    rows = generate_tetris_rows(n, seed)
+    return [tetris_kit_row(row, f"tetris-{index:04d}") for index, row in enumerate(rows)]
+
+
+def play_game(choose, seed: int, max_pieces: int = 40) -> dict:
+    """Drop pieces until no placement fits or ``max_pieces`` land. ``choose`` returns an option key."""
+    rng = random.Random(seed)
+    board = empty_board()
+    lines = 0
+    pieces = 0
+    names = list(PIECES)
+    while pieces < max_pieces:
+        piece = names[rng.randrange(len(names))]
+        options = placements(board, piece)
+        if not options:
+            break
+        key = choose(board, piece)
+        match = next((item for item in options if item["key"] == key), None)
+        if match is None:
+            break
+        lines += int(match["features"]["lines"])
+        board = match["board"]
+        pieces += 1
+    return {"lines": lines, "pieces": pieces, "capped": pieces >= max_pieces}

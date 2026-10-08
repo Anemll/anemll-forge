@@ -136,6 +136,9 @@ class ServerTests(unittest.TestCase):
         self.assertIn('id="status"', demo)
         self.assertLess(demo.index('id="toggle"'), demo.index('id="board"'))
         self.assertLess(demo.index('id="board"'), demo.index('id="status"'))
+        self.assertLess(demo.index('id="tetris-toggle"'), demo.index('id="tetris-board"'))
+        self.assertLess(demo.index('id="tetris-board"'), demo.index('id="tetris-status"'))
+        self.assertIn("lands on row", demo)
         self.assertEqual(health["adapters"], ["base"])
         self.assertIn("x-request-id", {key.lower() for key in headers})
 

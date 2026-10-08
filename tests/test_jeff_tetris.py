@@ -7,7 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
 
 from jeff_snake import as_decision
-from jeff_tetris import empty_board, generate_tetris_rows, oracle_key, placements, tetris_row
+from jeff_tetris import (
+    describe_placement, empty_board, generate_tetris_kit_rows, generate_tetris_rows,
+    oracle_key, placements, play_game, tetris_row,
+)
 
 
 class TetrisTests(unittest.TestCase):
@@ -19,7 +22,11 @@ class TetrisTests(unittest.TestCase):
         self.assertIn("r0c0", options)
         self.assertGreater(options["r0c0"]["rating"], options["r0c6"]["rating"])
         self.assertEqual(options["r0c0"]["features"]["eroded"], 4)
+        self.assertEqual(options["r0c0"]["features"]["lines"], 1)
         self.assertEqual(oracle_key(board, "I"), "r0c0")
+        text = describe_placement("I", options["r0c0"])
+        self.assertIn("I piece, unrotated, columns 0-3", text)
+        self.assertIn("clears 1 line", text)
 
     def test_row_matches_the_generic_format(self):
         board = empty_board()
@@ -37,6 +44,13 @@ class TetrisTests(unittest.TestCase):
         for row in rows:
             self.assertIn(row["label"], row["options"])
             self.assertGreaterEqual(len(row["options"]), 2)
+            self.assertIn("lands on row", row["options"][row["label"]])
+        games = play_game(lambda board, piece: oracle_key(board, piece), seed=2, max_pieces=12)
+        self.assertGreater(games["pieces"], 0)
+        kit = generate_tetris_kit_rows(4, seed=3)
+        self.assertEqual(len(kit), 4)
+        self.assertEqual(kit[0]["suite"], "tetris")
+        self.assertEqual(kit[0]["label"], kit[0]["target"])
 
 
 if __name__ == "__main__":

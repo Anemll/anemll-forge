@@ -151,11 +151,33 @@
   .examples { display: flex; flex-wrap: nowrap; gap: 8px; margin: 10px 0; height: 44px; overflow-x: auto; overflow-y: hidden; }
   .row { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; height: 44px; }
   #route-choice { font-size: 18px; }
+  #tetris { display: flex; flex-direction: column; gap: 12px; }
+  .tetris-play { display: grid; grid-template-columns: 194px 72px minmax(280px, 1fr); gap: 16px; align-items: start; }
+  .tboard {
+    display: grid; width: 194px; height: 374px;
+    grid-template-columns: repeat(10, 16px); grid-template-rows: repeat(20, 16px);
+    gap: 2px; background: #0c100c; padding: 8px; border-radius: 12px;
+  }
+  .tcell { border-radius: 3px; background: #232b21; }
+  .tcell.on { background: var(--accent); }
+  .next-piece {
+    width: 72px; height: 72px; display: grid;
+    grid-template-columns: repeat(4, 16px); grid-template-rows: repeat(4, 16px);
+    gap: 2px;
+  }
+  #tetris-readout { min-width: 280px; display: grid; grid-template-rows: 64px 1.8em 180px 4.6em; gap: 8px; align-content: start; }
+  #tetris-readout > * { min-width: 0; min-height: 0; }
+  #tetris-score { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
+  #tetris-bars { height: 180px; }
+  #tetris-status { height: 4.6em; margin: 0; color: var(--muted); }
+  #tetris-status p { margin: 0 0 4px; }
   @media (max-width: 760px) {
     .play { grid-template-columns: 1fr; }
     header { flex-direction: column; align-items: start; }
     #health { text-align: left; width: 100%; }
     .board { grid-template-columns: repeat(8, minmax(0, 1fr)); width: min(100%, 332px); height: auto; }
+    .tetris-play { grid-template-columns: 194px 72px; }
+    #tetris-readout { grid-column: 1 / -1; }
     .cell { aspect-ratio: 1; }
   }
 </style>
@@ -188,6 +210,29 @@
         <p class="meta scroll-box" id="timing">Waiting for the first decision.</p>
         <div id="bars" class="scroll-box"></div>
         <div id="status" class="scroll-box" role="log" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+  <section id="tetris">
+    <div class="controls">
+      <h2>Tetris</h2>
+      <label for="tetris-adapter">Adapter</label>
+      <select id="tetris-adapter" aria-label="Tetris adapter">
+        <option value="base">base</option>
+        <option value="tetris">tetris</option>
+      </select>
+      <button id="tetris-toggle" type="button">Play</button>
+      <button id="tetris-reset" type="button">Reset</button>
+    </div>
+    <p class="meta" id="tetris-blurb">One decision drops one piece. Options are the legal rotations and columns.</p>
+    <div class="tetris-play">
+      <div class="tboard" id="tetris-board" aria-label="Tetris board"></div>
+      <div class="next-piece" id="tetris-next" aria-label="Next piece"></div>
+      <div id="tetris-readout">
+        <div class="latency"><span id="tetris-ms">—</span><small>ms total</small></div>
+        <p class="meta" id="tetris-score">Lines 0 · pieces 0</p>
+        <div id="tetris-bars" class="scroll-box"></div>
+        <div id="tetris-status" class="scroll-box" role="log" aria-live="polite"></div>
       </div>
     </div>
   </section>
@@ -241,6 +286,12 @@ const SAMPLES = {
     blurb: "This adapter's sample is the board above. Each move is one decision.",
     game: true,
     preview: "8 by 8 grid. Eat F. The opening food is up and to the right.",
+  },
+  tetris: {
+    title: "Tetris",
+    blurb: "This adapter's sample is the Tetris board. One decision is one piece.",
+    game: "tetris",
+    preview: "10 by 20 board. Drop the piece. El-Tetris labels the training rows.",
   },
   triage: {
     title: "Triage",
@@ -525,14 +576,24 @@ document.getElementById("adapter").addEventListener("change", (event) => {
   logStatus(plays
     ? `Switched to ${adapter}. Board reset.`
     : `Switched to ${adapter}. Snake is paused. The sample below is that adapter's example.`);
-  if (playing) step();
-  if (!plays) document.getElementById("classify").click();
+  if (adapter === "tetris") {
+    const tetrisAdapter = document.getElementById("tetris-adapter");
+    if ([...tetrisAdapter.options].some((option) => option.value === "tetris")) tetrisAdapter.value = "tetris";
+    tStart();
+  } else if (playing) {
+    tStop();
+    step();
+  }
+  if (!plays && !sampleFor(adapter).game) document.getElementById("classify").click();
 });
 
 document.getElementById("toggle").addEventListener("click", () => {
   playing = !playing;
   document.getElementById("toggle").textContent = playing ? "Pause" : "Play";
-  if (playing) step();
+  if (playing) {
+    tStop();
+    step();
+  }
 });
 
 document.getElementById("reset").addEventListener("click", () => {
@@ -595,6 +656,224 @@ for (const button of document.querySelectorAll(".examples button")) {
   });
 }
 
+const T_W = 10;
+const T_H = 20;
+const T_TURNS = ["unrotated", "rotated right", "rotated twice", "rotated left"];
+const T_NAMES = ["I", "O", "T", "S", "Z", "J", "L"];
+const T_PIECES = {
+  I: [[[0, 0], [0, 1], [0, 2], [0, 3]], [[0, 0], [1, 0], [2, 0], [3, 0]]],
+  O: [[[0, 0], [0, 1], [1, 0], [1, 1]]],
+  T: [[[0, 1], [1, 0], [1, 1], [1, 2]], [[0, 0], [1, 0], [1, 1], [2, 0]], [[0, 0], [0, 1], [0, 2], [1, 1]], [[0, 1], [1, 0], [1, 1], [2, 1]]],
+  S: [[[0, 1], [0, 2], [1, 0], [1, 1]], [[0, 0], [1, 0], [1, 1], [2, 1]]],
+  Z: [[[0, 0], [0, 1], [1, 1], [1, 2]], [[0, 1], [1, 0], [1, 1], [2, 0]]],
+  J: [[[0, 0], [1, 0], [1, 1], [1, 2]], [[0, 0], [0, 1], [1, 0], [2, 0]], [[0, 0], [0, 1], [0, 2], [1, 2]], [[0, 1], [1, 1], [2, 0], [2, 1]]],
+  L: [[[0, 2], [1, 0], [1, 1], [1, 2]], [[0, 0], [1, 0], [2, 0], [2, 1]], [[0, 0], [0, 1], [0, 2], [1, 0]], [[0, 0], [0, 1], [1, 1], [2, 1]]],
+};
+const T_RULES = "10 by 20 board. # is filled, a dot is empty. The top row is printed first. Drop the named piece in one rotation and column. Do not leave a hole you can avoid.";
+const T_INSTRUCTIONS = "Choose where to drop this piece.";
+let tBoard = [];
+let tPiece = "T";
+let tNext = "I";
+let tLines = 0;
+let tPieces = 0;
+let tPlaying = false;
+let tInflight = false;
+
+function tEmpty() {
+  return Array.from({ length: T_H }, () => Array(T_W).fill(0));
+}
+
+function tRandomPiece() {
+  return T_NAMES[Math.floor(Math.random() * T_NAMES.length)];
+}
+
+function tFits(board, shape, row, col) {
+  for (const [dr, dc] of shape) {
+    const r = row + dr;
+    const c = col + dc;
+    if (c < 0 || c >= T_W || r >= T_H) return false;
+    if (r >= 0 && board[r][c]) return false;
+  }
+  return true;
+}
+
+function tDropRow(board, shape, col) {
+  if (!tFits(board, shape, 0, col)) return null;
+  let row = 0;
+  while (tFits(board, shape, row + 1, col)) row += 1;
+  return row;
+}
+
+function tPaint(board, shape, row, col) {
+  const next = board.map((line) => line.slice());
+  for (const [dr, dc] of shape) {
+    const r = row + dr;
+    if (r >= 0) next[r][col + dc] = 1;
+  }
+  return next;
+}
+
+function tClear(board) {
+  const kept = [];
+  let lines = 0;
+  for (const line of board) {
+    if (line.every(Boolean)) lines += 1;
+    else kept.push(line);
+  }
+  while (kept.length < T_H) kept.unshift(Array(T_W).fill(0));
+  return { board: kept, lines };
+}
+
+function tHoles(board) {
+  let holes = 0;
+  for (let c = 0; c < T_W; c += 1) {
+    let seen = false;
+    for (let r = 0; r < T_H; r += 1) {
+      if (board[r][c]) seen = true;
+      else if (seen) holes += 1;
+    }
+  }
+  return holes;
+}
+
+function tPlacements(board, piece) {
+  const found = [];
+  T_PIECES[piece].forEach((shape, rotation) => {
+    const width = Math.max(...shape.map((cell) => cell[1])) + 1;
+    for (let col = 0; col <= T_W - width; col += 1) {
+      const row = tDropRow(board, shape, col);
+      if (row === null) continue;
+      const cleared = tClear(tPaint(board, shape, row, col));
+      const holes = tHoles(cleared.board);
+      const cols = shape.map((cell) => col + cell[1]);
+      const lo = Math.min(...cols);
+      const hi = Math.max(...cols);
+      const span = lo === hi ? `column ${lo}` : `columns ${lo}-${hi}`;
+      const bottom = row + Math.max(...shape.map((cell) => cell[0]));
+      const lineWord = cleared.lines === 1 ? "line" : "lines";
+      const holeWord = holes === 1 ? "hole" : "holes";
+      found.push({
+        key: `r${rotation}c${col}`,
+        board: cleared.board,
+        lines: cleared.lines,
+        text: `${piece} piece, ${T_TURNS[rotation]}, ${span}, lands on row ${bottom}, clears ${cleared.lines} ${lineWord}, leaves ${holes} ${holeWord}`,
+      });
+    }
+  });
+  return found;
+}
+
+function tText(board) {
+  return board.map((line) => line.map((cell) => (cell ? "#" : ".")).join("")).join("\n");
+}
+
+function tDrawCells(host, board, rows, cols) {
+  host.replaceChildren();
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const cell = document.createElement("div");
+      cell.className = "tcell" + (board[r] && board[r][c] ? " on" : "");
+      host.appendChild(cell);
+    }
+  }
+}
+
+function tDraw() {
+  tDrawCells(document.getElementById("tetris-board"), tBoard, T_H, T_W);
+  const preview = tEmpty().slice(0, 4).map((line) => line.slice(0, 4));
+  const shape = T_PIECES[tNext][0];
+  for (const [dr, dc] of shape) preview[dr][dc] = 1;
+  tDrawCells(document.getElementById("tetris-next"), preview, 4, 4);
+  document.getElementById("tetris-score").textContent = `Lines ${tLines} · pieces ${tPieces}`;
+}
+
+function tLog(text) {
+  const log = document.getElementById("tetris-status");
+  const line = document.createElement("p");
+  line.textContent = text;
+  log.prepend(line);
+  while (log.children.length > 40) log.lastChild.remove();
+  log.scrollTop = 0;
+}
+
+function tReset() {
+  tBoard = tEmpty();
+  tLines = 0;
+  tPieces = 0;
+  tPiece = tRandomPiece();
+  tNext = tRandomPiece();
+  tDraw();
+}
+
+function tStop() {
+  tPlaying = false;
+  document.getElementById("tetris-toggle").textContent = "Play";
+}
+
+function tStart() {
+  playing = false;
+  document.getElementById("toggle").textContent = "Play";
+  tPlaying = true;
+  document.getElementById("tetris-toggle").textContent = "Pause";
+  tStep();
+}
+
+async function tStep() {
+  if (!tPlaying || tInflight || routing) return;
+  const options = tPlacements(tBoard, tPiece);
+  if (!options.length) {
+    tStop();
+    tLog(`No legal placement for ${tPiece}. Lines ${tLines}, pieces ${tPieces}.`);
+    return;
+  }
+  tInflight = true;
+  try {
+    const criteria = {};
+    for (const item of options) criteria[item.key] = item.text;
+    const which = document.getElementById("tetris-adapter").value || "base";
+    const payload = await decide({
+      model: which === "base" ? "jeff-latest" : which,
+      adapter: which,
+      state: { rules: T_RULES, latest: { board: tText(tBoard), piece: tPiece } },
+      questions: { move: { type: "choice", instructions: T_INSTRUCTIONS, criteria } },
+    });
+    const answer = payload.answers.move;
+    document.getElementById("tetris-ms").textContent = Math.round((payload.timings || {}).total_ms ?? 0);
+    const ranked = Object.entries(answer.probabilities)
+      .map(([key, value]) => ({ key, value, text: criteria[key] || key }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+    const shown = {};
+    for (const item of ranked) shown[item.text] = item.value;
+    bars("tetris-bars", shown, criteria[answer.choice] || answer.choice);
+    const chosen = options.find((item) => item.key === answer.choice);
+    if (!chosen) throw new Error(`Choice ${answer.choice} is not a legal placement.`);
+    tLines += chosen.lines;
+    tPieces += 1;
+    tBoard = chosen.board;
+    tPiece = tNext;
+    tNext = tRandomPiece();
+    tDraw();
+    tLog(`${answer.choice}: ${criteria[answer.choice]}`);
+  } catch (error) {
+    tStop();
+    tLog(String(error.message || error));
+  } finally {
+    tInflight = false;
+    if (tPlaying) setTimeout(tStep, 160);
+  }
+}
+
+document.getElementById("tetris-toggle").addEventListener("click", () => {
+  if (tPlaying) tStop();
+  else tStart();
+});
+
+document.getElementById("tetris-reset").addEventListener("click", () => {
+  tReset();
+  tLog("Board reset.");
+});
+
 fetch("/health").then((response) => response.json()).then((health) => {
   document.getElementById("health").innerHTML =
     `<strong>${health.model}</strong><br>${health.backend}<br>${health.status} · text · prefix cache ${health.prefix_cache ? "on" : "off"}`;
@@ -614,6 +893,7 @@ fetch("/health").then((response) => response.json()).then((health) => {
 });
 
 draw();
+tReset();
 step();
 if (new URLSearchParams(location.search).has("sample")) {
   document.getElementById("classify").click();
