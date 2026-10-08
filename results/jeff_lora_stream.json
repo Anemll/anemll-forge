@@ -1,0 +1,163 @@
+{
+ "scale": 2.0,
+ "note": "Full 4-layer streamed chunk (25 projections) is placed on the ANE but has no procedureInfo and does not run. These four calls are one layer each.",
+ "repeats": 50,
+ "latency_ms": {
+  "A_base_chunk": {
+   "median": 9.655895992182195,
+   "min": 9.610958863049746,
+   "max": 9.72341699525714
+  },
+  "B_merged_chunk": {
+   "median": 9.675312438048422,
+   "min": 9.614415932446718,
+   "max": 9.765541879460216
+  },
+  "C_triage_4layers": {
+   "median": 12.244687415659428,
+   "min": 12.171084061264992,
+   "max": 13.080707984045148
+  },
+  "C_zeros_4layers": {
+   "median": 12.24785449448973,
+   "min": 12.152333045378327,
+   "max": 12.327624950557947
+  }
+ },
+ "parity": {
+  "C_triage_vs_B": {
+   "max_abs": 0.0751953125,
+   "mean_abs": 0.0011842421954497695,
+   "cosine": 0.9996946309373328
+  },
+  "C_zeros_vs_A": {
+   "max_abs": 0.0,
+   "mean_abs": 0.0,
+   "cosine": 0.9999997684119635
+  },
+  "reswap_triage_vs_B": {
+   "max_abs": 0.0751953125,
+   "mean_abs": 0.0011842421954497695,
+   "cosine": 0.9996946309373328
+  }
+ },
+ "swap_ms": {
+  "median": 0.33156247809529305,
+  "min": 0.2758749760687351,
+  "max": 0.5204998888075352
+ },
+ "layers": [
+  {
+   "layer": 0,
+   "entry": "lora256_2k_L00_00",
+   "n_proj": 6,
+   "lora_bytes": 868352,
+   "fn_inputs": 24,
+   "fully_ane": true,
+   "no_gpu": true,
+   "ane_regions": 1,
+   "gpu_regions": 0
+  },
+  {
+   "layer": 1,
+   "entry": "lora256_2k_L01_01",
+   "n_proj": 6,
+   "lora_bytes": 868352,
+   "fn_inputs": 24,
+   "fully_ane": true,
+   "no_gpu": true,
+   "ane_regions": 1,
+   "gpu_regions": 0
+  },
+  {
+   "layer": 2,
+   "entry": "lora256_2k_L02_02",
+   "n_proj": 6,
+   "lora_bytes": 868352,
+   "fn_inputs": 24,
+   "fully_ane": true,
+   "no_gpu": true,
+   "ane_regions": 1,
+   "gpu_regions": 0
+  },
+  {
+   "layer": 3,
+   "entry": "lora256_2k_L03_03",
+   "n_proj": 7,
+   "lora_bytes": 802816,
+   "fn_inputs": 25,
+   "fully_ane": true,
+   "no_gpu": true,
+   "ane_regions": 1,
+   "gpu_regions": 0
+  }
+ ],
+ "lora_bytes_chunk0": 3407872,
+ "lora_bytes_all_6_chunks_if_uniform": 20447232,
+ "placement_chunk": {
+  "A_base": {
+   "digest": "cede023fece1944a41a98e6ba8e38c834965ea7bdebe77cff8e6fbeee0cc37a1",
+   "fully_ane": true,
+   "no_gpu": true,
+   "ane_regions": 1,
+   "gpu_regions": 0
+  },
+  "B_merged": {
+   "digest": "6fc7a6128ec1d67180eb112de011d103dd175982ed97087ced3585f5cd6098d7",
+   "fully_ane": true,
+   "no_gpu": true,
+   "ane_regions": 1,
+   "gpu_regions": 0
+  }
+ },
+ "four_layer_stream_limit": {
+  "note": "Inside one 4-layer chunk, dynamic matmul LoRA stays fully on the ANE and executes for 8 projections. At 12 projections the manifest still says fullyPlacedOnANE / noGPUActivity, but the call fails: no procedureInfo for the entry. HWX under /Library/Caches/com.apple.aned is root-owned and was not read.",
+  "trials": [
+   {
+    "n": 1,
+    "run": "ok",
+    "fully_ane": true,
+    "gpu_regions": 0,
+    "lora_bytes": 229376
+   },
+   {
+    "n": 4,
+    "run": "ok",
+    "fully_ane": true,
+    "gpu_regions": 0,
+    "lora_bytes": 573440
+   },
+   {
+    "n": 8,
+    "run": "ok",
+    "fully_ane": true,
+    "gpu_regions": 0,
+    "lora_bytes": 1196032
+   },
+   {
+    "n": 12,
+    "run": "fail",
+    "fully_ane": true,
+    "gpu_regions": 0,
+    "lora_bytes": 1736704
+   }
+  ]
+ },
+ "C_four_layer_single_graph": {
+  "entry": "lora256_2k",
+  "n_proj": 25,
+  "lora_bytes": 3407872,
+  "fn_inputs": 70,
+  "fully_ane": true,
+  "no_gpu": true,
+  "gpu_regions": 0,
+  "run": "fail",
+  "error": "no procedureInfo entry found"
+ },
+ "eager_fp16_stream_vs_merged": {
+  "max_abs": 0.0146484375,
+  "cosine": 0.999987781047821,
+  "n_proj": 25
+ },
+ "layout_probe": "results/jeff_lora_placement_probe.json"
+}

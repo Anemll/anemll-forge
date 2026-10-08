@@ -1,0 +1,110 @@
+{
+ "packs": [
+  {
+   "fn_inputs": 28,
+   "load_s": 55.26,
+   "lora_inputs": 8,
+   "run": "ok",
+   "y0": 0.043212890625,
+   "fully_ane": true,
+   "no_gpu": true,
+   "gpu_regions": 0,
+   "ane_regions": 1,
+   "tag": "layer",
+   "pack": "layer",
+   "n_pad": 0,
+   "entry": "lora256_2k_L00_03_layer",
+   "n_proj": 25,
+   "lora_bytes": 3407872
+  },
+  {
+   "fn_inputs": 24,
+   "load_s": 219.96,
+   "lora_inputs": 4,
+   "run": "ok",
+   "y0": 0.043212890625,
+   "fully_ane": true,
+   "no_gpu": true,
+   "gpu_regions": 0,
+   "ane_regions": 1,
+   "tag": "type",
+   "pack": "type",
+   "n_pad": 0,
+   "entry": "lora256_2k_L00_03_type",
+   "n_proj": 25,
+   "lora_bytes": 3407872
+  },
+  {
+   "fn_inputs": 21,
+   "load_s": 218.71,
+   "lora_inputs": 1,
+   "run": "ok",
+   "y0": 0.043212890625,
+   "fully_ane": true,
+   "no_gpu": true,
+   "gpu_regions": 0,
+   "ane_regions": 1,
+   "tag": "flat",
+   "pack": "flat",
+   "n_pad": 0,
+   "entry": "lora256_2k_L00_03_flat",
+   "n_proj": 25,
+   "lora_bytes": 3407872
+  }
+ ],
+ "pads": [
+  {
+   "fn_inputs": 44,
+   "load_s": 197.25,
+   "lora_inputs": 24,
+   "run": "fail",
+   "error": "binding 1 (lora256_2k_L00_03_p24_n0): InferenceError(location: unknown, underlyingError: MetalPerformanceShadersGraph.MPSGraphDelegateError.ndxRuntimeError(\"inferValue failed: Error, no procedureInfo entry found corresponding to the entry function: lora256_2k_L00_03_p24_n0_WWrJzIU0cpOuLTrv3ZL9qA.\"))",
+   "fully_ane": true,
+   "no_gpu": true,
+   "gpu_regions": 0,
+   "ane_regions": 1,
+   "tag": "pad24",
+   "pack": "none",
+   "n_pad": 24,
+   "entry": "lora256_2k_L00_03_p24_n0",
+   "n_proj": 0,
+   "lora_bytes": 768
+  },
+  {
+   "best_extra_inputs": 0
+  }
+ ],
+ "timed_pack": "layer",
+ "timing": {
+  "latency_ms": {
+   "A_base": 9.72,
+   "B_merged": 9.7,
+   "C_packed_triage": 10.74,
+   "C_packed_zeros": 10.74
+  },
+  "parity": {
+   "C_vs_B": {
+    "max_abs": 0.0751953125,
+    "mean_abs": 0.0011842421954497695,
+    "cosine": 0.9996946309373328
+   },
+   "C_zeros_vs_A": {
+    "max_abs": 0.0,
+    "mean_abs": 0.0,
+    "cosine": 0.9999997684119635
+   }
+  },
+  "swap_ms": 0.649
+ },
+ "input_limit": {
+  "executes": [
+   32,
+   36,
+   40,
+   42,
+   43
+  ],
+  "fails": 44,
+  "note": "Dummy fp16 inputs added to the base 4-layer chunk (no extra matmuls). 43 inputs run; 44 has no procedureInfo. Same cliff as 12 separate LoRA pairs (44 inputs)."
+ }
+}
