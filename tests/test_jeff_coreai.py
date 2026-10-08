@@ -396,6 +396,19 @@ class JeffRuntimeOutputsTests(unittest.TestCase):
         self.assertEqual(fn.raw, {})
         self.assertEqual(out, {})
 
+    def test_plan_runs_the_narrowest_entry_that_holds_the_prompt(self):
+        rt = jeff_coreai_runtime.JeffCoreAI.__new__(jeff_coreai_runtime.JeffCoreAI)
+        rt.TP, rt.widths = 256, [256, 512, 1024, 1536, 2048]
+        self.assertEqual(rt.plan(161), [256])
+        self.assertEqual(rt.plan(531), [1024])
+        self.assertEqual(rt.plan(818), [1024])
+        self.assertEqual(rt.plan(1430), [1536])
+        self.assertEqual(rt.plan(2048), [2048])
+        self.assertEqual(rt.plan(821, chained=True), [256] * 4)
+        rt.widths = [256]
+        self.assertEqual(rt.plan(821), [256] * 4)
+        self.assertEqual(rt.plan(213), [256])
+
 
 if __name__ == "__main__":
     unittest.main()

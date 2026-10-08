@@ -65,6 +65,8 @@ class JeffCoreAI:
         self.ctx = int(self.man["pctxs"][0])
         self.L = int(self.man["pkv_len"][str(self.ctx)])
         self.entry = f"p{self.TP}_{self.ctx // 1024}k"
+        self.widths = sorted({self.TP, *(int(w) for w in self.man.get("TPS", ()))})
+        self.entries = {w: f"p{w}_{self.ctx // 1024}k" for w in self.widths}
         hid, self.nkv, self.hd = int(c["hidden_size"]), int(c["num_key_value_heads"]), int(c["head_dim"])
         nv, dk, dv = (int(c[k]) for k in ("linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim"))
         cdim = 2 * int(c["linear_num_key_heads"]) * dk + nv * dv
@@ -91,11 +93,11 @@ class JeffCoreAI:
         self.head_pkg, hf = self.loop.run_until_complete(load(head["file"], [head.get("entry", "h1")]))
         self.head_fn = hf[head.get("entry", "h1")]
         self.load_s = time.time() - t0
-        TP = self.TP
-        self.pin = {n: buffer(s) for n, s in (
-            ("cos", (TP, rot)), ("sin", (TP, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
-            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, TP + 3)), ("valid", (1, TP, 1)),
-            ("x", (1, hid, 1, TP)), ("xb", (1, hid, 1, TP)), ("hx", (1, hid, 1, 1)))}
+        self.pins = {w: {n: buffer(s) for n, s in (
+            ("cos", (w, rot)), ("sin", (w, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
+            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, w + 3)), ("valid", (1, w, 1)),
+            ("x", (1, hid, 1, w)), ("xb", (1, hid, 1, w)))} for w in self.widths}
+        self.hx = buffer((1, hid, 1, 1))
         self.mask = buffer((1, self.L))
         self.pos = 0
         self._token_ids: list[int] = []
@@ -148,14 +150,21 @@ class JeffCoreAI:
                 ch["kv"][k][1][:] = arr
         self.pos = int(prefix["pos"])
         hidden = prefix.get("hidden")
-        self._last_hidden = None if hidden is None else np.asarray(hidden).reshape(self.pin["hx"][1].shape)
+        self._last_hidden = None if hidden is None else np.asarray(hidden).reshape(self.hx[1].shape)
 
-    def _block(self, ids, keep=None) -> np.ndarray:
-        """Up to TP prompt tokens at self.pos, all committed. Returns the last row's hidden state (1, hid, 1, 1).
-        keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
-        d, TP, n, p0 = self.pin, self.TP, len(ids), self.pos
+    def plan(self, n: int, chained: bool = False) -> list[int]:
+        """Entry widths of the calls that prefill n rows: one call in the narrowest entry that holds them, else
+        (or with chained=True) consecutive TP-row calls."""
+        fit = [] if chained else [w for w in self.widths if w >= n]
+        return [fit[0]] if fit else [self.TP] * -(-n // self.TP)
+
+    def _block(self, ids, keep=None, width: int | None = None) -> np.ndarray:
+        """Up to width (default TP) prompt tokens at self.pos, all committed. Returns the last row's hidden state
+        (1, hid, 1, 1). keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
+        TP = self.TP if width is None else width
+        d, n, p0, entry = self.pins[TP], len(ids), self.pos, self.entries[TP]
         if not 0 < n <= TP or p0 + n > self.L:
-            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {self.entry}")
+            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {entry}")
         d["x"][1][:] = 0
         d["x"][1][0, :, 0, :n] = self.emb[np.asarray(ids)].T
         pos = np.minimum(np.arange(p0, p0 + TP), p0 + n - 1)
@@ -171,7 +180,7 @@ class JeffCoreAI:
         d["valid"][1][0, :n, 0] = 1
         self.mask[1][:] = -1e4
         self.mask[1][0, :p0] = 0
-        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb", "hx")}
+        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb")}
         shared["mask"] = self.mask[0]
 
         async def run():
@@ -179,7 +188,7 @@ class JeffCoreAI:
             for ci, ch in enumerate(self.chunks):
                 ins = {**shared, "x": x, **{k: v[0] for k, v in ch["state"].items()},
                        **{k: v[0] for k, v in ch["kv"].items()}}
-                async with outputs(ch["fns"][self.entry], ins) as out:
+                async with outputs(ch["fns"][entry], ins) as out:
                     for k, (_, w) in ch["state"].items():
                         w[:] = writable(out[f"{k}_out"])
                     for k, (_, w) in ch["kv"].items():
@@ -193,11 +202,15 @@ class JeffCoreAI:
         return d["xb"][1][:, :, :, n - 1:n].copy()
 
     async def _head(self) -> np.ndarray:
-        async with outputs(self.head_fn, {"x": self.pin["hx"][0]}) as out:
+        async with outputs(self.head_fn, {"x": self.hx[0]}) as out:
             return np.array(out["logits"].numpy(), np.float32).reshape(-1)
 
-    def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None) -> dict:
+    def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None,
+                chained: bool = False) -> dict:
         """Readout logits (ANE head), the last hidden state and timings.
+
+        The fresh rows run in one call of the narrowest entry that holds them (see plan); chained=True forces
+        TP-row calls, the path of a single-width build.
 
         prefix=None resets and prefills every token (one independent decision).
         prefix= a capture_state() dict resumes GDN/KV at prefix["pos"] and prefills
@@ -218,17 +231,18 @@ class JeffCoreAI:
         self._token_ids = ids
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
-        calls, widths = [], []
-        for i in range(start, len(ids), self.TP):
+        calls, widths = [], self.plan(len(ids) - start, chained) if len(ids) > start else []
+        i = start
+        for w in widths:
             t1 = time.perf_counter()
-            last = self._block(ids[i:i + self.TP], keep)
+            last = self._block(ids[i:i + w], keep, w)
             calls.append(1e3 * (time.perf_counter() - t1))
-            widths.append(self.TP)
+            i += w
         if last is None:
             raise ValueError("prefix covers the prompt but has no hidden state")
         self._last_hidden = last
         t1 = time.perf_counter()
-        self.pin["hx"][1][:] = last
+        self.hx[1][:] = last
         logits = self.loop.run_until_complete(self._head())
         head_ms = 1e3 * (time.perf_counter() - t1)
         r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls, "call_widths": widths,
@@ -262,5 +276,5 @@ class JeffCoreAI:
             "head_ms": round(r["head_ms"], 2),
             "prefill_ms": round(r["total_ms"], 2),
             "prefix_tokens": int(r["prefix_tokens"]),
-            "backend": f"coreai-ane {self.entry}",
+            "backend": f"coreai-ane {'+'.join(dict.fromkeys(self.entries[w] for w in r['call_widths'])) or self.entry}",
         }
