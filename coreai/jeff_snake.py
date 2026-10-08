@@ -176,8 +176,77 @@ def snake_row(snake, food, label: str, hint: bool = False, size: int = SIZE) -> 
     }
 
 
+def kit_row(row: dict, row_id: str, family: str) -> dict:
+    """One Snake row in the adapter-kit ``rows.jsonl`` shape (``jeff-kit check-rows``).
+
+    ``family`` groups positions from one game so a split can hold the game out together.
+    ``label`` and ``target`` are the oracle direction.
+    """
+    label = str(row["label"])
+    return {
+        "id": row_id,
+        "suite": "snake",
+        "family": family,
+        "state": row["state"],
+        "question": {"type": "choice", "instructions": row["instructions"], "criteria": dict(row["options"])},
+        "label": label,
+        "target": label,
+        "source": {"dataset": "snake-oracle", "round": "oracle-v1"},
+    }
+
+
+def generate_kit_rows(games: int, seed: int, steps: int = 6, size: int = SIZE) -> list[dict]:
+    """Official rows: each game is a family, each position is labeled by the oracle."""
+    if games < 1 or steps < 1:
+        raise ValueError("games and steps must be positive")
+    rng = random.Random(seed)
+    rows = []
+    for game in range(games):
+        snake = [tuple(cell) for cell in random_snake(rng, rng.choice((3, 3, 4, 5)), size)]
+        food = place_food(rng, snake, size)
+        if food is None or oracle_move(snake, food, size) is None:
+            continue
+        family = f"game-{game:04d}"
+        for step in range(steps):
+            label = oracle_move(snake, food, size)
+            if label is None:
+                break
+            sample = snake_row(snake, food, label, size=size)
+            rows.append(kit_row(sample, f"snake-{family}-{step}", family))
+            move = label if rng.random() < 0.7 else safe_moves(snake, food, size)[0]
+            snake, ate = step_snake(snake, food, move)
+            if ate:
+                food = place_food(rng, snake, size)
+                if food is None:
+                    break
+    if not rows:
+        raise RuntimeError("the oracle produced no kit rows")
+    return rows
+
+
 def as_decision(row: dict) -> tuple[dict, int]:
-    """Generic row -> Jeff ``{state, question}`` plus the label index in option order."""
+    """Generic row -> Jeff ``{state, question}`` plus the label index in option order.
+
+    A hand-written row has ``options``. An adapter-kit row has ``question.criteria`` instead,
+    and ``label`` or ``target`` names the key.
+    """
+    if "options" not in row and isinstance(row.get("question"), dict):
+        question = dict(row["question"])
+        if question.get("type", "choice") != "choice":
+            raise ValueError("only choice questions are trained as option keys")
+        criteria = question.get("criteria")
+        if not isinstance(criteria, dict) or not criteria:
+            raise ValueError("question.criteria must be an object of key to description")
+        keys = list(criteria)
+        label = row["label"] if "label" in row else row["target"]
+        if isinstance(label, bool) or not isinstance(label, (int, str)):
+            raise ValueError("label must be an option key or an index")
+        index = label if isinstance(label, int) else keys.index(str(label))
+        if not 0 <= index < len(keys):
+            raise ValueError(f"label {label!r} is outside the {len(keys)} options")
+        question["type"] = "choice"
+        question["criteria"] = dict(criteria)
+        return {"state": row["state"], "question": question}, index
     options = row["options"]
     if isinstance(options, list):
         if not options or not all(isinstance(item, str) and item for item in options):

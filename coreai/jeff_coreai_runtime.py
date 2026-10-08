@@ -38,6 +38,10 @@ class JeffCoreAI:
             raise ValueError(f"{build} is not a jeff-decision package")
         c = self.cfg = load_text_config(self.model)
         self.decision = load_decision_config(self.model)
+        # A merged adapter's convert writes its own fitted temperature into the build manifest.
+        # Embeddings still come from --model (the base, unless that file was the merged checkpoint).
+        if "temperature" in self.man:
+            self.decision = {**self.decision, "temperature": float(self.man["temperature"])}
         ck = ck or JeffCheckpoint(self.model)
         self.emb, self.norm, self.readout = ck.embed_table(), ck.norm_weight(), np.asarray(ck.readout, np.float32)
         self.eps = float(c["rms_norm_eps"])

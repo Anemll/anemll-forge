@@ -1,4 +1,5 @@
 """LoRA wrap, forward, and merge without loading Jeff."""
+import json
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from torch import nn
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
 
-from jeff_lora import LoRALinear, attach_lora, save_merged_checkpoint
+from jeff_lora import LoRALinear, attach_lora, merge_peft_adapter, save_merged_checkpoint
 
 
 class Toy(nn.Module):
@@ -70,6 +71,34 @@ class LoRATests(unittest.TestCase):
             self.assertGreater(float(merged["q_proj.weight"].abs().sum()), 0)
             self.assertEqual(load_file(str(dest / "readout.safetensors"))["weight"].shape, (2, 4))
             self.assertTrue((dest / "decision_config.json").is_file())
+
+    def test_peft_merge_uses_alpha_over_rank(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base, adapter, dest = root / "base", root / "adapter", root / "merged"
+            base.mkdir()
+            adapter.mkdir()
+            save_file({"language_model.layers.0.q_proj.weight": torch.zeros(3, 4)}, str(base / "model.safetensors"))
+            save_file({"weight": torch.zeros(2, 4)}, str(base / "readout.safetensors"))
+            (base / "decision_config.json").write_text(json.dumps({"temperature": 1.0, "codes": ["A"]}))
+            (base / "notes.txt").write_text("keep")
+            save_file({
+                "base_model.model.language_model.layers.0.q_proj.lora_A.weight": torch.ones(2, 4),
+                "base_model.model.language_model.layers.0.q_proj.lora_B.weight": torch.ones(3, 2),
+            }, str(adapter / "adapter_model.safetensors"))
+            save_file({"weight": torch.ones(2, 4)}, str(adapter / "readout.safetensors"))
+            (adapter / "adapter_config.json").write_text(json.dumps({
+                "peft_type": "LORA", "bias": "none", "r": 2, "lora_alpha": 4,
+            }))
+            (adapter / "decision_config.json").write_text(json.dumps({"temperature": 0.5}))
+            info = merge_peft_adapter(base, adapter, dest)
+            merged = load_file(str(dest / "model.safetensors"))["language_model.layers.0.q_proj.weight"]
+            self.assertTrue(torch.equal(merged, torch.full((3, 4), 4.0)))
+            self.assertEqual(info["temperature"], 0.5)
+            decision = json.loads((dest / "decision_config.json").read_text())
+            self.assertEqual(decision["temperature"], 0.5)
+            self.assertEqual(decision["codes"], ["A"])
+            self.assertEqual((dest / "notes.txt").read_text(), "keep")
 
 
 if __name__ == "__main__":

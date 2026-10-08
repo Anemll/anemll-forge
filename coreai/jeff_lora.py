@@ -116,6 +116,70 @@ def save_lora(directory: Path, layers: list[LoRALinear], readout: nn.Linear, met
     (directory / "adapter_config.json").write_text(json.dumps(payload, indent=2) + "\n")
 
 
+def merge_peft_adapter(base: Path, adapter: Path, dest: Path) -> dict:
+    """Fold one published Jeff PEFT adapter into a copy of the base checkpoint.
+
+    This is the same update as ``jeff.lora.merge_adapter``: ``W += (alpha / rank) B A`` in
+    float32, stored in the base weight's dtype. The adapter's readout replaces the base
+    readout, and its fitted temperature is written into ``decision_config.json``. ``dest``
+    is what ``jeff-convert`` compiles. The ANE package does not apply LoRA at runtime.
+    """
+    base, adapter, dest = Path(base), Path(adapter), Path(dest)
+    if dest.exists() and any(dest.iterdir()):
+        raise FileExistsError(f"Refusing to overwrite checkpoint contents: {dest}")
+    config = json.loads((adapter / "adapter_config.json").read_text())
+    if config.get("peft_type") != "LORA" or config.get("bias") != "none":
+        raise ValueError(f"{adapter} is not a plain LoRA adapter")
+    if config.get("use_rslora") or config.get("use_dora") or config.get("rank_pattern") or config.get("alpha_pattern"):
+        raise ValueError(f"{adapter}: only a single rank and alpha are merged")
+    scale = float(config["lora_alpha"]) / float(config["r"])
+    factors = load_file(str(adapter / "adapter_model.safetensors"))
+    layers: dict[str, dict[str, torch.Tensor]] = {}
+    prefix = "base_model.model."
+    for key, value in factors.items():
+        if not key.startswith(prefix) or not key.endswith((".lora_A.weight", ".lora_B.weight")):
+            raise ValueError(f"unexpected adapter weight {key}")
+        name, part, _rest = key[len(prefix):].rsplit(".", 2)
+        layers.setdefault(name, {})["A" if part == "lora_A" else "B"] = value
+    if not layers or any(set(parts) != {"A", "B"} for parts in layers.values()):
+        raise ValueError(f"{adapter} is missing a LoRA factor")
+    dest.mkdir(parents=True, exist_ok=True)
+    tensors = load_file(str(base / "model.safetensors"))
+    missing = []
+    for name, parts in layers.items():
+        key = f"{name}.weight"
+        if key not in tensors and name.startswith("model."):
+            key = f"{name[len('model.'):]}.weight"
+        if key not in tensors:
+            missing.append(name)
+            continue
+        current = tensors[key]
+        delta = scale * (parts["B"].float() @ parts["A"].float())
+        tensors[key] = (current.float() + delta).to(dtype=current.dtype).contiguous()
+    if missing:
+        raise KeyError(f"adapter layers not in {base / 'model.safetensors'}: {missing[:3]}")
+    save_file(tensors, str(dest / "model.safetensors"))
+    readout = load_file(str(adapter / "readout.safetensors"))["weight"].contiguous()
+    save_file({"weight": readout}, str(dest / "readout.safetensors"))
+    decision = json.loads((base / "decision_config.json").read_text())
+    adapter_decision = json.loads((adapter / "decision_config.json").read_text())
+    temperature = float(adapter_decision["temperature"])
+    if temperature <= 0:
+        raise ValueError(f"{adapter} temperature must be positive")
+    decision["temperature"] = temperature
+    (dest / "decision_config.json").write_text(json.dumps(decision, indent=2) + "\n")
+    for item in base.iterdir():
+        if not item.is_file() or item.name in ("model.safetensors", "readout.safetensors", "decision_config.json"):
+            continue
+        target = dest / item.name
+        try:
+            os.link(item, target)
+        except OSError:
+            shutil.copy2(item, target)
+    return {"layers": len(layers), "rank": int(config["r"]), "alpha": float(config["lora_alpha"]),
+            "scale": scale, "temperature": temperature}
+
+
 def save_merged_checkpoint(source: Path, dest: Path, layers: list[LoRALinear], readout: nn.Linear) -> None:
     """Copy a Jeff checkpoint and replace the adapted matrices and the readout.
 

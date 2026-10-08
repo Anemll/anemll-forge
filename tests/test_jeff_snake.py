@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "coreai"))
 
 from jeff_coreai import decision_messages
-from jeff_snake import (OPENING_FOOD, OPENING_SNAKE, OPTIONS, RULES, as_decision, board_text, generate_snake_rows,
-                        oracle_move, play_game, safe_moves, snake_row)
+from jeff_snake import (OPENING_FOOD, OPENING_SNAKE, OPTIONS, RULES, as_decision, board_text, generate_kit_rows,
+                        generate_snake_rows, oracle_move, play_game, safe_moves, snake_row)
 
 
 class SnakeTests(unittest.TestCase):
@@ -51,6 +51,18 @@ class SnakeTests(unittest.TestCase):
         decision, index = as_decision({"state": "disk full", "options": ["page", "wait"], "label": 1})
         self.assertEqual(index, 1)
         self.assertEqual(list(decision["question"]["criteria"]), ["page", "wait"])
+
+    def test_kit_rows_use_the_oracle_label(self):
+        rows = generate_kit_rows(2, seed=1, steps=3)
+        self.assertGreaterEqual(len(rows), 2)
+        families = {row["family"] for row in rows}
+        self.assertGreaterEqual(len(families), 1)
+        for row in rows:
+            self.assertEqual(row["label"], row["target"])
+            self.assertIn(row["label"], row["question"]["criteria"])
+            decision, index = as_decision(row)
+            self.assertEqual(list(decision["question"]["criteria"])[index], row["label"])
+            self.assertEqual(set(row), {"id", "suite", "family", "state", "question", "label", "target", "source"})
 
     def test_oracle_survives_and_eats(self):
         def choose(snake, food):

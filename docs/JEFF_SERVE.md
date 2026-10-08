@@ -241,6 +241,22 @@ Eight self-play games from the same openings, through `jeff-serve` on `127.0.0.1
 
 Neither adapter survived to the 48-step cap. `/health` lists `adapters: ["base", "snake"]`, and `/v1/models` includes `snake`, which is what the demo dropdown reads.
 
+Snake rows for a machine that can run upstream `jeff-train` use the adapter-kit shape (`id`, `suite`, `family`, `state`, `question`, `label`, `target`, `source`). `generate_kit_rows` writes that shape from the same oracle. One game is one family, so `jeff-kit split` can hold a game out. Upstream `jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6` is the trainer in `jeff-src`. It calls `torch.cuda` before the first step, so it does not start on this Mac. The sample here is the MPS run above, with the same rank, alpha, and the two learning rates. `mlx_lora.py` applies PEFT adapters at serve time. It does not train.
+
+```sh
+# from a checkout of jeff-src, after the rows file exists
+uv run jeff-kit check-rows snake-rows.jsonl
+uv run jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6 \
+  --initial-checkpoint "$HOME/Models/jeff/jeff-base-v1.3" \
+  --train snake-train.jsonl --development snake-dev.jsonl --temperature snake-cal.jsonl \
+  --run runs/snake --output checkpoints/snake \
+  --base-model Qwen/Qwen3.5-0.8B --revision 2fc06364715b967f1860aea9cf38778875588b17
+```
+
+## Published adapters
+
+`triage`, `tools`, `guard`, and `spam` are the Apache-2.0 PEFT adapters on `mstrasser/jeff-adapter-*` (revision `v1.3`). Each is a LoRA plus its own readout and temperature. `scripts/jeff_peft_merge.py` folds one into a copy of jeff-base the same way `jeff.lora.merge_adapter` does (`W += (alpha / rank) B A`), then `jeff-convert` / `compile` write `/Users/anemll/Models/jeff-coreai/adapters/<name>/`. The demo dropdown lists every name `/health` returns. Choosing one loads that adapter's example and also scores the same question on base.
+
 `--task tetris` uses `coreai/jeff_tetris.py`. A 256/64 El-Tetris dataset is generated with `generate_tetris_rows`; Tetris LoRA training is the next run, after this Snake adapter.
 
 Placement audit of the specializations this server loaded (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).
