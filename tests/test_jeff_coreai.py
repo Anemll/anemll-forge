@@ -223,6 +223,17 @@ class JeffCoreAITests(unittest.TestCase):
             self.assertIn("0/linear_attn.in_proj_qkv.weight/int8", arrs_w)
             self.assertAlmostEqual(float(arrs_w["0/linear_attn.in_proj_qkv.weight/act_unit"]), 0.02, places=4)
             self.assertAlmostEqual(float(arrs_w["0/mlp.down_proj.weight/out_unit"]), 0.05, places=4)
+            attn_scales = {}
+            for name in ("self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight",
+                         "self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight",
+                         "mlp.down_proj.weight"):
+                attn_scales[f"3/{name}"] = {"in": 0.03, "out": 0.04}
+            arrs_a = layer_arrays(ck, 3, "w8a8", attn_scales)
+            self.assertIn("3/self_attn.q_proj.weight/act_unit", arrs_a)
+            self.assertNotIn("3/self_attn.q_proj.weight/out_unit", arrs_a)
+            self.assertNotIn("3/self_attn.k_proj.weight/out_unit", arrs_a)
+            self.assertIn("3/self_attn.v_proj.weight/out_unit", arrs_a)
+            self.assertIn("3/self_attn.o_proj.weight/out_unit", arrs_a)
             w = ck.layer(3)["self_attn.q_proj.weight"]
             codes, scale = int8_per_channel(w)
             recon = codes.astype(np.float32) * scale[:, None].astype(np.float32)

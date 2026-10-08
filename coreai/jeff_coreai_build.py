@@ -345,7 +345,12 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
     man_path = coreai / "manifest.json"
     act_scales = None
     if quant == "w8a8":
-        act_scales = calibrate_activation_scales(B, ck, ctx, width=min(widths))
+        reused = os.environ.get("JEFF_ACT_SCALES")
+        if reused:
+            act_scales = json.loads(Path(reused).read_text())
+            print(f"reused {len(act_scales)} activation scales from {reused}", flush=True)
+        else:
+            act_scales = calibrate_activation_scales(B, ck, ctx, width=min(widths))
         (coreai / "act_scales.json").write_text(json.dumps(act_scales, indent=1))
     chunks = []
     for layers in chunk_plan_from(plan):

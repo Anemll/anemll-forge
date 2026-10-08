@@ -203,8 +203,10 @@ class QConv(nn.Module):
             self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
         if f"{key}/act_unit" in W:
             self.register_buffer("act_unit", torch.tensor(float(np.asarray(W[f"{key}/act_unit"]).reshape(())), dtype=torch.float16))
-            out_unit = W[f"{key}/out_unit"] if f"{key}/out_unit" in W else W[f"{key}/act_unit"]
-            self.register_buffer("out_unit", torch.tensor(float(np.asarray(out_unit).reshape(())), dtype=torch.float16))
+            # out_unit is optional. q/k omit it: an output quantize in front of RoPE makes ANEC fail
+            # ("Must be connected") and the whole chunk leaves the ANE.
+            if f"{key}/out_unit" in W:
+                self.register_buffer("out_unit", torch.tensor(float(np.asarray(W[f"{key}/out_unit"]).reshape(())), dtype=torch.float16))
             self.register_buffer("act_zero", torch.tensor(0, dtype=torch.int8))
 
     def forward(self, x):

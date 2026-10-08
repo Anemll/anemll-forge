@@ -327,7 +327,10 @@ def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16", act_scales: di
                     raise ValueError(f"w8a8 is missing a calibrated activation scale for {key}")
                 spec = act_scales[key]
                 arrs[f"{key}/act_unit"] = np.float16(spec["in"])
-                arrs[f"{key}/out_unit"] = np.float16(spec["out"])
+                # Query and key feed RoPE. Quantizing that conv's output makes this M5's ANEC abort
+                # ("Must be connected") and place the whole chunk on the GPU. The input quantize stays.
+                if name not in ("self_attn.q_proj.weight", "self_attn.k_proj.weight"):
+                    arrs[f"{key}/out_unit"] = np.float16(spec["out"])
         else:
             arrs[f"{key}/dense"] = np.asarray(mat, np.float16)
     return arrs
