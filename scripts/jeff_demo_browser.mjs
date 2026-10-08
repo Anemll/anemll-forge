@@ -1,11 +1,12 @@
 // Headless check of scripts/jeff_demo.html against a running jeff-serve, through the installed Google Chrome.
 // Needs playwright-core (no browser download): npm i playwright-core   (in any folder; pass it via NODE_PATH)
 //   NODE_PATH=/path/to/node_modules node scripts/jeff_demo_browser.mjs [--url http://127.0.0.1:8787/] [--out dir]
+//     [--html page.html]   (serve this file as the page instead of the server's copy)
 // Checks: Snake target arrow and Move text; Tetris mid-game Reset with a request in flight; Pause / Play;
 // top-out before a request and right after a placement, with the translucent GAME OVER overlay; Play starts a
 // new game. Exits nonzero on the first failed check.
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -25,8 +26,13 @@ function check(name, ok, detail = "") {
   if (!ok) throw new Error(`check failed: ${name}`);
 }
 
+const html = arg("--html", null);
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1180, height: 1400 } });
+if (html) {
+  // Serve this file as the page (the API still goes to --url), to test page edits without touching the server.
+  await page.route((u) => u.pathname === "/", (route) => route.fulfill({ contentType: "text/html", body: readFileSync(html, "utf8") }));
+}
 page.on("pageerror", (error) => console.log("page error:", error.message));
 const state = () => page.evaluate(() => ({
   pieces: tPieces, lines: tLines, playing: tPlaying, inflight: tInflight, generation: tGeneration, over: tOver,
@@ -35,6 +41,20 @@ const state = () => page.evaluate(() => ({
   why: document.getElementById("tetris-over-why").textContent,
 }));
 const waitFor = (fn, arg, timeout = 30000) => page.waitForFunction(fn, arg, { timeout, polling: 20 });
+
+// Play after game over: a fresh board (new generation, no stats, overlay hidden) that starts dropping pieces.
+async function playAfterGameOver(name) {
+  const over = await state();
+  if (!over.over || !over.overlay) throw new Error(`${name}: not at game over`);
+  await page.click("#tetris-toggle");
+  const fresh = await state();
+  await waitFor(() => tPieces > 0, undefined, 5000).catch(() => {});
+  const later = await state();
+  check(name, fresh.generation > over.generation && !fresh.overlay && !fresh.over && fresh.playing
+    && fresh.filled === 0 && fresh.pieces === 0 && fresh.lines === 0
+    && later.pieces > 0 && !later.overlay && later.filled <= 4 * later.pieces,
+    `at click ${JSON.stringify(fresh)}; within 5 s pieces ${later.pieces}, filled ${later.filled}`);
+}
 
 try {
   await page.goto(url);
@@ -141,12 +161,7 @@ try {
   check("overlay is translucent", overlay.bg === "rgba(0, 0, 0, 0.45)" && overlay.color === "rgb(255, 255, 255)"
     && Number(overlay.weight) >= 700 && overlay.shadow !== "none", `${overlay.bg} ${overlay.blur}`);
 
-  // Play after game over starts a new game and hides the overlay.
-  await page.click("#tetris-toggle");
-  const fresh = await state();
-  check("play after game over starts a new game", !fresh.overlay && fresh.filled === 0 && fresh.playing,
-    JSON.stringify(fresh));
-  await waitFor(() => tPieces >= 1);
+  await playAfterGameOver("play after a top-out before the request");
   await page.click("#tetris-toggle");
   await waitFor(() => tInflight === false);
 
@@ -167,6 +182,9 @@ try {
   await page.waitForTimeout(800);
   check("no request after game over", (await state()).pieces === top2.pieces && !(await state()).inflight);
   await page.locator(".tboard-wrap").screenshot({ path: `${out}/tetris_game_over_after_placement.png` });
+  await playAfterGameOver("play after a top-out after a placement");
+  await page.click("#tetris-toggle");
+  await waitFor(() => tInflight === false);
 
   // Reset hides the overlay.
   await page.click("#tetris-reset");
