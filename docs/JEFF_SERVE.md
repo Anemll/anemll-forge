@@ -288,6 +288,16 @@ python scripts/jeff_lora_parity.py \
 
 `--task tetris` uses `coreai/jeff_tetris.py`. One decision drops one piece. Each option is a legal rotation and column, written as a sentence (`T piece, rotated right, columns 4-6, lands on row 3, clears 1 line, leaves 0 holes`). The board is text in `latest`. Labels are the El-Tetris maximum. `generate_tetris_rows` builds the 256/64 split, and `generate_tetris_kit_rows` writes the same positions in the adapter-kit `rows.jsonl` shape. The demo Tetris controls sit above that board. The top-5 placement bars and the move log are fixed-height scroll boxes, same as Snake. `scripts/jeff_tetris_eval.py` plays identical seeds for the heuristic, base, and the `tetris` adapter.
 
+MPS, batch 4, rank 16, 7 October 2026. Steady 8.40 s/step (prompts run about 500–1500 tokens). Epoch 1 was 519 s, loss 1.844, accuracy 0.402. Epoch 2 was 506 s, loss 1.485, accuracy 0.531. Wall time 1580 s, merged to `~/Models/jeff-tetris-mps/merged`, compiled `fully_ane` in 1 m 24 s.
+
+| Player | Lines / game | Pieces survived | Notes |
+| --- | --- | --- | --- |
+| El-Tetris heuristic | 13.50 | 40.0 | all 8 games hit the 40-piece cap |
+| Base, ANE | 0.125 | 26.6 | 1 line in 213 pieces, 247 ms/decision |
+| Tetris adapter, ANE | 7.38 | 39.9 | 59 lines in 319 pieces, 7 of 8 games hit the cap, 299 ms/decision |
+
+Held-out choice accuracy on the same 64 rows: base 0.062 (loss 2.955), adapter 0.531 (loss 1.686). Train accuracy 0.664. The ANE games loaded one build at a time; two resident Jeff engines plus these long prefills exhaust IOSurface after a few dozen decisions.
+
 The older checkpoint `~/Models/jeff/Jeff-Qwen3.5-0.8B` is prompt layout `state-first` with its own temperature. This server renders every prompt with the v1.3 live-last layout, and a second full ANE compile is another gigabyte, so that checkpoint is not a dropdown entry.
 
 The prefix cache on `cursor/jeff-prefix-cache` (PR #7) measured a Tetris suffix of about 85 tokens at 35.7 ms cached versus 58 ms cold. Wiring it in waits until that branch and this one have both landed. This server still ships with the cache off.

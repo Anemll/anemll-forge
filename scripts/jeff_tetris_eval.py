@@ -75,7 +75,12 @@ def main(argv: list[str] | None = None) -> int:
             latencies.append(float(payload["timings"]["total_ms"]))
             return payload["answers"]["move"]["choice"]
 
-        games = [play_game(choose, seed, args.max_pieces) for seed in seeds]
+        games = []
+        for index, seed in enumerate(seeds):
+            game = play_game(choose, seed, args.max_pieces)
+            games.append(game)
+            print(f"  {name} game {index + 1}/{len(seeds)}  lines {game['lines']}  pieces {game['pieces']}",
+                  flush=True)
         report[name] = summarize(games, latencies)
         latency = report[name]["latency_ms_mean"]
         print(f"{name}: lines {report[name]['lines_mean']:.2f}  pieces {report[name]['pieces_mean']:.1f}  "
