@@ -124,6 +124,7 @@
   .latency { height: 64px; overflow: hidden; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .latency span { font-size: 64px; letter-spacing: -0.04em; line-height: 0.9; }
   .latency small { color: var(--muted); margin-left: 6px; font-size: 16px; }
+  .latency small.avg { font-size: 13px; margin-left: 10px; opacity: 0.85; }
   .meta { color: var(--muted); margin: 6px 0 12px; }
   .scroll-box { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; min-width: 240px; }
   #scoreline { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
@@ -259,7 +260,7 @@
     <div class="play">
       <div class="board" id="board" aria-label="Snake board"></div>
       <div class="readout">
-        <div class="latency"><span id="ms">—</span><small>ms total</small></div>
+        <div class="latency"><span id="ms">—</span><small>ms total</small><small class="avg" id="avg"></small></div>
         <p id="move">Move: —</p>
         <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
         <p class="meta timing" id="timing"><span>Waiting for the first decision.</span><span></span></p>
@@ -290,7 +291,7 @@
       </div>
       <div class="next-piece" id="tetris-next" aria-label="Next piece"></div>
       <div id="tetris-readout">
-        <div class="latency"><span id="tetris-ms">—</span><small>ms total</small></div>
+        <div class="latency"><span id="tetris-ms">—</span><small>ms total</small><small class="avg" id="tetris-avg"></small></div>
         <p class="meta" id="tetris-score">Lines 0 · pieces 0</p>
         <p class="meta timing" id="tetris-timing"><span>Waiting for the first decision.</span><span></span></p>
         <div id="tetris-bars" class="scroll-box"></div>
@@ -574,6 +575,7 @@ function resetSnake() {
   sGeneration += 1;
   target = null;
   showMove(null);
+  resetMoveTime("");
   snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
   food = { r: 1, c: 6 };
   score = 0;
@@ -607,6 +609,22 @@ function showTiming(prefix, payload, label) {
   where.textContent = `tokenize ${timing.tokenize_ms} ms · prefill ${timing.prefill_ms} ms · head ${timing.head_ms} ms`;
 }
 
+// Mean server total over the moves of the game in progress, per panel ("" Snake, "tetris-" Tetris).
+const moveTimes = { "": { sum: 0, n: 0 }, "tetris-": { sum: 0, n: 0 } };
+
+function addMoveTime(prefix, payload) {
+  const avg = moveTimes[prefix];
+  avg.sum += Number((payload.timings || {}).total_ms) || 0;
+  avg.n += 1;
+  document.getElementById(`${prefix}avg`).textContent =
+    `avg ${Math.round(avg.sum / avg.n)} ms/move · ${avg.n} ${avg.n === 1 ? "move" : "moves"}`;
+}
+
+function resetMoveTime(prefix) {
+  moveTimes[prefix] = { sum: 0, n: 0 };
+  document.getElementById(`${prefix}avg`).textContent = "";
+}
+
 function clearTiming(prefix) {
   document.getElementById(`${prefix}ms`).textContent = "—";
   const [what, where] = document.getElementById(`${prefix}timing`).children;
@@ -626,6 +644,7 @@ async function step() {
     if (generation !== sGeneration) return;
     const answer = payload.answers.move;
     showTiming("", payload, payload.adapter || adapter);
+    addMoveTime("", payload);
     bars("bars", answer.probabilities, answer.choice);
     document.getElementById("scoreline").textContent = `Food eaten ${score} · best ${best}`;
     const delta = DIRS[answer.choice];
@@ -643,6 +662,7 @@ async function step() {
       logStatus(`Chose ${answer.choice}. That hits a wall or the body. Food eaten this life: ${score}. Restarting.`);
       snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
       score = 0;
+      resetMoveTime("");
       placeFood();
       document.getElementById("scoreline").textContent = `Food eaten 0 · best ${best}`;
     } else {
@@ -935,6 +955,7 @@ function tReset() {
   tOver = false;
   document.getElementById("tetris-over").hidden = true;
   clearTiming("tetris-");
+  resetMoveTime("tetris-");
   document.getElementById("tetris-bars").replaceChildren();
   document.getElementById("tetris-status").replaceChildren();
   tDraw();
@@ -996,6 +1017,7 @@ async function tStep() {
     if (generation !== tGeneration) return;
     const answer = payload.answers.move;
     showTiming("tetris-", payload, payload.adapter || which);
+    addMoveTime("tetris-", payload);
     const ranked = Object.entries(answer.probabilities)
       .map(([key, value]) => ({ key, value, text: criteria[key] || key }))
       .sort((a, b) => b.value - a.value)
@@ -1032,6 +1054,8 @@ document.getElementById("tetris-toggle").addEventListener("click", () => {
   if (tPlaying) tStop();
   else tStart();
 });
+
+document.getElementById("tetris-adapter").addEventListener("change", () => resetMoveTime("tetris-"));
 
 document.getElementById("tetris-reset").addEventListener("click", () => {
   tReset();
