@@ -209,4 +209,27 @@ A 256-row call costs about 63 ms whether the prompt fills it or not, so both dem
 
 The refund message was classified `refunds` at probability 0.85. The snake's first moves were soft (top option about 0.34): this is the base checkpoint with no adapter.
 
+## Sample Snake LoRA (M5 Max, 7 October 2026)
+
+Rank 16, alpha 32, LoRA learning rate `2e-4`, readout learning rate `5e-6`, batch 4, 2 epochs, 256 train / 64 held-out. Backbone bf16 on MPS with bf16 autocast; LoRA factors and the readout stay fp32. Loss is cross-entropy on the masked 255-way logits. Temperature 1.075 is applied only when probabilities are formed.
+
+| Device | Steady s/step | Notes |
+| --- | --- | --- |
+| CPU | 12.91 | Batch 4, rank 8, fp32, one learning rate on LoRA and the readout. 826 s for 64 steps. That run diverged (loss 1.34 to 2.05). |
+| MPS | 1.58 | Batch 4, rank 16, bf16 autocast. Timed steady step after a 4.92 s warmup. Epoch steps were 1.46 s and 1.43 s. |
+
+`jeff-src` `mlx_lora.py` applies PEFT adapters at serve time. It is not a trainer, so there is no MLX training step time.
+
+| Split | Accuracy | Loss | n |
+| --- | --- | --- | --- |
+| Base, train | 0.309 | 1.337 | 256 |
+| Base, held-out | 0.281 | 1.352 | 64 |
+| Base, held-out, hint prompt | 0.484 | 1.121 | 64 |
+| Adapter, train | 0.598 | 0.887 | 256 |
+| Adapter, held-out | 0.594 | 0.932 | 64 |
+
+The hint prompt adds food direction and the safe-move list in front of `latest`. It is scored on the base model only. The whole MPS run, including both evals and the merge, took 300 s. The merged checkpoint is `/Users/anemll/Models/jeff-snake/merged`.
+
+`--task tetris` uses `coreai/jeff_tetris.py`. A 256/64 El-Tetris dataset is generated with `generate_tetris_rows`; Tetris LoRA training is the next run, after this Snake adapter.
+
 Placement audit of the specializations this server loaded (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).
