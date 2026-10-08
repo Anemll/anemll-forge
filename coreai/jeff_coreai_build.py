@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from jeff_coreai import JeffCheckpoint, convert_plan, layer_arrays
+from jeff_coreai import JeffCheckpoint, convert_plan, layer_arrays, prefill_widths
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -118,24 +118,193 @@ class ReadoutHead:
         return Head().eval().to(torch.float16)
 
 
-def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, prefill: int,
-                        quant: str, out: Path) -> dict:
+def _calibration_rows() -> list[tuple[str, list[int]]]:
+    """Real Jeff prompts whose projection ranges set the W8A8 scales. Override with JEFF_CALIB_CASES / JEFF_CALIB_PROMPTS."""
+    path = Path(os.environ.get(
+        "JEFF_CALIB_CASES", "/Users/anemll/Models/jeff/spike/parity/prefix_cases.json"))
+    names = [n for n in os.environ.get("JEFF_CALIB_PROMPTS", "t256_5opt,t1024_30opt,t2048_100opt").split(",") if n]
+    payload = json.loads(path.read_text())
+    rows = []
+    for name in names:
+        case = next((c for c in payload["cases"] if c["name"] == name), None)
+        if case is None:
+            raise ValueError(f"calibration prompt {name} is not in {path}")
+        rows.append((name, [int(t) for t in case["ids"]]))
+    if not rows:
+        raise ValueError("no calibration prompts")
+    return rows
+
+
+def _fresh_state(B, entry):
+    import torch
+    f = torch.float16
+    gdn = [[torch.zeros(B.P + 3, B.cdim, dtype=f), torch.zeros(B.nv, B.dk, B.dv, dtype=f),
+            torch.zeros(B.nv, 3 * B.P + 1, B.dv, dtype=f)] for _ in entry.gdn_j]
+    att = [[torch.zeros(B.nkv, entry.ctx, B.hd, dtype=f), torch.zeros(B.nkv, entry.ctx, B.hd, dtype=f)]
+           for _ in entry.att_j]
+    return gdn, att
+
+
+def _call_entry(B, entry, x, pos: int, n: int, gdn, att, inv: np.ndarray):
+    """One 256-row prefill step of the torch graph, with the same masks the runtime uses. Returns the hidden buffer."""
+    import torch
+    T = entry.T
+    f = torch.float16
+    pos_idx = np.minimum(np.arange(pos, pos + T), pos + n - 1)
+    ang = np.concatenate([np.outer(pos_idx, inv)] * 2, axis=1).astype(np.float32)
+    cos = torch.from_numpy(np.cos(ang).astype(np.float16))
+    sin = torch.from_numpy(np.sin(ang).astype(np.float16))
+    mask = torch.full((1, entry.ctx), -1e4, dtype=f)
+    if pos:
+        mask[0, :pos] = 0
+    conv_sel = torch.zeros(3, B.P + 3, dtype=f)
+    conv_sel[torch.arange(3), torch.arange(3)] = 1
+    commit = torch.zeros(1, B.P, 1, dtype=f)
+    commit_last = torch.zeros(1, B.P, 1, dtype=f)
+    conv_sel_out = torch.zeros(3, T + 3, dtype=f)
+    idx = torch.arange(3)
+    conv_sel_out[idx, n + idx] = 1
+    valid = torch.zeros(1, T, 1, dtype=f)
+    valid[0, :n, 0] = 1
+    args = [x, cos, sin, mask, conv_sel, commit, commit_last, conv_sel_out, valid]
+    for conv, rec, pend in gdn:
+        args += [conv, rec, pend]
+    for k, v in att:
+        args += [k, v]
+    with torch.inference_mode():
+        out = entry(*args)
+    rest = out[1:]
+    cursor = 0
+    for i in range(len(gdn)):
+        gdn[i][0] = rest[cursor].detach().clone()
+        gdn[i][1] = rest[cursor + 1].detach().clone()
+        gdn[i][2] = rest[cursor + 2].detach().clone()
+        cursor += 3
+    for i in range(len(att)):
+        kt, vt = rest[cursor], rest[cursor + 1]
+        cursor += 2
+        att[i][0][:, pos:pos + n] = kt[:, :n]
+        att[i][1][:, pos:pos + n] = vt[:, :n]
+    return out[0]
+
+
+def calibrate_activation_scales(B, ck: JeffCheckpoint, ctx: int, width: int = 256) -> dict:
+    """Per-channel absolute max of each dense projection's input and output, over a few real prompts on the FP16 graph.
+
+    The W8A8 graph divides by these and quantizes with step 1/127. A single abs-max for the whole tensor leaves the
+    small channels of a projection (MLP down, GDN out) with almost no codes, and the chunk hidden state drifts.
+    """
+    import torch
+    import torch.nn as nn
+    rows = _calibration_rows()
+    layers = list(range(int(ck.cfg["num_hidden_layers"])))
+    W = {}
+    for i in layers:
+        W.update(layer_arrays(ck, i, "fp16"))
+    mods = [B.LayerW(W, i).eval().to(torch.float16) for i in layers]
+    del W
+    gc.collect()
+    peaks: dict[str, list] = {}
+
+    def _channel_amax(tensor) -> np.ndarray:
+        # (1, C, 1, T) -> one abs-max per channel. Padding rows are included; they only raise the max.
+        return tensor.detach().float().abs().amax(dim=(0, 2, 3)).cpu().numpy()
+
+    def pre(mod, inputs):
+        a = _channel_amax(inputs[0])
+        slot = peaks.get(mod.key)
+        if slot is None:
+            peaks[mod.key] = [a, None]
+        else:
+            slot[0] = np.maximum(slot[0], a)
+
+    def post(mod, _inputs, output):
+        a = _channel_amax(output)
+        slot = peaks[mod.key]
+        slot[1] = a if slot[1] is None else np.maximum(slot[1], a)
+
+    handles = []
+    dense_suffixes = (
+        "in_proj_qkv.weight", "in_proj_z.weight", "out_proj.weight",
+        "q_proj.weight", "k_proj.weight", "v_proj.weight", "o_proj.weight",
+        "gate_proj.weight", "up_proj.weight", "down_proj.weight",
+    )
+    for layer in mods:
+        for mod in layer.modules():
+            if mod.__class__.__name__ == "QConv" and any(mod.key.endswith(name) for name in dense_suffixes):
+                handles.append(mod.register_forward_pre_hook(pre))
+                handles.append(mod.register_forward_hook(post))
+    chunks = []
+    for start in range(0, len(layers), 4):
+        entry = B.Entry(nn.ModuleList(mods[start:start + 4]), ctx, width, kv_cache_dtype="fp16")
+        chunks.append((entry, *_fresh_state(B, entry)))
+    rope = ck.cfg["rope_parameters"]
+    rot = int(ck.cfg["head_dim"] * rope["partial_rotary_factor"])
+    inv = 1.0 / rope["rope_theta"] ** (np.arange(0, rot, 2) / rot)
+    emb = torch.from_numpy(np.asarray(ck.embed_table()))
+    hid = int(ck.cfg["hidden_size"])
+    for name, ids in rows:
+        if len(ids) > ctx:
+            raise ValueError(f"{name} has {len(ids)} tokens, context is {ctx}")
+        for entry, gdn, att in chunks:
+            gdn_z, att_z = _fresh_state(B, entry)
+            for i in range(len(gdn)):
+                gdn[i][:] = [t.clone() for t in gdn_z[i]]
+            for i in range(len(att)):
+                att[i][:] = [t.clone() for t in att_z[i]]
+        pos = 0
+        print(f"calibrate {name}: {len(ids)} tokens", flush=True)
+        while pos < len(ids):
+            n = min(width, len(ids) - pos)
+            x = torch.zeros(1, hid, 1, width, dtype=torch.float16)
+            x[0, :, 0, :n] = emb[ids[pos:pos + n]].T
+            for entry, gdn, att in chunks:
+                x = _call_entry(B, entry, x, pos, n, gdn, att, inv)
+            pos += n
+    for handle in handles:
+        handle.remove()
+    scales = {}
+    for key, (in_max, out_max) in peaks.items():
+        if out_max is None:
+            raise RuntimeError(f"calibration saw no output from {key}")
+        scales[key] = {
+            "in": np.maximum(in_max, 1e-3).astype(np.float32).tolist(),
+            "out": np.maximum(out_max, 1e-3).astype(np.float32).tolist(),
+        }
+    if not scales:
+        raise RuntimeError("calibration saw no dense projections")
+    spreads = [float(np.max(s["in"]) / max(np.median(s["in"]), 1e-6)) for s in scales.values()]
+    print(f"calibrated {len(scales)} projections, per-channel amax "
+          f"{min(min(s['in']) for s in scales.values()):.4g} .. {max(max(s['in']) for s in scales.values()):.4g}, "
+          f"median channel-spread {float(np.median(spreads)):.3g}", flush=True)
+    del mods
+    gc.collect()
+    return scales
+
+
+def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, widths: list[int],
+                        quant: str, out: Path, act_scales: dict | None = None) -> dict:
     import torch.nn as nn
     W = {}
     for i in layers:
-        W.update(layer_arrays(ck, i, quant))
+        W.update(layer_arrays(ck, i, quant, act_scales))
     mods = nn.ModuleList(B.LayerW(W, i) for i in layers).eval()
     import torch
     mods = mods.to(torch.float16)
     del W
     gc.collect()
-    entry_name = f"p{prefill}_{ctx // 1024}k"
-    e = B.Entry(mods, ctx, prefill, kv_cache_dtype="fp16")
-    mb = save_dense_program(B, [(entry_name, e, e.input_names(), e.output_names())], out)
+    # One package, one shared weight set, one prefill function per width (a short suffix entry next to p256).
+    built = []
+    for width in widths:
+        entry = B.Entry(mods, ctx, width, kv_cache_dtype="fp16")
+        name = f"p{width}_{ctx // 1024}k"
+        built.append((name, entry, entry.input_names(), entry.output_names()))
+    mb = save_dense_program(B, built, out)
+    e = built[0][1]
     return {
         "file": out.name,
         "layers": [layers[0], layers[-1]],
-        "entries": [entry_name],
+        "entries": [name for name, _, _, _ in built],
         "gdn_j": e.gdn_j,
         "att_j": e.att_j,
         "taps": [],
@@ -154,10 +323,11 @@ def build_readout_head(B, ck: JeffCheckpoint, out: Path) -> dict:
 
 
 def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
-                quant: str = "fp16", chunk: int = 4) -> dict:
-    plan = convert_plan(ck, ctx, prefill, quant, chunk)
+                quant: str = "fp16", chunk: int = 4, prefills=()) -> dict:
+    widths = prefill_widths(prefill, prefills)
+    plan = convert_plan(ck, ctx, prefill, quant, chunk, widths)
     B = load_builder(ck.cfg)
-    B.TPS = [prefill]
+    B.TPS = widths
     B.OUT = out_dir
     coreai = out_dir / "coreai"
     model_dir = out_dir / "model"
@@ -176,13 +346,14 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
         "version": "jeff-coreai1",
         "kind": "jeff-decision",
         "T": 8,
-        "TP": prefill,
+        "TP": max(widths),
+        "prefills": widths,
         "pend": B.P,
         "taps": [],
         "ctxs": [ctx],
         "pctxs": [ctx],
         "kv_len": {str(ctx): B.kv_len(ctx, 8)},
-        "pkv_len": {str(ctx): B.kv_len(ctx, prefill)},
+        "pkv_len": {str(ctx): B.kv_len(ctx, max(widths))},
         "kv_cache": {"format": "fp16", "keys": "float16", "values": "float16", "scales": None},
         "quant": quant,
         "dflash2": False,
@@ -192,10 +363,22 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
         "numerics": {"SILU": B.SILU, "MLP_SILU": B.MLP_SILU, "GDN_FAST": B.GDN_FAST},
     }
     man_path = coreai / "manifest.json"
+    act_scales = None
+    if quant == "w8a8":
+        reused = os.environ.get("JEFF_ACT_SCALES")
+        if reused:
+            act_scales = json.loads(Path(reused).read_text())
+            sample = next(iter(act_scales.values()))
+            if np.asarray(sample.get("in", 0)).size == 1:
+                raise ValueError(f"{reused} has a per-tensor activation step. Recalibrate; W8A8 needs per-channel amax.")
+            print(f"reused {len(act_scales)} per-channel activation scales from {reused}", flush=True)
+        else:
+            act_scales = calibrate_activation_scales(B, ck, ctx, width=min(widths))
+        (coreai / "act_scales.json").write_text(json.dumps(act_scales))
     chunks = []
     for layers in chunk_plan_from(plan):
         dest = coreai / f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
-        info = build_prefill_chunk(B, ck, layers, ctx, prefill, quant, dest)
+        info = build_prefill_chunk(B, ck, layers, ctx, widths, quant, dest, act_scales)
         chunks.append(info)
         man["chunks"] = chunks
         man_path.write_text(json.dumps(man, indent=1))

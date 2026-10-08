@@ -11,6 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
+from jeff_prefix_cache import LIVE_MARK, token_cut
+
 SMALL = (
     "input_layernorm.weight", "post_attention_layernorm.weight",
     "linear_attn.conv1d.weight", "linear_attn.A_log", "linear_attn.dt_bias",
@@ -120,16 +122,44 @@ def decision_messages(row: dict, codes: list[str], layout: str) -> list[dict]:
             {"role": "user", "content": [{"type": "text", "text": prompt}]}]
 
 
-def prompt_ids(model: Path, row: dict, decision: dict | None = None, tokenizer=None) -> list[int]:
-    """Token ids exactly as Jeff's backends build them: the checkpoint's chat template with
-    add_generation_prompt=True, enable_thinking=False, then add_special_tokens=False. Needs transformers."""
-    decision = decision or load_decision_config(model)
+def _chat_text(model: Path, row: dict, decision: dict, tokenizer):
     if tokenizer is None:
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(str(model))
     text = tokenizer.apply_chat_template(decision_messages(row, decision["codes"], decision["prompt_layout"]),
                                          tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    return tokenizer, text
+
+
+def prompt_ids(model: Path, row: dict, decision: dict | None = None, tokenizer=None) -> list[int]:
+    """Token ids exactly as Jeff's backends build them: the checkpoint's chat template with
+    add_generation_prompt=True, enable_thinking=False, then add_special_tokens=False. Needs transformers."""
+    decision = decision or load_decision_config(model)
+    tokenizer, text = _chat_text(model, row, decision, tokenizer)
     return list(tokenizer(text, add_special_tokens=False)["input_ids"])
+
+
+def split_live_last(model: Path, row: dict, decision: dict | None = None, tokenizer=None) -> dict:
+    """Token ids of one decision, split into the shared prefix and the live suffix.
+
+    The prefix is the system message, question, instructions, options and every state field except the
+    last, through ``Latest:\\n``. The suffix is the last field plus the closing instruction and the
+    generation-prompt tail (those tokens sit after the changing field, so they cannot stay in the
+    snapshot). ``prefix + suffix`` equals :func:`prompt_ids`. Needs transformers. Raises if the row is
+    not a live-last object state.
+    """
+    decision = decision or load_decision_config(model)
+    tokenizer, text = _chat_text(model, row, decision, tokenizer)
+    mark = text.find(LIVE_MARK)
+    if mark < 0:
+        raise ValueError("live-last split needs an object state whose last field is rendered after 'Latest:'")
+    enc = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
+    ids = list(enc["input_ids"])
+    cut = token_cut(enc["offset_mapping"], mark + len(LIVE_MARK))
+    if cut <= 0 or cut >= len(ids):
+        raise ValueError(f"live-last cut {cut} is outside the {len(ids)}-token prompt")
+    return {"ids": ids, "prefix": ids[:cut], "suffix": ids[cut:],
+            "prefix_tokens": cut, "suffix_tokens": len(ids) - cut}
 
 
 def _read_safetensors(path: Path, names=None):
@@ -275,20 +305,48 @@ def int8_per_channel(weight: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return codes, scale.astype(np.float16)
 
 
-def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16") -> dict:
-    """Keys the Core AI LayerW / QConv graph already understands, but dense (or INT8) — no LUT/VQ."""
+def _amax_vector(value, n: int, key: str) -> np.ndarray:
+    """Per-channel absolute max. A scalar broadcasts; lengths other than 1 or ``n`` are a bad calibration file."""
+    vec = np.asarray(value, np.float32).reshape(-1)
+    if vec.size == 1:
+        vec = np.full(n, float(vec[0]), np.float32)
+    if vec.size != n:
+        raise ValueError(f"{key} activation amax has length {vec.size}, expected {n}")
+    return np.maximum(vec, 1e-3).astype(np.float16)
+
+
+def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16", act_scales: dict | None = None) -> dict:
+    """Keys the Core AI LayerW / QConv graph already understands, but dense (or INT8) — no LUT/VQ.
+
+    ``w8a8`` folds each projection's per-channel activation amax into the INT8 weight (``W * amax_in``) and stores
+    those amax vectors. The graph divides by them and quantizes with the constant step 1/127, which is the per-tensor
+    pair the ANE fuses. A direct per-channel quantize stays on the ANE but does not hit that kernel.
+    """
     w = ck.layer(i)
     arrs = {f"{i}/{k}": np.asarray(w[k], np.float32) for k in SMALL if k in w}
     for name in DENSE:
         if name not in w:
             continue
         mat = np.asarray(w[name], np.float32)
-        if quant == "int8":
-            codes, scale = int8_per_channel(mat)
-            arrs[f"{i}/{name}/int8"] = codes
-            arrs[f"{i}/{name}/scale"] = scale
+        key = f"{i}/{name}"
+        if quant in ("int8", "w8a8"):
+            folded = mat
+            if quant == "w8a8":
+                if not act_scales or key not in act_scales:
+                    raise ValueError(f"w8a8 is missing a calibrated activation scale for {key}")
+                spec = act_scales[key]
+                amax_in = _amax_vector(spec["in"], mat.shape[1], key)
+                folded = mat * amax_in.astype(np.float32)[None, :]
+                arrs[f"{key}/act_amax"] = amax_in
+                # Query and key feed RoPE. Quantizing that conv's output makes this M5's ANEC abort
+                # ("Must be connected") and place the whole chunk on the GPU. The input quantize stays.
+                if name not in ("self_attn.q_proj.weight", "self_attn.k_proj.weight"):
+                    arrs[f"{key}/out_amax"] = _amax_vector(spec["out"], mat.shape[0], key)
+            codes, scale = int8_per_channel(folded)
+            arrs[f"{key}/int8"] = codes
+            arrs[f"{key}/scale"] = scale
         else:
-            arrs[f"{i}/{name}/dense"] = np.asarray(mat, np.float16)
+            arrs[f"{key}/dense"] = np.asarray(mat, np.float16)
     return arrs
 
 
@@ -298,11 +356,19 @@ def chunk_plan(n_layers: int, chunk: int = 4) -> list[list[int]]:
     return [list(range(a, min(a + chunk, n_layers))) for a in range(0, n_layers, chunk)]
 
 
-def convert_plan(ck: JeffCheckpoint, ctx: int, prefill: int, quant: str, chunk: int = 4) -> dict:
-    if prefill <= 8 or prefill % 8:
-        raise ValueError("Jeff prefill rows must be a multiple of 8 and greater than 8 (GDN sub-chunk)")
-    if ctx < prefill:
-        raise ValueError(f"context {ctx} must be >= prefill {prefill}")
+def prefill_widths(prefill: int, extra=()) -> list[int]:
+    """Sorted unique prefill entry widths. Each must be a multiple of 8 and greater than 8."""
+    widths = sorted({int(prefill), *(int(w) for w in extra)})
+    for width in widths:
+        if width <= 8 or width % 8:
+            raise ValueError("Jeff prefill rows must be a multiple of 8 and greater than 8 (GDN sub-chunk)")
+    return widths
+
+
+def convert_plan(ck: JeffCheckpoint, ctx: int, prefill: int, quant: str, chunk: int = 4, prefills=()) -> dict:
+    widths = prefill_widths(prefill, prefills)
+    if ctx < max(widths):
+        raise ValueError(f"context {ctx} must be >= prefill {max(widths)}")
     n = int(ck.cfg["num_hidden_layers"])
     plan = chunk_plan(n, chunk)
     return {
@@ -313,7 +379,8 @@ def convert_plan(ck: JeffCheckpoint, ctx: int, prefill: int, quant: str, chunk: 
         "layer_types": list(ck.cfg["layer_types"]),
         "chunk_plan": [f"{p[0]}-{p[-1]}" for p in plan],
         "ctx": ctx,
-        "prefill_rows": prefill,
+        "prefill_rows": max(widths),
+        "prefills": widths,
         "kv_cache": "fp16",
         "quant": quant,
         "head": {"kind": "readout", "shape": list(ck.readout.shape)},

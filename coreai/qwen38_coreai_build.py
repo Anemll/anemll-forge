@@ -155,14 +155,26 @@ def layer_arrays(ck, i: int) -> dict:
     return arrs
 
 
+def _act_qdq(x, unit, zero):
+    """Per-tensor symmetric INT8 around a matmul. Constant scale and zero point 0 is the pair the ANE fuses into an
+    INT8 multiply-add; a zero point of -128 or a runtime per-row scale does not."""
+    q = torch.ops.coreai.quantize(x, unit, torch.int8, zero_point=zero)
+    return torch.ops.coreai.dequantize(q, unit, zero_point=zero, output_dtype=torch.float16)
+
+
 class QConv(nn.Module):
     """1x1 conv with an exported weight: LUT (dense lut[idx], registered for exact palettization) + per-channel scale as
     a mul after the conv, int8 (a compile-time INT8 constant with its per-channel scales; QCONV_INT8=0: dequantized to
-    dense fp16) or dense."""
+    dense fp16) or dense. Optional ``act_amax`` / ``out_amax`` are per-channel absolute maxima: the activation is
+    divided by them and wrapped in a per-tensor ``_act_qdq`` of step 1/127 (W8A8). The weight stored beside
+    ``act_amax`` is already ``W * act_amax``."""
 
     def __init__(self, W: dict, key: str) -> None:
         super().__init__()
+        self.key = key
         self.register_buffer("scale", None)
+        if (f"{key}/int8" in W and QCONV_INT8) or f"{key}/act_amax" in W:
+            import coreai_torch._compression.custom_layers  # noqa: F401  registers quantize / constexpr_blockwise_shift_scale
         if f"{key}/lut" in W:
             lut, idx = W[f"{key}/lut"], W[f"{key}/idx"]
             cd = lut.shape[1]
@@ -171,7 +183,6 @@ class QConv(nn.Module):
             if f"{key}/scale" in W:
                 self.register_buffer("scale", torch.from_numpy(W[f"{key}/scale"].astype(np.float16)).view(1, -1, 1, 1))
         elif f"{key}/int8" in W and QCONV_INT8:
-            import coreai_torch._compression.custom_layers  # noqa: F401  registers coreai::constexpr_blockwise_shift_scale
             codes = np.ascontiguousarray(W[f"{key}/int8"])
             self.register_buffer("w8", torch.from_numpy(codes).view(codes.shape[0], codes.shape[1], 1, 1))
             self.register_buffer("w8_scale", torch.from_numpy(np.asarray(W[f"{key}/scale"], np.float16)).view(-1, 1, 1, 1))
@@ -191,14 +202,29 @@ class QConv(nn.Module):
             self.lr_b.weight = nn.Parameter(torch.from_numpy(b.copy()).view(b.shape[0], b.shape[1], 1, 1), requires_grad=False)
             self.lr_a = nn.Conv2d(a.shape[1], a.shape[0], 1, bias=False)
             self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
+        if f"{key}/act_amax" in W:
+            amax = np.asarray(W[f"{key}/act_amax"], np.float16).reshape(-1)
+            self.register_buffer("act_amax", torch.from_numpy(np.ascontiguousarray(amax)).view(1, -1, 1, 1))
+            self.register_buffer("q_unit", torch.tensor(np.float16(1.0 / 127.0)))
+            self.register_buffer("act_zero", torch.tensor(0, dtype=torch.int8))
+            # out_amax is optional. q/k omit it: an output quantize in front of RoPE makes ANEC fail
+            # ("Must be connected") and the whole chunk leaves the ANE.
+            if f"{key}/out_amax" in W:
+                out = np.asarray(W[f"{key}/out_amax"], np.float16).reshape(-1)
+                self.register_buffer("out_amax", torch.from_numpy(np.ascontiguousarray(out)).view(1, -1, 1, 1))
 
     def forward(self, x):
+        raw = x
+        if getattr(self, "act_amax", None) is not None:
+            x = _act_qdq(x / self.act_amax, self.q_unit, self.act_zero)
         if self.conv is None:  # INT8 constant: never expanded to an FP16 weight in the program
             y = F.conv2d(x, torch.ops.coreai.constexpr_blockwise_shift_scale(self.w8, self.w8_scale, None, None, torch.int8))
         else:
             y = self.conv(x)
         y = y if self.scale is None else y * self.scale
-        return y if self.lr_a is None else y + self.lr_a(self.lr_b(x))
+        if getattr(self, "out_amax", None) is not None:
+            y = _act_qdq(y / self.out_amax, self.q_unit, self.act_zero) * self.out_amax
+        return y if self.lr_a is None else y + self.lr_a(self.lr_b(raw))
 
 
 class Hadamard(nn.Module):
@@ -338,7 +364,10 @@ class GDNW(nn.Module):
 
         def heads(t):
             t = t.reshape(nk, dk, T).permute(0, 2, 1)
-            return t.reshape(nk, 1, T, dk).repeat(1, nv // nk, 1, 1).reshape(nv, T, dk)
+            g = nv // nk
+            if g == 1:  # one value head per key head (Jeff): nothing to repeat
+                return t
+            return t.reshape(nk, 1, T, dk).repeat(1, g, 1, 1).reshape(nv, T, dk)
 
         def l2n(t, s):
             return t * torch.rsqrt((t * t).sum(-1, keepdim=True) + 1e-6) * s
@@ -473,7 +502,10 @@ class AttnW(nn.Module):
         kt, vt = rope(kh).permute(1, 0, 2), vh.permute(1, 0, 2)                              # (nkv, T, hd)
         qg4 = qh.reshape(T, nkv, grp, hd).permute(1, 2, 0, 3).reshape(nkv, grp * T, hd)
         causal = (1 - tri(T, False)) * -1e4
-        sc_b = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp * T, T) + causal.repeat(grp, 1)  # rows (g, t)
+        # Broadcast the (T, T) mask across the grp query groups. repeat() lowers to mps.tile, which this ANE
+        # rejects once the mask is large (a 1024-row entry: one GPU region, "Unsupported mps.tile").
+        scores = ((qg4 @ kt.transpose(1, 2)) * hd ** -0.5).reshape(nkv, grp, T, T)
+        sc_b = (scores + causal.reshape(1, 1, T, T)).reshape(nkv, grp * T, T)  # rows (g, t)
         forms = _FORMS_OVERRIDE if _FORMS_OVERRIDE is not None else \
             ATT_INT8MM_BY_LAYER.get(getattr(self, "layer_index", -1), ATT_INT8MM)
         mm8 = set(filter(None, forms.split(","))) if cache_v8 else set()  # INT8 values: v8 and kv8

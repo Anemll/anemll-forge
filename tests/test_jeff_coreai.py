@@ -196,6 +196,9 @@ class JeffCoreAITests(unittest.TestCase):
         self.assertEqual(len(plan["chunk_plan"]), 2)
         with self.assertRaises(ValueError):
             convert_plan(ck, ctx=256, prefill=7, quant="fp16")
+        both = convert_plan(ck, ctx=256, prefill=64, quant="fp16", prefills=(32, 64))
+        self.assertEqual(both["prefills"], [32, 64])
+        self.assertEqual(both["prefill_rows"], 64)
 
     def test_int8_and_layer_arrays(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -211,6 +214,34 @@ class JeffCoreAITests(unittest.TestCase):
             arrs8 = layer_arrays(ck, 0, "int8")
             self.assertIn("0/linear_attn.in_proj_qkv.weight/int8", arrs8)
             self.assertIn("0/linear_attn.in_proj_qkv.weight/scale", arrs8)
+            self.assertNotIn("0/linear_attn.in_proj_qkv.weight/act_amax", arrs8)
+            qkv = ck.layer(0)["linear_attn.in_proj_qkv.weight"]
+            scales = {"0/linear_attn.in_proj_qkv.weight": {"in": 0.02, "out": 0.05}}
+            for name in ("linear_attn.in_proj_z.weight", "linear_attn.out_proj.weight",
+                         "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight"):
+                scales[f"0/{name}"] = {"in": 0.02, "out": 0.05}
+            arrs_w = layer_arrays(ck, 0, "w8a8", scales)
+            self.assertIn("0/linear_attn.in_proj_qkv.weight/int8", arrs_w)
+            amax = arrs_w["0/linear_attn.in_proj_qkv.weight/act_amax"]
+            self.assertEqual(amax.shape, (qkv.shape[1],))
+            self.assertTrue(np.allclose(amax, np.float16(0.02)))
+            down = ck.layer(0)["mlp.down_proj.weight"]
+            self.assertEqual(arrs_w["0/mlp.down_proj.weight/out_amax"].shape, (down.shape[0],))
+            # A uniform input amax scales every weight in a row by the same amount, so the INT8 codes match the
+            # unfolded matrix. The per-channel case is what the calibration file actually stores.
+            codes, _scale = int8_per_channel(np.asarray(qkv, np.float32))
+            np.testing.assert_array_equal(arrs_w["0/linear_attn.in_proj_qkv.weight/int8"], codes)
+            attn_scales = {}
+            for name in ("self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight",
+                         "self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight",
+                         "mlp.down_proj.weight"):
+                attn_scales[f"3/{name}"] = {"in": 0.03, "out": 0.04}
+            arrs_a = layer_arrays(ck, 3, "w8a8", attn_scales)
+            self.assertIn("3/self_attn.q_proj.weight/act_amax", arrs_a)
+            self.assertNotIn("3/self_attn.q_proj.weight/out_amax", arrs_a)
+            self.assertNotIn("3/self_attn.k_proj.weight/out_amax", arrs_a)
+            self.assertIn("3/self_attn.v_proj.weight/out_amax", arrs_a)
+            self.assertIn("3/self_attn.o_proj.weight/out_amax", arrs_a)
             w = ck.layer(3)["self_attn.q_proj.weight"]
             codes, scale = int8_per_channel(w)
             recon = codes.astype(np.float32) * scale[:, None].astype(np.float32)
@@ -283,6 +314,16 @@ class JeffLauncherTests(unittest.TestCase):
             forge.prepare(forge.parser().parse_args([
                 "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
                 "--prefill", "250"]))
+        with self.assertRaisesRegex(ValueError, "multiple of 8"):
+            forge.prepare(forge.parser().parse_args([
+                "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
+                "--prefill-extra", "12"]))
+
+    def test_jeff_prefill_extra_argv(self):
+        cmd, _ = forge.prepare(forge.parser().parse_args([
+            "jeff-convert", "--model", str(self.model), "--output", str(self.root / "out"),
+            "--prefill", "256", "--prefill-extra", "32,64", "--dry-run"]))
+        self.assertEqual(cmd[cmd.index("--prefill-extra") + 1], "32,64")
 
     def test_jeff_smoke_argv(self):
         cmd, _ = forge.prepare(forge.parser().parse_args([

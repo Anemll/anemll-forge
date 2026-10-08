@@ -1,7 +1,7 @@
 # Jeff / Unsloth decision models on the ANE
 
 - **Scope:** run Jeff (Qwen3.5-0.8B decision head) on the Apple Neural Engine through a prefill-only Core AI path.
-- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). Not done: LoRA adapters, ANE temperature/ECE fit, live-last prefix cache, a serving route.
+- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). The live-last prefix cache snapshots GDN, conv and KV after the shared prefix and prefills only the changing suffix. With a 64-row entry that suffix is one call: about 18 ms, 54–56 decisions/s, against 2.1 decisions/s for a cold 2,018-token prefill. See [Live-last prefix cache](#live-last-prefix-cache). A 1,024-row and a 2,048-row entry share weights with the 256-row entry and stay fully on the ANE; a 256-row chain is still the faster cold prefill (233 ms vs 305 ms at 1,008 tokens, 473 ms vs 610 ms at 2,018 tokens). See [Wide prefill entries](#wide-prefill-entries). A fixed-shape sweep from 256 through 2,048 rows stays fully on the ANE. Rows/s drops at 512 (about 4,150 to 3,660) and again, less, at 1,024 (to about 3,400). See [Prefill width cliff](#prefill-width-cliff). Not done: LoRA adapters, ANE temperature/ECE fit, a serving route.
 - **Branch:** `cursor/jeff-decision-ane-85f5`.
 
 Evidence labels: **Source-verified** (this checkout), **External doc** (Jeff / Unsloth / Qwen cards, not fetched as weights), **Inferred**.
@@ -245,6 +245,35 @@ Same token ids (port checked against upstream `jeff/model.py` on every row; unit
 
 FP16 stays the default: a 0.8B model has no memory pressure, and INT8 buys no speed.
 
+### W8A8
+
+`--quant int8` is weight-only. Chunk `L00-03` has 25 `coreai.blockwise_shift_scale` ops (INT8 weights, per-output-channel f16 scales) and each one returns f16. The following `coreai.conv2d` is f16 × f16. That chunk has 34 conv2d, 0 `quantize`, 0 `dequantize`, and 0 `f8E4M3`. The same counts hold for the other five chunks. The multiply-adds in that MIL are FP16, which is why the end-to-end speed matches the FP16 build.
+
+A fused INT8 multiply-add on this M5 is a constant-scale `quantize` / `dequantize` pair (zero point 0) on the activation, with the weight a compile-time INT8 constant. An isolated conv, 512 rows × 4096, stack of 2, all fully on the ANE:
+
+| Graph | Call | TOPS | vs torch |
+| --- | ---: | ---: | --- |
+| Per-tensor activation scale | 1.68 ms | 20.5 | within one bin |
+| Per-channel scale inside `quantize` | 2.31 ms | 14.9 | up to 11 bins |
+| Per-channel absolute max folded into the weight, then step 1/127 | 1.86 ms | 18.5 | max \|d\| 0.003 |
+
+The direct per-channel `quantize` stays on the ANE and is the slower kernel. The folded form keeps the scalar pair. MIL still types the conv as f16 × f16; the fusion happens in the ANE compiler. `/Library/Caches/com.apple.aned` is mode 700, so the HWX kernel format was not read. FP8 e4m3 is rejected on this M5 (`E4M3 not supported as kernel format on this architecture`, the probe places on the GPU). There is no FP8 Jeff build.
+
+One absolute max for a whole tensor is a poor scale here. On the 238-token prompt the layer-0 down-projection input has median absolute value 0.014 and max 3.94. That per-tensor build (`/Users/anemll/Models/jeff-coreai-w8a8`) is fully on the ANE and 51 ms per 256-row call, and the answers are wrong.
+
+`--quant w8a8` now records a per-channel absolute max on the 238 / 1,008 / 2,018-token prompts, folds it into the INT8 weight, and quantizes the divided activation at step 1/127. Query and key skip the output quantize: an output quantize in front of RoPE makes this M5's ANEC abort with "Must be connected" and the whole chunk leaves the ANE. Every chunk's MIL: 39 scalar `quantize` to si8, 39 `dequantize` to f16, 25 `blockwise_shift_scale`, 34 `conv2d`, 0 fp8. Shared input quantizes (q/k/v, gate/up) are commoned, which is why 39 is less than one pair per projection. Build `/Users/anemll/Models/jeff-coreai-w8a8pc`, 84 MB per chunk, `fully_ane` (`mps.fullyPlacedOnANE`, `mps.noGPUActivity`).
+
+Same harness as the rows above (median of 5). `jeff_serve` was resident under 1% CPU and no other ANE compile was running.
+
+| Build | MB/chunk | 256-row call | rows/s | 238 tok | 1,008 tok | 2,018 tok |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| FP16 `w256` | 166.4 | 60.2 ms | 4,250 | 60.2 ms, KL 4.6e-6, \|Δp\| 0.0012, C = C | 240 ms, 6.6e-4, 0.0091, B = B | 482 ms, 8.3e-4, 0.013, B vs A |
+| INT8 weight-only | 84.1 | 59.7 ms | 4,288 | 59.5 ms, 3.2e-4, 0.011, C = C | 240 ms, 2.2e-3, 0.019, B = B | 477 ms, 2.8e-3, 0.022, B vs A |
+| W8A8 per-tensor | 83.8 | 50.9 ms | 5,027 | 51.2 ms, 0.50, 0.29, D vs C | 208 ms, 1.24, 0.26, D vs B | 417 ms, 1.14, 0.22, I vs A |
+| W8A8 folded per-channel | 84.0 | 58.2 ms | 4,398 | 58.4 ms, 9.3e-3, 0.047, C = C | 232 ms, 0.084, 0.11, B = B | 463 ms, 0.135, 0.11, A = A |
+
+The folded build picks the HF top answer on all three prompts, including the 2,018-token near-tie. Its KL is about 20× to 100× the FP16 build, and the 256-row call is 58 ms against 60 ms. The chunk is dominated by the DeltaNet and attention elementwise work, so the 18 TOPS kernel does not show up end to end. FP16 stays the serve default.
+
 The 1.3 base without an adapter is uncertain on these rows (top probability 0.25–0.46). Parity on adapter-served prompts, where Jeff is confident, is still to be measured.
 
 ### Where the FP16 error comes from
@@ -274,16 +303,127 @@ A `GDN_SQ=64` rebuild moved no chunk error (layer 3 last row 0.0268 vs 0.0264). 
 
 1. **LoRA adapters.** v1.3 is a base for adapters (per-adapter LoRA, readout and temperature). Merging an adapter into the FP16 weights before `jeff-convert` is the simplest path. A shared base with runtime LoRA is not built.
 2. **ANE temperature / ECE.** The FP32 temperature is reused. Fit it on holdout rows with the compiled build.
-3. **Live-last prefix cache.** The chained runtime already carries DeltaNet / KV state between calls. Snapshotting after the fixed part (question and options) and replaying only `Latest:` is the next runtime piece.
-4. **Longer prompts.** Jeff trains at up to 8,192 tokens. Build `--ctx 8192` (same 256-row entry, 8,192-row KV cache) and recheck placement and parity.
-5. **Serving route.** A SystemOne-style `state` / `questions` endpoint around `JeffCoreAI.decide`.
+3. **Longer prompts.** Jeff trains at up to 8,192 tokens. Build `--ctx 8192` (same 256-row entry, 8,192-row KV cache) and recheck placement and parity.
+4. **Serving route.** A SystemOne-style `state` / `questions` endpoint around `JeffCoreAI.prepare_prefix` / `decide(handle, suffix)`.
+
+## Live-last prefix cache
+
+`decision_config.json` sets `prompt_layout: live-last`: the system message, question, instructions, options and every state field except the last come first, and the changing field is rendered after `Latest:`. Gated DeltaNet state cannot be rewound, so a snapshot is valid only for the exact token ids a prefill call committed.
+
+`JeffCoreAI.prepare_prefix(token_ids, n_options=)` runs that prefix (reusing the longest cached strict prefix, which is a previous chunk boundary or prefix end) and stores, per layer, the GDN conv / recurrent / pending state, the attention KV rows `[0, pos)` and the position. The key is the prefix token ids. `JeffCoreAI.decide(handle, suffix_ids)` restores that snapshot and prefills only the suffix: the last field, the closing instruction and the generation-prompt tail. A cold `decide(token_ids, n_options)` is unchanged.
+
+`split_live_last` returns `prefix` and `suffix` whose concatenation is `prompt_ids`. On the Qwen tokenizer the cut after `Latest:\n` is a token boundary (`271, 30938, 25, 198`), so two decisions that differ only in the last field share the prefix ids exactly.
+
+The Jeff server's hook is the same store: `runtime.prefix_cache.lookup(token_ids)` returns the longest snapshot whose token ids are a prefix of the prompt, and `decide(token_ids, n_options, prefix=snapshot)` resumes there. `enable_prefix_cache(live_mark)` records every committed call, and splits a cold prefill at that `Latest:` mark so the next decision restores the shared prefix rather than a 256-token boundary. `capture_state()` is what `store` keeps.
+
+```python
+split = split_live_last(model, row)          # prefix, suffix, ids
+handle = runtime.prepare_prefix(split["prefix"], n_options=n)
+out = runtime.decide(handle, split["suffix"])  # probabilities, restore_ms, suffix_ms, total_ms
+```
+
+A short suffix still occupies a whole prefill call. `--prefill-extra 64` (and, if wanted, `32`) compiles those widths into the same packages as the 256-row entry. Weights stay shared: six chunks are still 159 MB each. Without measured call times the suffix uses the smallest width that can hold it in one call; `measure_prefill_calls` / `set_prefill_costs` picks the width whose call count times measured milliseconds is smallest. The 256-row entry stays the one used to build a long prefix.
+
+Calls use `libcoreai_bridge.dylib` (`coreai/swift_bridge/build.sh`) when it is present. Outputs are bound once and DeltaNet state ping-pongs between two IOSurface sets. The Python binding allocates a new output surface on every call; that pool is not reclaimed and the process aborts (`NDArray+Pool.swift`, a 100 KB allocate) after a long bench. `COREAI_BRIDGE=0` forces the Python binding.
+
+### M5 Max, 7 October 2026
+
+Build `/Users/anemll/Models/jeff-coreai-prefix/coreai`: `p32_2k`, `p64_2k`, `p256_2k`, context 2,048, bonded mode 1. `inspect_coreai_cache.py --strict` reports `fully_ane` for every entry (one ANE region each, no GPU region). An idle 27B Core AI server was resident on port 8766; a `jeff_serve.py` process was alive during convert/compile and had exited before this timing run. The 256-row call is 58.4 ms, the same as the single-width build (57.8 ms).
+
+One call, median of three: **p32 15.1 ms, p64 17.9 ms, p256 58.4 ms**. Every measured suffix is 36–88 tokens, so the planner never picks p32: a 41-token suffix is one p64 call (17.9 ms), not two p32 calls (30 ms). An 85-token Tetris suffix is two p64 calls (36 ms), which beats one p256 call (58 ms). p64 is the width to ship beside 256.
+
+Cache versus a cold prefill of the same ids. The suffix is its own call, so the FP16 reduction order differs from a cold prefill that fuses the prefix tail with the suffix. Worst max |Δp| is 0.0026, under the 0.005 gate, and the argmax matches on every row. Repeats, and a cold prefill after cached decisions, are bit-identical (max |Δp| 0). Median of five decisions. JSON: `/Users/anemll/Models/jeff/spike/parity/prefix_cache_p32_p64_p256.json`.
+
+| Case | Tokens | Prefix | Suffix | Suffix entries | Cached | Cold | max \|Δp\| vs cold | max \|Δp\| vs HF FP32 |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: |
+| readme, 3 options | 175 | 134 | 41 | p64 | 17.7 ms, 56.5/s | 58.6 ms, 17.1/s | 0.0021 | 0.0070 |
+| 5 options | 238 | 197 | 41 | p64 | 17.9 ms, 55.9/s | 59.4 ms, 16.8/s | 0.0018 | 0.0009 |
+| 30 options | 1,008 | 967 | 41 | p64 | 17.8 ms, 56.2/s | 234 ms, 4.3/s | 0.0024 | 0.0067 |
+| 100 options | 2,018 | 1,977 | 41 | p64 | 18.6 ms, 53.7/s | 467 ms, 2.1/s | 0.0026 | 0.0157 |
+| 100 options, message changed | 2,023 | 1,977 | 46 | p64 | 18.3 ms, 54.6/s | 468 ms, 2.1/s | 0.0019 | 0.0038 |
+| Snake A | 170 | 134 | 36 | p64 | 18.0 ms, 55.6/s | 58.1 ms, 17.2/s | 0.0014 | 0.0033 |
+| Snake B | 171 | 134 | 37 | p64 | 17.8 ms, 56.1/s | 58.2 ms, 17.2/s | 0.0011 | 0.0035 |
+| Tetris A | 242 | 157 | 85 | p64+p64 | 35.7 ms, 28.0/s | 58.4 ms, 17.1/s | 0.0010 | 0.0059 |
+| Tetris B | 245 | 157 | 88 | p64+p64 | 35.8 ms, 27.9/s | 58.2 ms, 17.2/s | 0.0022 | 0.0047 |
+
+Argmax matches HF FP32 on every row except the 2,018-token 100-option prompt, where both the cached path and the cold path answer B and FP32 does not. That is the published near-tie (FP32 A 0.2460 vs B 0.2448); cold vs FP32 max |Δp| is 0.013. Snake A/B both answer A, Tetris A/B both answer D, and the second 100-option message answers D on both paths. Restoring the snapshot is 0.3 ms (short prefix) to 0.7 ms (1,977 tokens). A prefix longer than 256 tokens reuses the first 256-token snapshot (`chunk_reuse` 256 on the 1,008- and 2,018-token rows).
+
+`scripts/jeff_prefix_bench.py prepare` writes Snake, Tetris and the published parity rows (including a second ~2K-token, 100-option message) with the split and HF FP32 probabilities. `run` checks cache against a cold prefill and against that reference, and reports decisions/sec.
+
+## Wide prefill entries
+
+`jeff-convert --prefill 256 --prefill-extra 1024,2048` puts `p256_2k`, `p1024_2k` and `p2048_2k` in one package per chunk. Weights are shared. Each chunk is 179.5 MB (the 32+64+256 package is 159 MB). KV history stays 2,048 rows, the same buffer for every width. Build: `/Users/anemll/Models/jeff-coreai-wide/coreai`.
+
+The earlier 1,024-row-only package (`jeff-coreai-p1024`) compiled in about 6 minutes (61 s per chunk) and left one GPU region. Its graph contains one `mps.tile` and the string `Unsupported mps.tile op for this ANE architecture`. The producer is the causal mask in `AttnW.forward`: a `(T, T)` fp16 mask passed through `repeat(grp, 1)` with `grp = 4`. At 256 rows the compiler emits no `mps.tile`. Jeff's Gated DeltaNet head repeat has factor 1 (16 key heads, 16 value heads), so that path is a reshape.
+
+The mask is now added in `(group, T, T)` layout, which broadcasts the `(T, T)` constant. The factor-1 GDN repeat is omitted. KV stays fp16. The triangular mask is still an fp16 constant. `inspect_coreai_cache.py --strict` then reports `fully_ane` for `p256_2k`, `p1024_2k`, `p2048_2k` and the readout, bonded mode 1, three ANE regions per chunk, `mps.tile` count 0, no GPU region and no unsupported-op string. A standalone SDPA of the same shape (history 2,048, head dim 256) also lands entirely on the ANE at both widths. The existing split-softmax path and the 4,096-row prefill tile were left unchanged.
+
+Export of the six chunks and the head took 4 min 31 s. ANE specialization of one three-entry chunk took 4 min 55 s (layers 0–3) and 5 min 03–09 s for each of the other five chunks (30 min 16 s for the six chunks). The readout loaded from cache in under a second.
+
+One fixed-shape call, median of five, Swift bridge: **p256 58.5 ms, p1024 307 ms, p2048 604 ms**. The published prompts are 1,008 and 2,018 tokens, so the wide call is one partial entry (the extra rows stay invalid) and the chain is four or eight 256-row calls. Median of five prefills. JSON: `/Users/anemll/Models/jeff/spike/parity/wide_prefill.json`. An idle 27B server was resident at 0% CPU. `jeff_serve.py` was not running during this timing.
+
+| Prompt | Tokens | Plan | Prefill | KL vs HF FP32 | max \|Δp\| vs HF | Top answer |
+| --- | ---: | --- | ---: | ---: | ---: | --- |
+| 30 options | 1,008 | 1×1024 | 305 ms | 4.2e-4 | 0.0061 | B, same as HF |
+| 30 options | 1,008 | 4×256 | 233 ms | 6.6e-4 | 0.0091 | B, same as HF |
+| 100 options | 2,018 | 1×2048 | 610 ms | 9.1e-4 | 0.0140 | B, HF says A |
+| 100 options | 2,018 | 8×256 | 473 ms | 8.3e-4 | 0.0131 | B, HF says A |
+
+Wide versus the 256-row chain on the same ids: max |Δp| 0.0031 (1,008 tokens) and 0.0026 (2,018 tokens), same top answer on both. The 2,018-token row is the published near-tie (FP32 A 0.2460 vs B 0.2448); both ANE plans answer B, as the cold 256-row path did before. The previous GPU-spill 1,024-row call was 319 ms, and two of those calls covered 2,018 tokens in 639 ms. Fully on the ANE, one 1,024-row call is 305 ms and one 2,048-row call is 610 ms. Both are slower than the 256-row chain (233 ms and 473 ms; the published chain figures were 254 ms and 508 ms). A cold prefill uses the largest entry, so this build's cold path is the slower one. The prefix-cache build (`p64` beside `p256`) stays the one to serve.
+
+`scripts/jeff_wide_prefill.py` runs the two plans against the stored HF FP32 probabilities.
+
+## Prefill width cliff
+
+Each width is its own package (`jeff-coreai-w<T>`, ctx 2048, fp16, one prefill entry). KV history is 2,048 rows at every width (`pkv_len` 2048). Compile time is the `forge.py compile` wall clock for the six chunks and the readout. Placement is the compile-cache audit (`mps.fullyPlacedOnANE`, `mps.noGPUActivity`, GPU/CPU region names, `mps.tile` count, unsupported-op strings). The call time is the median of five full-shape calls (eight live tokens, the rest masked; the ANE still runs the whole entry). Rows/s is the width divided by that call. Parity is one prompt, `t1024_30opt` (1,008 tokens, 30 options), against the stored HF FP32 probabilities. A width narrower than 1,008 chains that entry; a wider width is one partial call. JSON: `/Users/anemll/Models/jeff/spike/parity/width_sweep.json`. `jeff_serve.py` was not running during these compiles.
+
+| Width | Query rows | Compile | Placement | Call | rows/s | KL vs HF | max \|Δp\| | Top |
+| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| 256 | 1,024 | 122 s | fully ANE | 57.8 ms | 4428 | 6.6e-4 | 0.0091 | B, same as HF |
+| 384 | 1,536 | 115 s | fully ANE | 92.1 ms | 4170 | 8.4e-4 | 0.0109 | B, same as HF |
+| 448 | 1,792 | 145 s | fully ANE | 109.7 ms | 4085 | 4.6e-4 | 0.0065 | B, same as HF |
+| 480 | 1,920 | 140 s | fully ANE | 115.7 ms | 4148 | 4.5e-4 | 0.0048 | B, same as HF |
+| 512 | 2,048 | 152 s | fully ANE | 139.8 ms | 3663 | 4.5e-4 | 0.0063 | B, same as HF |
+| 640 | 2,560 | 195 s | fully ANE | 174.3 ms | 3671 | 4.0e-4 | 0.0050 | B, same as HF |
+| 768 | 3,072 | 236 s | fully ANE | 211.1 ms | 3638 | 5.3e-4 | 0.0070 | B, same as HF |
+| 896 | 3,584 | 309 s | fully ANE | 251.8 ms | 3559 | 5.6e-4 | 0.0069 | B, same as HF |
+| 960 | 3,840 | 345 s | fully ANE | 271.7 ms | 3534 | 5.4e-4 | 0.0066 | B, same as HF |
+| 1024 | 4,096 | 379 s | fully ANE | 304.7 ms | 3361 | 4.2e-4 | 0.0061 | B, same as HF |
+| 1536 | 6,144 | 716 s | fully ANE | 449.3 ms | 3419 | 4.2e-4 | 0.0061 | B, same as HF |
+| 2048 | 8,192 | 1,328 s | fully ANE | 603.7 ms | 3393 | 4.2e-4 | 0.0061 | B, same as HF |
+
+Every graph is fully on the ANE: no GPU region, no CPU region, `mps.tile` count 0, no unsupported-op string. Package size grows from 166.4 MB per chunk at 256 rows to 176.1 MB at 2,048. Compile time grows smoothly (about 20 s per chunk at 256, 25 s at 512, 63 s at 1,024, 221 s at 2,048) and no width failed to compile.
+
+```
+rows/s
+4428 | 256
+4170 | 384
+4148 |   480
+4085 | 448
+3663 |     512
+3671 |       640
+3638 |         768
+3559 |           896
+3534 |             960
+3361 |               1024
+3419 |                  1536
+3393 |                     2048
+```
+
+The rows/s cliff is the **512-row** entry. 480 rows still run at 4,148 rows/s (call 116 ms). 512 rows drop to 3,663 rows/s (call 140 ms). Width grows 6.7% and the call grows 21%. From 512 through 960, latency scales with width and rows/s sits near 3,530–3,670. A second, smaller step is the **1,024-row** entry: 960 rows are still 3,534 rows/s (call 272 ms) and 1,024 rows are 3,361 rows/s (call 305 ms). From 1,024 through 2,048, rows/s stays near 3,400 and latency scales with width.
+
+At 512 the attention score tensor's query axis reaches 2,048. Jeff attention has 2 KV heads and 4 query groups, so queries are `(2, 4T, 256)`. History scores are `(2, 4T, 2048)` and the within-block scores are `(2, 4T, T)`; softmax runs over the concatenation, width `2048 + T`. That query axis is 1,920 at 480 rows and 2,048 at 512. The same width is where the GDN prefill unrolls 64 sub-chunks of 8 (60 sub-chunks at 480). The sub-chunk stays 8. Query rows equal 32 times the GDN block count, so the two counts step at the same widths and this sweep does not separate them. The second step is the same pair of counts at the next power of two: query axis 4,096 and 128 GDN sub-chunks, at 1,024 rows (3,840 query rows and 120 sub-chunks at 960).
+
+KV history width is 2,048 at every point in the table, so it is not what moves at either step. The causal mask is a `(T, T)` fp16 broadcast. The earlier `repeat` path emitted `mps.tile` and one GPU region at 1,024 rows; after the broadcast, `mps.tile` stays 0 through 2,048 rows.
+
+The 256-row chain is still the faster cold prefill of a real prompt (233 ms vs 305 ms at 1,008 tokens, 473 ms vs 610 ms at 2,018 tokens). The prefix-cache build (`p64` beside `p256`) stays the one to serve.
 
 The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is not used here. Its normalization multiplies `amax` back in and is scale-incorrect; the Core AI head uses `rms_hidden`. The live-last layout comes from `decision_config.json` (the external feasibility note's "state-first" was wrong for v1.3).
 
 ## What was verified where
 
 - **Linux cloud VM:** implemented Path B and ran the unit tests (no Core AI SDK, no Jeff weights).
-- **M5 Max (this section):** convert, compile, placement audit, prefill timing and FP32 parity with the local weights. Unit tests: `python -m unittest tests.test_jeff_coreai tests.test_launcher tests.test_checkpoint` (34 tests, including the upstream token-id check).
+- **M5 Max (this section):** convert, compile, placement audit, prefill timing and FP32 parity with the local weights. Unit tests: `python -m unittest tests.test_jeff_coreai tests.test_launcher tests.test_checkpoint` (34 tests, including the upstream token-id check). The prefix-cache tests (`tests.test_jeff_prefix_cache`) cover the `Latest:` cut, Snake/Tetris shared prefixes and the ~2K-token split; the M5 bench is the table above. The wide-entry placement and the 1,008 / 2,018-token timings are in [Wide prefill entries](#wide-prefill-entries). The per-width placement, call time and rows/s sweep is in [Prefill width cliff](#prefill-width-cliff).
 
 ## See also
 
