@@ -46,7 +46,7 @@ def parser():
     jc.add_argument("--prefill-extra", default="",
                     help="extra prefill widths compiled beside --prefill, comma-separated (e.g. 32,64)")
     jc.add_argument("--quant", choices=("fp16", "int8", "w8a8"), default="fp16",
-                    help="fp16, weight-only per-channel int8, or W8A8 (int8 weights plus calibrated activation quantize)")
+                    help="fp16, weight-only per-channel int8, or W8A8 (int8 weights, per-channel activation amax folded in)")
     jc.add_argument("--chunk-layers", type=int, default=4)
     jc.add_argument("--dry-run", action="store_true")
     js = sub.add_parser("jeff-smoke", help="Jeff prefill+readout smoke (host DecodeLayer; optional Core AI --build)")

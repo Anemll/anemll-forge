@@ -165,14 +165,15 @@ def _act_qdq(x, unit, zero):
 class QConv(nn.Module):
     """1x1 conv with an exported weight: LUT (dense lut[idx], registered for exact palettization) + per-channel scale as
     a mul after the conv, int8 (a compile-time INT8 constant with its per-channel scales; QCONV_INT8=0: dequantized to
-    dense fp16) or dense. Optional ``act_unit`` / ``out_unit`` wrap the activation and the result in ``_act_qdq``
-    (W8A8)."""
+    dense fp16) or dense. Optional ``act_amax`` / ``out_amax`` are per-channel absolute maxima: the activation is
+    divided by them and wrapped in a per-tensor ``_act_qdq`` of step 1/127 (W8A8). The weight stored beside
+    ``act_amax`` is already ``W * act_amax``."""
 
     def __init__(self, W: dict, key: str) -> None:
         super().__init__()
         self.key = key
         self.register_buffer("scale", None)
-        if (f"{key}/int8" in W and QCONV_INT8) or f"{key}/act_unit" in W:
+        if (f"{key}/int8" in W and QCONV_INT8) or f"{key}/act_amax" in W:
             import coreai_torch._compression.custom_layers  # noqa: F401  registers quantize / constexpr_blockwise_shift_scale
         if f"{key}/lut" in W:
             lut, idx = W[f"{key}/lut"], W[f"{key}/idx"]
@@ -201,25 +202,28 @@ class QConv(nn.Module):
             self.lr_b.weight = nn.Parameter(torch.from_numpy(b.copy()).view(b.shape[0], b.shape[1], 1, 1), requires_grad=False)
             self.lr_a = nn.Conv2d(a.shape[1], a.shape[0], 1, bias=False)
             self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
-        if f"{key}/act_unit" in W:
-            self.register_buffer("act_unit", torch.tensor(float(np.asarray(W[f"{key}/act_unit"]).reshape(())), dtype=torch.float16))
-            # out_unit is optional. q/k omit it: an output quantize in front of RoPE makes ANEC fail
-            # ("Must be connected") and the whole chunk leaves the ANE.
-            if f"{key}/out_unit" in W:
-                self.register_buffer("out_unit", torch.tensor(float(np.asarray(W[f"{key}/out_unit"]).reshape(())), dtype=torch.float16))
+        if f"{key}/act_amax" in W:
+            amax = np.asarray(W[f"{key}/act_amax"], np.float16).reshape(-1)
+            self.register_buffer("act_amax", torch.from_numpy(np.ascontiguousarray(amax)).view(1, -1, 1, 1))
+            self.register_buffer("q_unit", torch.tensor(np.float16(1.0 / 127.0)))
             self.register_buffer("act_zero", torch.tensor(0, dtype=torch.int8))
+            # out_amax is optional. q/k omit it: an output quantize in front of RoPE makes ANEC fail
+            # ("Must be connected") and the whole chunk leaves the ANE.
+            if f"{key}/out_amax" in W:
+                out = np.asarray(W[f"{key}/out_amax"], np.float16).reshape(-1)
+                self.register_buffer("out_amax", torch.from_numpy(np.ascontiguousarray(out)).view(1, -1, 1, 1))
 
     def forward(self, x):
         raw = x
-        if getattr(self, "act_unit", None) is not None:
-            x = _act_qdq(x, self.act_unit, self.act_zero)
+        if getattr(self, "act_amax", None) is not None:
+            x = _act_qdq(x / self.act_amax, self.q_unit, self.act_zero)
         if self.conv is None:  # INT8 constant: never expanded to an FP16 weight in the program
             y = F.conv2d(x, torch.ops.coreai.constexpr_blockwise_shift_scale(self.w8, self.w8_scale, None, None, torch.int8))
         else:
             y = self.conv(x)
         y = y if self.scale is None else y * self.scale
-        if getattr(self, "out_unit", None) is not None:
-            y = _act_qdq(y, self.out_unit, self.act_zero)
+        if getattr(self, "out_amax", None) is not None:
+            y = _act_qdq(y / self.out_amax, self.q_unit, self.act_zero) * self.out_amax
         return y if self.lr_a is None else y + self.lr_a(self.lr_b(raw))
 
 

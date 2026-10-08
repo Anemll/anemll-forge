@@ -305,11 +305,22 @@ def int8_per_channel(weight: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return codes, scale.astype(np.float16)
 
 
+def _amax_vector(value, n: int, key: str) -> np.ndarray:
+    """Per-channel absolute max. A scalar broadcasts; lengths other than 1 or ``n`` are a bad calibration file."""
+    vec = np.asarray(value, np.float32).reshape(-1)
+    if vec.size == 1:
+        vec = np.full(n, float(vec[0]), np.float32)
+    if vec.size != n:
+        raise ValueError(f"{key} activation amax has length {vec.size}, expected {n}")
+    return np.maximum(vec, 1e-3).astype(np.float16)
+
+
 def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16", act_scales: dict | None = None) -> dict:
     """Keys the Core AI LayerW / QConv graph already understands, but dense (or INT8) — no LUT/VQ.
 
-    ``w8a8`` stores the same per-channel INT8 weights as ``int8`` and, when ``act_scales`` has this projection,
-    a constant per-tensor input scale and output scale (abs-max / 127 from calibration).
+    ``w8a8`` folds each projection's per-channel activation amax into the INT8 weight (``W * amax_in``) and stores
+    those amax vectors. The graph divides by them and quantizes with the constant step 1/127, which is the per-tensor
+    pair the ANE fuses. A direct per-channel quantize stays on the ANE but does not hit that kernel.
     """
     w = ck.layer(i)
     arrs = {f"{i}/{k}": np.asarray(w[k], np.float32) for k in SMALL if k in w}
@@ -319,18 +330,21 @@ def layer_arrays(ck: JeffCheckpoint, i: int, quant: str = "fp16", act_scales: di
         mat = np.asarray(w[name], np.float32)
         key = f"{i}/{name}"
         if quant in ("int8", "w8a8"):
-            codes, scale = int8_per_channel(mat)
-            arrs[f"{key}/int8"] = codes
-            arrs[f"{key}/scale"] = scale
+            folded = mat
             if quant == "w8a8":
                 if not act_scales or key not in act_scales:
                     raise ValueError(f"w8a8 is missing a calibrated activation scale for {key}")
                 spec = act_scales[key]
-                arrs[f"{key}/act_unit"] = np.float16(spec["in"])
+                amax_in = _amax_vector(spec["in"], mat.shape[1], key)
+                folded = mat * amax_in.astype(np.float32)[None, :]
+                arrs[f"{key}/act_amax"] = amax_in
                 # Query and key feed RoPE. Quantizing that conv's output makes this M5's ANEC abort
                 # ("Must be connected") and place the whole chunk on the GPU. The input quantize stays.
                 if name not in ("self_attn.q_proj.weight", "self_attn.k_proj.weight"):
-                    arrs[f"{key}/out_unit"] = np.float16(spec["out"])
+                    arrs[f"{key}/out_amax"] = _amax_vector(spec["out"], mat.shape[0], key)
+            codes, scale = int8_per_channel(folded)
+            arrs[f"{key}/int8"] = codes
+            arrs[f"{key}/scale"] = scale
         else:
             arrs[f"{key}/dense"] = np.asarray(mat, np.float16)
     return arrs

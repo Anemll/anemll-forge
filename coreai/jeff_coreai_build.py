@@ -189,7 +189,11 @@ def _call_entry(B, entry, x, pos: int, n: int, gdn, att, inv: np.ndarray):
 
 
 def calibrate_activation_scales(B, ck: JeffCheckpoint, ctx: int, width: int = 256) -> dict:
-    """Per-tensor abs-max/127 of each dense projection's input and output, over a few real prompts on the FP16 graph."""
+    """Per-channel absolute max of each dense projection's input and output, over a few real prompts on the FP16 graph.
+
+    The W8A8 graph divides by these and quantizes with step 1/127. A single abs-max for the whole tensor leaves the
+    small channels of a projection (MLP down, GDN out) with almost no codes, and the chunk hidden state drifts.
+    """
     import torch
     import torch.nn as nn
     rows = _calibration_rows()
@@ -200,14 +204,24 @@ def calibrate_activation_scales(B, ck: JeffCheckpoint, ctx: int, width: int = 25
     mods = [B.LayerW(W, i).eval().to(torch.float16) for i in layers]
     del W
     gc.collect()
-    peaks: dict[str, list[float]] = {}
+    peaks: dict[str, list] = {}
+
+    def _channel_amax(tensor) -> np.ndarray:
+        # (1, C, 1, T) -> one abs-max per channel. Padding rows are included; they only raise the max.
+        return tensor.detach().float().abs().amax(dim=(0, 2, 3)).cpu().numpy()
 
     def pre(mod, inputs):
-        peaks.setdefault(mod.key, [0.0, 0.0])
-        peaks[mod.key][0] = max(peaks[mod.key][0], float(inputs[0].detach().abs().amax()))
+        a = _channel_amax(inputs[0])
+        slot = peaks.get(mod.key)
+        if slot is None:
+            peaks[mod.key] = [a, None]
+        else:
+            slot[0] = np.maximum(slot[0], a)
 
     def post(mod, _inputs, output):
-        peaks[mod.key][1] = max(peaks[mod.key][1], float(output.detach().abs().amax()))
+        a = _channel_amax(output)
+        slot = peaks[mod.key]
+        slot[1] = a if slot[1] is None else np.maximum(slot[1], a)
 
     handles = []
     dense_suffixes = (
@@ -251,12 +265,18 @@ def calibrate_activation_scales(B, ck: JeffCheckpoint, ctx: int, width: int = 25
         handle.remove()
     scales = {}
     for key, (in_max, out_max) in peaks.items():
-        scales[key] = {"in": max(in_max, 1e-3) / 127.0, "out": max(out_max, 1e-3) / 127.0,
-                       "in_max": in_max, "out_max": out_max}
+        if out_max is None:
+            raise RuntimeError(f"calibration saw no output from {key}")
+        scales[key] = {
+            "in": np.maximum(in_max, 1e-3).astype(np.float32).tolist(),
+            "out": np.maximum(out_max, 1e-3).astype(np.float32).tolist(),
+        }
     if not scales:
         raise RuntimeError("calibration saw no dense projections")
-    print(f"calibrated {len(scales)} projections, input scale "
-          f"{min(s['in'] for s in scales.values()):.4g} .. {max(s['in'] for s in scales.values()):.4g}", flush=True)
+    spreads = [float(np.max(s["in"]) / max(np.median(s["in"]), 1e-6)) for s in scales.values()]
+    print(f"calibrated {len(scales)} projections, per-channel amax "
+          f"{min(min(s['in']) for s in scales.values()):.4g} .. {max(max(s['in']) for s in scales.values()):.4g}, "
+          f"median channel-spread {float(np.median(spreads)):.3g}", flush=True)
     del mods
     gc.collect()
     return scales
@@ -348,10 +368,13 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
         reused = os.environ.get("JEFF_ACT_SCALES")
         if reused:
             act_scales = json.loads(Path(reused).read_text())
-            print(f"reused {len(act_scales)} activation scales from {reused}", flush=True)
+            sample = next(iter(act_scales.values()))
+            if np.asarray(sample.get("in", 0)).size == 1:
+                raise ValueError(f"{reused} has a per-tensor activation step. Recalibrate; W8A8 needs per-channel amax.")
+            print(f"reused {len(act_scales)} per-channel activation scales from {reused}", flush=True)
         else:
             act_scales = calibrate_activation_scales(B, ck, ctx, width=min(widths))
-        (coreai / "act_scales.json").write_text(json.dumps(act_scales, indent=1))
+        (coreai / "act_scales.json").write_text(json.dumps(act_scales))
     chunks = []
     for layers in chunk_plan_from(plan):
         dest = coreai / f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
