@@ -70,7 +70,7 @@
   .readout {
     min-width: 280px;
     display: grid;
-    grid-template-rows: 64px 1.8em 2.9em 148px 4.6em;
+    grid-template-rows: 64px 1.8em 1.8em 2.9em 148px 4.6em;
     gap: 8px;
     align-content: start;
   }
@@ -82,14 +82,45 @@
     grid-template-columns: repeat(8, 36px);
     grid-template-rows: repeat(8, 36px);
     gap: 4px;
-    background: #0c100c;
+    background: #0b0d10;
     padding: 8px;
     border-radius: 12px;
   }
-  .cell { border-radius: 6px; background: #232b21; }
-  .cell.h { background: var(--accent); }
-  .cell.b { background: var(--body); }
-  .cell.f { background: var(--food); }
+  .cell {
+    position: relative;
+    display: grid;
+    place-items: center;
+    container-type: size;
+    border-radius: 6px;
+    background: #15181d;
+    border: 1px solid #2a2f38;
+  }
+  .cell.h { background: #00e676; box-shadow: inset 0 0 0 2px #fff; }
+  .cell.b { background: #1b8a3a; }
+  .cell.f::before {
+    content: "";
+    position: absolute;
+    width: 62%;
+    height: 62%;
+    border-radius: 50%;
+    background: #ff1744;
+  }
+  .cell.target {
+    outline: 3px solid #00e5ff;
+    outline-offset: -1px;
+    background-image: linear-gradient(#00e5ff22, #00e5ff22);
+  }
+  .arrow {
+    position: relative;
+    color: #00e5ff;
+    font-weight: 900;
+    /* the triangle glyphs are about 0.7em tall, so this makes them about 70% of the cell */
+    font-size: 34px;
+    font-size: 100cqh;
+    line-height: 1;
+    text-shadow: 1px 1px 1px #000;
+  }
+  #move { height: 1.8em; margin: 0; color: #00e5ff; font-weight: 700; white-space: nowrap; }
   .latency { height: 64px; overflow: hidden; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .latency span { font-size: 64px; letter-spacing: -0.04em; line-height: 0.9; }
   .latency small { color: var(--muted); margin-left: 6px; font-size: 16px; }
@@ -120,8 +151,9 @@
   }
   .bar .name, .bar span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .track { height: 10px; background: #0c100c; border-radius: 99px; overflow: hidden; }
-  .fill { height: 100%; background: var(--accent); width: 0; }
-  .bar.chosen .name { color: var(--accent); }
+  .fill { height: 100%; background: #5c6370; width: 0; }
+  .bar.chosen .fill { background: #00e5ff; }
+  .bar.chosen .name, .bar.chosen span:last-child { color: #00e5ff; font-weight: 700; }
   button, .examples button, select {
     background: transparent;
     color: var(--ink);
@@ -153,6 +185,21 @@
   #route-choice { font-size: 18px; }
   #tetris { display: flex; flex-direction: column; gap: 12px; }
   .tetris-play { display: grid; grid-template-columns: 194px 72px minmax(280px, 1fr); gap: 16px; align-items: start; }
+  .tboard-wrap { position: relative; width: 194px; height: 374px; }
+  .t-over {
+    position: absolute; inset: 0; border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px; text-align: center; pointer-events: none;
+    background: rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(1px);
+    backdrop-filter: blur(1px);
+  }
+  .t-over[hidden] { display: none; }
+  .t-over strong {
+    color: #fff; font-size: 28px; font-weight: 800; letter-spacing: 0.02em; line-height: 1.1; white-space: nowrap;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px #000;
+  }
+  .t-over span { color: #fff; font-size: 12px; line-height: 1.3; text-shadow: 0 1px 3px #000, 0 0 2px #000; }
   .tboard {
     display: grid; width: 194px; height: 374px;
     grid-template-columns: repeat(10, 16px); grid-template-rows: repeat(20, 16px);
@@ -212,6 +259,7 @@
       <div class="board" id="board" aria-label="Snake board"></div>
       <div class="readout">
         <div class="latency"><span id="ms">—</span><small>ms total</small></div>
+        <p id="move">Move: —</p>
         <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
         <p class="meta scroll-box" id="timing">Waiting for the first decision.</p>
         <div id="bars" class="scroll-box"></div>
@@ -232,7 +280,13 @@
     </div>
     <p class="meta" id="tetris-blurb">One decision drops one piece. Options are the legal rotations and columns.</p>
     <div class="tetris-play">
-      <div class="tboard" id="tetris-board" aria-label="Tetris board"></div>
+      <div class="tboard-wrap">
+        <div class="tboard" id="tetris-board" aria-label="Tetris board"></div>
+        <div class="t-over" id="tetris-over" role="status" hidden>
+          <strong>GAME OVER</strong>
+          <span id="tetris-over-why"></span>
+        </div>
+      </div>
       <div class="next-piece" id="tetris-next" aria-label="Next piece"></div>
       <div id="tetris-readout">
         <div class="latency"><span id="tetris-ms">—</span><small>ms total</small></div>
@@ -406,6 +460,12 @@ let adapter = "base";
 let playing = true;
 let inflight = false;
 let routing = false;
+let target = null;
+let sGeneration = 0;
+let sTimer = 0;
+// U+FE0E keeps the triangles as text glyphs (not emoji) so they take the arrow color.
+const ARROWS = { up: "\u25B2\uFE0E", down: "\u25BC\uFE0E", left: "\u25C0\uFE0E", right: "\u25B6\uFE0E" };
+const TARGET_MS = 160;
 
 function occupied(r, c, ignoreHead) {
   return snake.some((cell, index) => (ignoreHead && index === 0 ? false : cell.r === r && cell.c === c));
@@ -446,6 +506,13 @@ function draw() {
       if (snake[0].r === r && snake[0].c === c) cell.classList.add("h");
       else if (occupied(r, c, true)) cell.classList.add("b");
       else if (food.r === r && food.c === c) cell.classList.add("f");
+      if (target && target.r === r && target.c === c) {
+        cell.classList.add("target");
+        const arrow = document.createElement("span");
+        arrow.className = "arrow";
+        arrow.textContent = ARROWS[target.dir];
+        cell.appendChild(arrow);
+      }
       board.appendChild(cell);
     }
   }
@@ -497,7 +564,14 @@ function snakeRequest() {
   return body;
 }
 
+function showMove(choice) {
+  document.getElementById("move").textContent = `Move: ${choice ? choice.toUpperCase() : "—"}`;
+}
+
 function resetSnake() {
+  sGeneration += 1;
+  target = null;
+  showMove(null);
   snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
   food = { r: 1, c: 6 };
   score = 0;
@@ -514,7 +588,9 @@ async function decide(body) {
   const payload = await response.json();
   if (!response.ok) {
     const detail = payload.detail;
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -531,15 +607,24 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function step() {
   if (!playing || inflight || routing) return;
+  const generation = sGeneration;
+  let delay = 0;
   inflight = true;
   try {
     const payload = await decide(snakeRequest());
+    if (generation !== sGeneration) return;
     const answer = payload.answers.move;
     showTiming(payload, payload.adapter || adapter);
     bars("bars", answer.probabilities, answer.choice);
     document.getElementById("scoreline").textContent = `Food eaten ${score} · best ${best}`;
     const delta = DIRS[answer.choice];
     const next = { r: snake[0].r + delta.r, c: snake[0].c + delta.c };
+    target = { ...next, dir: answer.choice };
+    showMove(answer.choice);
+    draw();
+    await sleep(TARGET_MS);
+    if (generation !== sGeneration) return;
+    target = null;
     const ontoTail = next.r === snake[snake.length - 1].r && next.c === snake[snake.length - 1].c;
     const hit = next.r < 0 || next.c < 0 || next.r >= SIZE || next.c >= SIZE || (occupied(next.r, next.c, false) && !ontoTail);
     if (hit) {
@@ -564,10 +649,12 @@ async function step() {
     }
     draw();
   } catch (error) {
-    logStatus(String(error.message || error));
+    if (generation === sGeneration) logStatus(String(error.message || error));
+    delay = 160;
   } finally {
     inflight = false;
-    if (playing) setTimeout(step, 160);
+    clearTimeout(sTimer);
+    if (playing) sTimer = setTimeout(step, delay);
   }
 }
 
@@ -652,6 +739,7 @@ document.getElementById("classify").addEventListener("click", async () => {
     button.disabled = false;
     routing = false;
     if (playing) step();
+    if (tPlaying) tStep();
   }
 });
 
@@ -684,6 +772,9 @@ let tLines = 0;
 let tPieces = 0;
 let tPlaying = false;
 let tInflight = false;
+let tGeneration = 0;
+let tTimer = 0;
+let tOver = false;
 
 function tEmpty() {
   return Array.from({ length: T_H }, () => Array(T_W).fill(0));
@@ -785,14 +876,20 @@ function tDrawCells(host, board, rows, cols) {
   }
 }
 
-function tWithFalling(board, piece) {
-  const view = board.map((line) => line.slice());
+function tSpawnCells(piece) {
   const shape = T_PIECES[piece][0];
   const width = Math.max(...shape.map((cell) => cell[1])) + 1;
   const col = Math.floor((T_W - width) / 2);
-  for (const [dr, dc] of shape) {
-    const r = dr;
-    const c = col + dc;
+  return shape.map(([dr, dc]) => [dr, col + dc]);
+}
+
+function tToppedOut(board, piece) {
+  return tSpawnCells(piece).some(([r, c]) => Boolean(board[r][c]));
+}
+
+function tWithFalling(board, piece) {
+  const view = board.map((line) => line.slice());
+  for (const [r, c] of tSpawnCells(piece)) {
     if (r >= 0 && r < T_H && c >= 0 && c < T_W && !view[r][c]) view[r][c] = piece;
   }
   return view;
@@ -816,20 +913,44 @@ function tLog(text) {
 }
 
 function tReset() {
+  tGeneration += 1;
+  tStop();
+  tInflight = false;
   tBoard = tEmpty();
   tLines = 0;
   tPieces = 0;
   tPiece = tRandomPiece();
   tNext = tRandomPiece();
+  tOver = false;
+  document.getElementById("tetris-over").hidden = true;
+  document.getElementById("tetris-ms").textContent = "—";
+  document.getElementById("tetris-bars").replaceChildren();
+  document.getElementById("tetris-status").replaceChildren();
   tDraw();
 }
 
 function tStop() {
   tPlaying = false;
+  clearTimeout(tTimer);
+  tTimer = 0;
   document.getElementById("tetris-toggle").textContent = "Play";
 }
 
+function tGameOver(reason) {
+  tGeneration += 1;
+  tInflight = false;
+  tStop();
+  tOver = true;
+  document.getElementById("tetris-over-why").textContent = `${reason} · Lines ${tLines} · Pieces ${tPieces}`;
+  document.getElementById("tetris-over").hidden = false;
+  tLog(`Game over: ${reason}. Lines ${tLines}, pieces ${tPieces}.`);
+}
+
 function tStart() {
+  if (tOver) {
+    tReset();
+    tLog("New game.");
+  }
   playing = false;
   document.getElementById("toggle").textContent = "Play";
   tPlaying = true;
@@ -839,12 +960,17 @@ function tStart() {
 
 async function tStep() {
   if (!tPlaying || tInflight || routing) return;
-  const options = tPlacements(tBoard, tPiece);
-  if (!options.length) {
-    tStop();
-    tLog(`No legal placement for ${tPiece}. Lines ${tLines}, pieces ${tPieces}.`);
+  const generation = tGeneration;
+  if (tToppedOut(tBoard, tPiece)) {
+    tGameOver("Topped out");
     return;
   }
+  const options = tPlacements(tBoard, tPiece);
+  if (!options.length) {
+    tGameOver(`No legal placement for ${tPiece}`);
+    return;
+  }
+  let delay = 160;
   tInflight = true;
   try {
     const criteria = {};
@@ -856,6 +982,7 @@ async function tStep() {
       state: { rules: T_RULES, latest: { board: tText(tBoard), piece: tPiece } },
       questions: { move: { type: "choice", instructions: T_INSTRUCTIONS, criteria } },
     });
+    if (generation !== tGeneration) return;
     const answer = payload.answers.move;
     document.getElementById("tetris-ms").textContent = Math.round((payload.timings || {}).total_ms ?? 0);
     const ranked = Object.entries(answer.probabilities)
@@ -874,12 +1001,19 @@ async function tStep() {
     tNext = tRandomPiece();
     tDraw();
     tLog(`${answer.choice}: ${criteria[answer.choice]}`);
+    if (tToppedOut(tBoard, tPiece)) tGameOver("Topped out");
   } catch (error) {
-    tStop();
-    tLog(String(error.message || error));
+    if (generation !== tGeneration) return;
+    if (error.status === 529) {
+      delay = 1000;
+    } else {
+      tGameOver(String(error.message || error));
+    }
   } finally {
-    tInflight = false;
-    if (tPlaying) setTimeout(tStep, 160);
+    if (generation === tGeneration) {
+      tInflight = false;
+      if (tPlaying) tTimer = setTimeout(tStep, delay);
+    }
   }
 }
 
