@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -29,6 +31,48 @@ if str(SCRIPTS) not in sys.path:
 import ane_compile_mode as SOC  # noqa: E402
 from qwen38_coreai_model import _spec, buffer, pick_package, writable  # noqa: E402
 from qwen38_kv_cache import put_rows  # noqa: E402
+
+# How prefill splits the fresh rows over the compiled widths (JEFF_PREFILL, or prefill(mode=...)):
+#   chain     consecutive TP-row calls, the path of a single-width build
+#   fit       one call in the narrowest entry that holds the rows, else chain
+#   cheapest  the chain of compiled widths with the lowest summed per-call cost (see call_ms)
+PREFILL_MODES = ("chain", "fit", "cheapest")
+# Relative per-call cost by width, measured on chunk L00-03 of a 256..2048 build (ms per call of one chunk).
+# Used until calibrate() measures the loaded build; widths in between are interpolated per row.
+DEFAULT_CALL_MS = {256: 11.4, 512: 25.4, 1024: 53.8, 1536: 78.3, 2048: 105.3}
+
+
+def prefill_mode(raw: str | None) -> str:
+    mode = (raw or "cheapest").strip().lower()
+    if mode not in PREFILL_MODES:
+        raise ValueError(f"JEFF_PREFILL={raw!r}; use one of {', '.join(PREFILL_MODES)}")
+    return mode
+
+
+def default_call_ms(widths) -> dict[int, float]:
+    """Per-call cost of each width from DEFAULT_CALL_MS, interpolating the per-row cost between measured widths."""
+    pts = sorted((w, ms / w) for w, ms in DEFAULT_CALL_MS.items())
+    out = {}
+    for w in widths:
+        if w <= pts[0][0]:
+            per_row = pts[0][1]
+        elif w >= pts[-1][0]:
+            per_row = pts[-1][1]
+        else:
+            (a, fa), (b, fb) = next((x, y) for x, y in zip(pts, pts[1:]) if x[0] <= w <= y[0])
+            per_row = fa + (fb - fa) * (w - a) / (b - a)
+        out[w] = per_row * w
+    return out
+
+
+def cheapest_chain(n: int, call_ms: dict[int, float]) -> list[int]:
+    """Widths (widest first) whose calls cover n rows at the lowest summed cost; ties go to fewer calls."""
+    widths = sorted(call_ms)
+    best = [(0.0, 0, ())] * (n + 1)
+    for m in range(1, n + 1):
+        best[m] = min((call_ms[w] + best[max(0, m - w)][0], 1 + best[max(0, m - w)][1],
+                       (w, *best[max(0, m - w)][2])) for w in widths)
+    return sorted(best[n][2], reverse=True)
 
 
 @contextlib.asynccontextmanager
@@ -67,6 +111,9 @@ class JeffCoreAI:
         self.entry = f"p{self.TP}_{self.ctx // 1024}k"
         self.widths = sorted({self.TP, *(int(w) for w in self.man.get("TPS", ()))})
         self.entries = {w: f"p{w}_{self.ctx // 1024}k" for w in self.widths}
+        self.mode = prefill_mode(os.environ.get("JEFF_PREFILL"))
+        self.call_ms = default_call_ms(self.widths)
+        self._plans: dict[tuple[str, int], list[int]] = {}
         hid, self.nkv, self.hd = int(c["hidden_size"]), int(c["num_key_value_heads"]), int(c["head_dim"])
         nv, dk, dv = (int(c[k]) for k in ("linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim"))
         cdim = 2 * int(c["linear_num_key_heads"]) * dk + nv * dv
@@ -152,11 +199,37 @@ class JeffCoreAI:
         hidden = prefix.get("hidden")
         self._last_hidden = None if hidden is None else np.asarray(hidden).reshape(self.hx[1].shape)
 
-    def plan(self, n: int, chained: bool = False) -> list[int]:
-        """Entry widths of the calls that prefill n rows: one call in the narrowest entry that holds them, else
-        (or with chained=True) consecutive TP-row calls."""
-        fit = [] if chained else [w for w in self.widths if w >= n]
-        return [fit[0]] if fit else [self.TP] * -(-n // self.TP)
+    def plan(self, n: int, chained: bool = False, mode: str | None = None) -> list[int]:
+        """Entry widths of the calls that prefill n rows, in call order (see PREFILL_MODES).
+        chained=True is mode="chain"."""
+        mode = "chain" if chained else prefill_mode(mode or self.mode)
+        key = (mode, n)
+        if key not in self._plans:
+            fit = [w for w in self.widths if w >= n] if mode == "fit" else []
+            if mode == "cheapest" and len(self.widths) > 1:
+                self._plans[key] = cheapest_chain(n, self.call_ms)
+            else:
+                self._plans[key] = [fit[0]] if fit else [self.TP] * -(-n // self.TP)
+        return list(self._plans[key])
+
+    def calibrate(self, reps: int = 5) -> dict[int, float]:
+        """Measure the ANE time of one full-width backbone call per compiled width (median of reps after a warmup)
+        and plan cheapest chains with it. Leaves the runtime reset."""
+        if len(self.widths) > 1:
+            ms = {}
+            for w in self.widths:
+                times = []
+                for i in range(reps + 1):
+                    self.reset()
+                    t0 = time.perf_counter()
+                    self._block([0] * w, None, w)
+                    if i:
+                        times.append(1e3 * (time.perf_counter() - t0))
+                ms[w] = statistics.median(times)
+            self.call_ms = ms
+            self._plans.clear()
+        self.reset()
+        return dict(self.call_ms)
 
     def _block(self, ids, keep=None, width: int | None = None) -> np.ndarray:
         """Up to width (default TP) prompt tokens at self.pos, all committed. Returns the last row's hidden state
@@ -206,11 +279,11 @@ class JeffCoreAI:
             return np.array(out["logits"].numpy(), np.float32).reshape(-1)
 
     def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None,
-                chained: bool = False) -> dict:
+                chained: bool = False, mode: str | None = None) -> dict:
         """Readout logits (ANE head), the last hidden state and timings.
 
-        The fresh rows run in one call of the narrowest entry that holds them (see plan); chained=True forces
-        TP-row calls, the path of a single-width build.
+        The fresh rows run in the calls plan() picks for mode (default self.mode, from JEFF_PREFILL); chained=True
+        forces TP-row calls, the path of a single-width build.
 
         prefix=None resets and prefills every token (one independent decision).
         prefix= a capture_state() dict resumes GDN/KV at prefix["pos"] and prefills
@@ -231,7 +304,7 @@ class JeffCoreAI:
         self._token_ids = ids
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
-        calls, widths = [], self.plan(len(ids) - start, chained) if len(ids) > start else []
+        calls, widths = [], self.plan(len(ids) - start, chained, mode) if len(ids) > start else []
         i = start
         for w in widths:
             t1 = time.perf_counter()
@@ -255,8 +328,8 @@ class JeffCoreAI:
         return r
 
     def decide(self, token_ids: list[int], n_options: int, temperature: float | None = None,
-               prefix: dict | None = None) -> dict:
-        r = self.prefill(token_ids, prefix=prefix)
+               prefix: dict | None = None, mode: str | None = None) -> dict:
+        r = self.prefill(token_ids, prefix=prefix, mode=mode)
         temp = float(self.decision["temperature"] if temperature is None else temperature)
         probs = softmax(r["logits"][:n_options] / temp)
         # the same readout applied on the host to the ANE hidden state: isolates head error from backbone error

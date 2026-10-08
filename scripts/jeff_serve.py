@@ -267,6 +267,8 @@ class App:
             "prompt_layout": self.layout,
             "prefix_cache": self.prefix_cache is not None,
             "adapters": sorted(self.engines),
+            "prefill": {name: engine.prefill_info() for name, engine in sorted(self.engines.items())
+                        if hasattr(engine, "prefill_info")},
         }
 
     def models(self) -> dict:
@@ -436,6 +438,10 @@ class CoreAIEngine:
 
     def capture_state(self):
         return self.runtime.capture_state()
+
+    def prefill_info(self) -> dict:
+        """Compiled prefill widths and how a prompt is split over them (JEFF_PREFILL)."""
+        return {"widths": list(self.runtime.widths), "mode": self.runtime.mode}
 
 
 def make_handler(app: App):

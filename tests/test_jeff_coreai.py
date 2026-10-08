@@ -396,19 +396,51 @@ class JeffRuntimeOutputsTests(unittest.TestCase):
         self.assertEqual(fn.raw, {})
         self.assertEqual(out, {})
 
-    def test_plan_runs_the_narrowest_entry_that_holds_the_prompt(self):
+    def _planner(self, widths, mode):
         rt = jeff_coreai_runtime.JeffCoreAI.__new__(jeff_coreai_runtime.JeffCoreAI)
-        rt.TP, rt.widths = 256, [256, 512, 1024, 1536, 2048]
+        rt.TP, rt.widths, rt.mode, rt._plans = widths[0], widths, mode, {}
+        rt.call_ms = jeff_coreai_runtime.default_call_ms(widths)
+        return rt
+
+    def test_plan_fit_runs_the_narrowest_entry_that_holds_the_prompt(self):
+        rt = self._planner([256, 512, 1024, 1536, 2048], "fit")
         self.assertEqual(rt.plan(161), [256])
         self.assertEqual(rt.plan(531), [1024])
         self.assertEqual(rt.plan(818), [1024])
         self.assertEqual(rt.plan(1430), [1536])
         self.assertEqual(rt.plan(2048), [2048])
         self.assertEqual(rt.plan(821, chained=True), [256] * 4)
-        rt.widths = [256]
+        self.assertEqual(rt.plan(821, mode="chain"), [256] * 4)
+        rt = self._planner([256], "fit")
         self.assertEqual(rt.plan(821), [256] * 4)
         self.assertEqual(rt.plan(213), [256])
 
+    def test_plan_two_wide_entries(self):
+        for mode in ("fit", "cheapest"):
+            rt = self._planner([1024, 1536], mode)
+            self.assertEqual(rt.plan(285), [1024])
+            self.assertEqual(rt.plan(1024), [1024])
+            self.assertEqual(rt.plan(1025), [1536])
+            self.assertEqual(rt.plan(1491), [1536])
+            self.assertEqual(rt.plan(1800), [1024, 1024])
+            self.assertEqual(rt.plan(1491, mode="chain"), [1024, 1024])
+
+    def test_plan_cheapest_never_costs_more_than_chain_or_fit(self):
+        rt = self._planner([256, 512, 1024, 1536, 2048], "cheapest")
+        cost = lambda plan: sum(rt.call_ms[w] for w in plan)  # noqa: E731
+        for n in (1, 255, 256, 257, 531, 797, 818, 1024, 1430, 1491, 2048):
+            plan = rt.plan(n)
+            self.assertGreaterEqual(sum(plan), n)
+            self.assertLessEqual(cost(plan), cost(rt.plan(n, mode="chain")) + 1e-9)
+            self.assertLessEqual(cost(plan), cost(rt.plan(n, mode="fit")) + 1e-9)
+        self.assertEqual(rt.plan(200), [256])
+        self.assertEqual(self._planner([256], "cheapest").plan(821), [256] * 4)
+
+    def test_prefill_mode_env_values(self):
+        self.assertEqual(jeff_coreai_runtime.prefill_mode(None), "cheapest")
+        self.assertEqual(jeff_coreai_runtime.prefill_mode(" Fit "), "fit")
+        with self.assertRaises(ValueError):
+            jeff_coreai_runtime.prefill_mode("widest")
 
 if __name__ == "__main__":
     unittest.main()
