@@ -230,6 +230,17 @@ Rank 16, alpha 32, LoRA learning rate `2e-4`, readout learning rate `5e-6`, batc
 
 The hint prompt adds food direction and the safe-move list in front of `latest`. It is scored on the base model only. The whole MPS run, including both evals and the merge, took 300 s. The merged checkpoint is `/Users/anemll/Models/jeff-snake/merged`.
 
+The merged checkpoint was converted to `/Users/anemll/Models/jeff-coreai/adapters/snake` and compiled (`p256_2k`, FP16, bonded mode 1) in 10 m 18 s while another Jeff width compile was also using the ANE compiler. `inspect_coreai_cache.py --executable python --strict` reports every chunk and `head_readout` as `fully_ane` (one ANE region, no GPU region). The same 64 held-out rows, scored from the compiled head, are 38/64 = 0.594, the same accuracy as the PyTorch adapter.
+
+Eight self-play games from the same openings, through `jeff-serve` on `127.0.0.1:8787` (`--adapter snake` beside the base build):
+
+| Adapter | Food / game | Steps / game | Decisions | Mean latency |
+| --- | --- | --- | --- | --- |
+| base | 0.12 (1 total) | 3.0 | 32 | 67.0 ms |
+| snake | 0.25 (2 total) | 3.5 | 36 | 67.7 ms |
+
+Neither adapter survived to the 48-step cap. `/health` lists `adapters: ["base", "snake"]`, and `/v1/models` includes `snake`, which is what the demo dropdown reads.
+
 `--task tetris` uses `coreai/jeff_tetris.py`. A 256/64 El-Tetris dataset is generated with `generate_tetris_rows`; Tetris LoRA training is the next run, after this Snake adapter.
 
 Placement audit of the specializations this server loaded (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).
