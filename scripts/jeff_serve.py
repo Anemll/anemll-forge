@@ -8,6 +8,11 @@ Loads the ANE packages once, then answers POST /v1/systemone the way jeff-serve
 does: state plus questions in, one answer per question out. GET / is a browser
 demo (snake, and a routing panel). GET /health is the readiness check.
 
+``--adapter name=path`` loads another compiled build beside the base. The request
+field ``adapter`` selects it (``base`` is the ``--build`` package). A model name
+that matches a loaded adapter selects it too. Each adapter is its own ANE build
+with the LoRA already merged into the weights.
+
 A prefix cache plugs in without changing the route. Set ``app.prefix_cache`` to
 an object with ``lookup(token_ids) -> snapshot | None`` and
 ``store(token_ids, snapshot)``. ``lookup``'s snapshot is passed to
@@ -20,6 +25,7 @@ import argparse
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -36,6 +42,8 @@ from jeff_coreai import load_decision_config, question_options  # noqa: E402
 
 LEGACY_MODEL = "jeff-qwen3.8-27b"
 ALIASES = {"jeff", "jeff-latest", LEGACY_MODEL}
+# Adapter names are a path segment, not "base" (that name is the --build package).
+ADAPTER_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 DEMO_PATHS = {"/", "/demo", "/demo/"}
 # Text decisions only. Large enough for a long state, small enough to refuse an image upload early.
 MAX_BODY = 2_000_000
@@ -144,14 +152,39 @@ def _check_question(key: str, question, max_options: int, n_codes: int) -> dict:
     return question
 
 
-def normalize(body: dict, *, name: str, aliases: set[str], max_options: int, n_codes: int) -> tuple[object, dict, int, str]:
-    """Return (state, questions, orders, model) from a Jeff request or the short {state, options} form."""
-    if not isinstance(body, dict):
-        raise DecisionError(422, "The request body must be a JSON object.")
-    model = body.get("model", name)
-    if not isinstance(model, str) or model not in aliases:
+def _select_adapter(model: str, requested, *, name: str, aliases: set[str], adapters: dict) -> str:
+    """``adapter`` wins when it is set. Otherwise a model name that is a loaded adapter selects that build."""
+    loaded = set(adapters) | {"base"}
+    names = loaded - {"base"}
+    if requested is not None:
+        if not isinstance(requested, str) or requested not in loaded:
+            shown = ", ".join(sorted(loaded))
+            raise DecisionError(422, f"Unknown adapter {requested!r}. Loaded: {shown}.")
+        if model in names and model != requested:
+            raise DecisionError(422, f"model {model!r} and adapter {requested!r} select different builds.")
+        if model not in aliases and model not in names:
+            raise DecisionError(422, [{"loc": ["body", "model"], "msg": f"Unknown model. Use {name} or jeff-latest.",
+                                       "type": "value_error"}])
+        return requested
+    if model in names:
+        return model
+    if model not in aliases:
         raise DecisionError(422, [{"loc": ["body", "model"], "msg": f"Unknown model. Use {name} or jeff-latest.",
                                    "type": "value_error"}])
+    return "base"
+
+
+def normalize(body: dict, *, name: str, aliases: set[str], max_options: int, n_codes: int,
+              adapters: dict | None = None) -> tuple[object, dict, int, str, str]:
+    """Return (state, questions, orders, response model, adapter) from a Jeff request or the short options form."""
+    if not isinstance(body, dict):
+        raise DecisionError(422, "The request body must be a JSON object.")
+    adapters = adapters or {"base": None}
+    model = body.get("model", name)
+    if not isinstance(model, str):
+        raise DecisionError(422, [{"loc": ["body", "model"], "msg": f"Unknown model. Use {name} or jeff-latest.",
+                                   "type": "value_error"}])
+    adapter = _select_adapter(model, body.get("adapter", None), name=name, aliases=aliases, adapters=adapters)
     if body.get("images"):
         raise DecisionError(422, "Jeff Core AI is text only; this server does not accept images.")
     orders = body.get("orders", 1)
@@ -188,8 +221,9 @@ def normalize(body: dict, *, name: str, aliases: set[str], max_options: int, n_c
         raise DecisionError(422, "The request needs questions, or a short options list.")
     if isinstance(state, dict) and not state:
         raise DecisionError(422, "The live-last layout needs an object state to have at least one field.")
-    # Aliases (jeff, jeff-latest, the legacy name) all answer as this checkpoint. There are no adapters.
-    return state, questions, int(orders), name
+    # Aliases answer as this checkpoint. An adapter name answers as that build.
+    response_model = name if adapter == "base" else adapter
+    return state, questions, int(orders), response_model, adapter
 
 
 class App:
@@ -203,8 +237,13 @@ class App:
 
     def __init__(self, engine, encode, *, name: str, checkpoint: str, max_options: int, n_codes: int,
                  max_tokens: int, release_date: str, backend: str, layout: str, demo_html: str,
-                 queue_seconds: float = 0, api_key: str | None = None, prefix_cache=None):
+                 queue_seconds: float = 0, api_key: str | None = None, prefix_cache=None, adapters=None):
         self.engine, self.encode = engine, encode
+        self.engines = {"base": engine}
+        for adapter_name, adapter_engine in (adapters or {}).items():
+            if adapter_name == "base" or not ADAPTER_NAME.fullmatch(adapter_name):
+                raise ValueError(f"adapter name {adapter_name!r} must match {ADAPTER_NAME.pattern} and must not be 'base'")
+            self.engines[adapter_name] = adapter_engine
         self.name, self.checkpoint = name, checkpoint
         self.max_options, self.n_codes, self.max_tokens = max_options, n_codes, max_tokens
         self.release_date, self.backend, self.layout = release_date, backend, layout
@@ -227,12 +266,22 @@ class App:
             "backend": self.backend,
             "prompt_layout": self.layout,
             "prefix_cache": self.prefix_cache is not None,
+            "adapters": sorted(self.engines),
+            "prefill": {name: engine.prefill_info() for name, engine in sorted(self.engines.items())
+                        if hasattr(engine, "prefill_info")},
         }
 
     def models(self) -> dict:
         names = sorted((ALIASES - {LEGACY_MODEL}) | {self.name})
-        return {"models": [{"name": item, "description": "Local Jeff text decisions on the ANE.",
-                            "release_date": self.release_date} for item in names]}
+        items = [{"name": item, "description": "Local Jeff text decisions on the ANE.",
+                  "release_date": self.release_date} for item in names]
+        for adapter_name in sorted(self.engines):
+            if adapter_name == "base":
+                continue
+            items.append({"name": adapter_name,
+                          "description": "LoRA adapter merged into its own Core AI build.",
+                          "release_date": self.release_date})
+        return {"models": items}
 
     def _authorized(self, header: str | None) -> bool:
         if not self.api_key:
@@ -240,27 +289,32 @@ class App:
         offered = header or ""
         return hmac.compare_digest(offered.encode(), f"Bearer {self.api_key}".encode())
 
-    def _one(self, state, question: dict) -> tuple[list[float], dict]:
+    def _one(self, state, question: dict, adapter: str) -> tuple[list[float], dict]:
         row = {"state": state, "question": question}
         t0 = time.perf_counter()
         ids = self.encode(row)
         tokenize_ms = 1e3 * (time.perf_counter() - t0)
         if len(ids) > self.max_tokens:
             raise DecisionError(422, f"This question is {len(ids)} tokens; this build accepts at most {self.max_tokens}.")
+        engine = self.engines[adapter]
+        # The prefix cache stores one backbone snapshot. It is only applied to the base build so a snake
+        # snapshot cannot be restored into the base packages, or the other way around.
         prefix = None
-        if self.prefix_cache is not None:
+        use_cache = self.prefix_cache is not None and adapter == "base"
+        if use_cache:
             prefix = self.prefix_cache.lookup(ids)
         try:
-            raw = self.engine.decide(ids, len(question_options(question)[0]), prefix=prefix)
+            raw = engine.decide(ids, len(question_options(question)[0]), prefix=prefix)
         except ValueError as error:
             raise DecisionError(422, str(error)) from error
-        if self.prefix_cache is not None:
-            self.prefix_cache.store(ids, self.engine.capture_state())
+        if use_cache:
+            self.prefix_cache.store(ids, engine.capture_state())
         probs = [float(value) for value in raw["option_probabilities"]]
         calls = [float(value) for value in raw["calls_ms"]]
         timing = {
             "tokenize_ms": round(tokenize_ms, 2),
             "calls_ms": [round(value, 2) for value in calls],
+            "call_widths": [int(value) for value in raw.get("call_widths", [])],
             "prefill_ms": round(sum(calls), 2),
             "head_ms": round(float(raw["head_ms"]), 2),
             "tokens": len(ids),
@@ -278,15 +332,16 @@ class App:
 
     def _evaluate(self, body: dict) -> dict:
         started = time.perf_counter()
-        state, questions, orders, model = normalize(
-            body, name=self.name, aliases=self.aliases, max_options=self.max_options, n_codes=self.n_codes)
+        state, questions, orders, model, adapter = normalize(
+            body, name=self.name, aliases=self.aliases, max_options=self.max_options, n_codes=self.n_codes,
+            adapters=self.engines)
         answers = {}
         parts = []
         input_tokens = 0
         for key, question in questions.items():
-            probs, timing = self._one(state, question)
+            probs, timing = self._one(state, question, adapter)
             if orders == 2:
-                reversed_probs, reversed_timing = self._one(state, reverse_question(question))
+                reversed_probs, reversed_timing = self._one(state, reverse_question(question), adapter)
                 restored = restore_order(question, reversed_probs)
                 probs = [(a + b) / 2 for a, b in zip(probs, restored)]
                 timing = _merge_timing(timing, reversed_timing)
@@ -296,11 +351,13 @@ class App:
         calls = [value for part in parts for value in part["calls_ms"]]
         return {
             "model": model,
+            "adapter": adapter,
             "answers": answers,
             "usage": {"input_tokens": input_tokens, "output_tokens": 0, "orders": orders},
             "timings": {
                 "tokenize_ms": round(sum(part["tokenize_ms"] for part in parts), 2),
                 "calls_ms": calls,
+                "call_widths": [value for part in parts for value in part["call_widths"]],
                 "prefill_ms": round(sum(part["prefill_ms"] for part in parts), 2),
                 "head_ms": round(sum(part["head_ms"] for part in parts), 2),
                 "total_ms": round(1e3 * (time.perf_counter() - started), 2),
@@ -313,6 +370,7 @@ def _merge_timing(first: dict, second: dict) -> dict:
     return {
         "tokenize_ms": round(first["tokenize_ms"] + second["tokenize_ms"], 2),
         "calls_ms": first["calls_ms"] + second["calls_ms"],
+        "call_widths": first["call_widths"] + second["call_widths"],
         "prefill_ms": round(first["prefill_ms"] + second["prefill_ms"], 2),
         "head_ms": round(first["head_ms"] + second["head_ms"], 2),
         "tokens": first["tokens"] + second["tokens"],
@@ -375,10 +433,15 @@ class CoreAIEngine:
             raise RuntimeError(f"runtime returned {len(probs)} probabilities for {n_options} options")
         calls = [float(value) for value in raw["calls_ms"]]
         return {"option_probabilities": probs, "calls_ms": calls, "head_ms": float(raw["head_ms"]),
+                "call_widths": [int(value) for value in raw.get("call_widths", [])],
                 "prefix_tokens": int(raw.get("prefix_tokens", 0))}
 
     def capture_state(self):
         return self.runtime.capture_state()
+
+    def prefill_info(self) -> dict:
+        """Compiled prefill widths and how a prompt is split over them (JEFF_PREFILL)."""
+        return {"widths": list(self.runtime.widths), "mode": self.runtime.mode}
 
 
 def make_handler(app: App):
@@ -421,7 +484,13 @@ def make_handler(app: App):
 
         def _dispatch(self, path: str):
             if self.command == "GET" and path in DEMO_PATHS:
-                return 200, app.demo_html.encode(), {}
+                # Read the file each request so a browser reload picks up a demo edit
+                # without restarting the ANE process.
+                try:
+                    page = load_demo().encode()
+                except OSError:
+                    page = app.demo_html.encode()
+                return 200, page, {}
             if self.command == "GET" and path == "/health":
                 return 200, app.health(), {}
             if self.command == "GET" and path == "/v1/models":
@@ -474,7 +543,7 @@ def load_demo() -> str:
     return path.read_text(encoding="utf-8")
 
 
-def open_app(model: Path, build: Path) -> tuple[App, TokenizerWorker]:
+def open_app(model: Path, build: Path, adapters: list[tuple[str, Path]] | None = None) -> tuple[App, TokenizerWorker]:
     """Load the compiled package and the tokenizer worker. Core AI import stays here so tests can import the module."""
     from jeff_coreai_runtime import JeffCoreAI  # Core AI SDK Python only
 
@@ -483,6 +552,10 @@ def open_app(model: Path, build: Path) -> tuple[App, TokenizerWorker]:
     worker = TokenizerWorker(python, model)
     try:
         runtime = JeffCoreAI(build, model)
+        extra = {}
+        for adapter_name, adapter_build in adapters or []:
+            print(f"loading adapter {adapter_name} from {adapter_build}", flush=True)
+            extra[adapter_name] = CoreAIEngine(JeffCoreAI(adapter_build, model))
     except Exception:
         worker.close()
         raise
@@ -500,7 +573,8 @@ def open_app(model: Path, build: Path) -> tuple[App, TokenizerWorker]:
               max_options=int(decision.get("max_options") or 254), n_codes=len(decision["codes"]),
               max_tokens=limit, release_date=released, backend=engine.backend,
               layout=str(decision.get("prompt_layout") or "state-first"), demo_html=load_demo(),
-              queue_seconds=_queue_seconds(), api_key=os.environ.get("JEFF_API_KEY") or None)
+              queue_seconds=_queue_seconds(), api_key=os.environ.get("JEFF_API_KEY") or None,
+              adapters=extra)
     return app, worker
 
 
@@ -510,11 +584,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--build", type=Path, required=True)
     p.add_argument("--host", default=os.environ.get("JEFF_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8787")))
+    p.add_argument("--adapter", action="append", default=[], metavar="NAME=PATH",
+                   help="merged Core AI build, e.g. snake=/path/to/coreai. Repeatable. base is --build")
     a = p.parse_args(argv)
     model, build = a.model.expanduser().resolve(), a.build.expanduser().resolve()
     if not (build / "manifest.json").is_file():
         p.error(f"Missing build manifest: {build / 'manifest.json'}")
-    app, worker = open_app(model, build)
+    adapters = []
+    seen = set()
+    for item in a.adapter:
+        if item.count("=") != 1:
+            p.error("--adapter must be name=path")
+        adapter_name, raw_path = item.split("=", 1)
+        if adapter_name == "base" or not ADAPTER_NAME.fullmatch(adapter_name):
+            p.error(f"adapter name {adapter_name!r} must match {ADAPTER_NAME.pattern} and must not be 'base'")
+        if adapter_name in seen:
+            p.error(f"adapter {adapter_name!r} was given twice")
+        seen.add(adapter_name)
+        adapter_build = Path(raw_path).expanduser().resolve()
+        if not (adapter_build / "manifest.json").is_file():
+            p.error(f"Missing build manifest: {adapter_build / 'manifest.json'}")
+        adapters.append((adapter_name, adapter_build))
+    app, worker = open_app(model, build, adapters)
     try:
         serve(app, a.host, a.port)
     finally:

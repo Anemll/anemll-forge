@@ -13,9 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "coreai"))
 import forge
-from jeff_coreai import (JEFF_DEFAULT, SYSTEM_PROMPT, chunk_plan, convert_plan, decision_messages, int8_per_channel,
-                         is_hybrid_qwen35, is_jeff_decision_checkpoint, layer_arrays, load_decision_config,
-                         load_text_config, question_options, readout_probs)
+from jeff_coreai import (JEFF_DEFAULT, SYSTEM_PROMPT, apply_manifest_temperature, chunk_plan, convert_plan,
+                         decision_messages, int8_per_channel, is_hybrid_qwen35, is_jeff_decision_checkpoint,
+                         layer_arrays, load_decision_config, load_text_config, question_options, readout_probs)
+
+try:  # needs the Core AI runtime (coreai.runtime); the interpreter forge.py uses for jeff-serve has it
+    import jeff_coreai_runtime
+except ImportError:
+    jeff_coreai_runtime = None
 
 JEFF_SRC = Path(os.environ.get("JEFF_SRC", "/Users/anemll/Models/jeff/jeff-src/src"))
 # Jeff v1.3's codes: A..Z, then the two-letter pairs that are one token ("BQ" is not, so index 68 is "BR")
@@ -151,6 +156,16 @@ class JeffPromptTests(unittest.TestCase):
 
 
 class JeffCoreAITests(unittest.TestCase):
+    def test_manifest_temperature_comes_from_convert(self):
+        decision = {"temperature": 1.075, "codes": ["A"]}
+        overlaid = apply_manifest_temperature(decision, {"convert": {"temperature": 0.794}})
+        self.assertAlmostEqual(overlaid["temperature"], 0.794)
+        self.assertEqual(decision["temperature"], 1.075)
+        self.assertAlmostEqual(apply_manifest_temperature(decision, {"temperature": 0.5})["temperature"], 0.5)
+        self.assertEqual(apply_manifest_temperature(decision, {})["temperature"], 1.075)
+        both = apply_manifest_temperature(decision, {"temperature": 0.5, "convert": {"temperature": 0.8}})
+        self.assertAlmostEqual(both["temperature"], 0.8)
+
     def test_readout_softmax_and_temperature(self):
         hidden = np.array([1.0, 0.0, 0.0], np.float32)
         readout = np.array([[1.0, 0, 0], [0, 0, 0], [0.5, 0, 0]], np.float32)
@@ -293,6 +308,19 @@ class JeffLauncherTests(unittest.TestCase):
         self.assertTrue(command[1].endswith("jeff_serve.py"))
         self.assertEqual(command[command.index("--port") + 1], "8799")
         self.assertEqual(env["TOKENIZER_PYTHON"], sys.executable)
+        command, _env = forge.prepare(forge.parser().parse_args([
+            "jeff-serve", "--model", str(self.model), "--build", str(self.root / "coreai"),
+            "--adapter", "snake=/tmp/jeff-snake/coreai"]))
+        self.assertEqual(command[command.index("--adapter") + 1], "snake=/tmp/jeff-snake/coreai")
+
+    def test_jeff_train_lora_uses_this_interpreter(self):
+        command, _env = forge.prepare(forge.parser().parse_args([
+            "jeff-train-lora", "--model", str(self.model), "--output", str(self.root / "lora"),
+            "--train", "4", "--play", "0"]))
+        self.assertEqual(command[0], sys.executable)
+        self.assertTrue(command[1].endswith("jeff_lora_train.py"))
+        self.assertEqual(command[command.index("--train") + 1], "4")
+        self.assertNotIn("coreai_python", command[0])
 
     def test_serve_still_rejects_jeff_shape(self):
         with self.assertRaisesRegex(ValueError, "64 layers"):
@@ -337,6 +365,82 @@ class JeffLauncherTests(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse(out.exists())
 
+
+@unittest.skipUnless(jeff_coreai_runtime is not None, "needs coreai.runtime")
+class JeffRuntimeOutputsTests(unittest.TestCase):
+    def test_outputs_empties_the_native_result_dict(self):
+        class Tensor:
+            pass
+
+        class Fn:
+            def __init__(self):
+                self.raw, self.seen = None, None
+
+            async def _function(self, inputs, state):
+                self.seen = inputs
+                self.raw = {"y": Tensor(), "logits": Tensor()}
+                return self.raw
+
+        class Arg:
+            _tensor = "x-storage"
+
+        async def run(fn):
+            async with jeff_coreai_runtime.outputs(fn, {"x": Arg()}) as out:
+                self.assertEqual(set(out), {"y", "logits"})
+                self.assertIs(out["y"]._tensor, fn.raw["y"])
+                return out
+
+        fn = Fn()
+        out = jeff_coreai_runtime.asyncio.run(run(fn))
+        self.assertEqual(fn.seen, {"x": "x-storage"})
+        self.assertEqual(fn.raw, {})
+        self.assertEqual(out, {})
+
+    def _planner(self, widths, mode):
+        rt = jeff_coreai_runtime.JeffCoreAI.__new__(jeff_coreai_runtime.JeffCoreAI)
+        rt.TP, rt.widths, rt.mode, rt._plans = widths[0], widths, mode, {}
+        rt.call_ms = jeff_coreai_runtime.default_call_ms(widths)
+        return rt
+
+    def test_plan_fit_runs_the_narrowest_entry_that_holds_the_prompt(self):
+        rt = self._planner([256, 512, 1024, 1536, 2048], "fit")
+        self.assertEqual(rt.plan(161), [256])
+        self.assertEqual(rt.plan(531), [1024])
+        self.assertEqual(rt.plan(818), [1024])
+        self.assertEqual(rt.plan(1430), [1536])
+        self.assertEqual(rt.plan(2048), [2048])
+        self.assertEqual(rt.plan(821, chained=True), [256] * 4)
+        self.assertEqual(rt.plan(821, mode="chain"), [256] * 4)
+        rt = self._planner([256], "fit")
+        self.assertEqual(rt.plan(821), [256] * 4)
+        self.assertEqual(rt.plan(213), [256])
+
+    def test_plan_two_wide_entries(self):
+        for mode in ("fit", "cheapest"):
+            rt = self._planner([1024, 1536], mode)
+            self.assertEqual(rt.plan(285), [1024])
+            self.assertEqual(rt.plan(1024), [1024])
+            self.assertEqual(rt.plan(1025), [1536])
+            self.assertEqual(rt.plan(1491), [1536])
+            self.assertEqual(rt.plan(1800), [1024, 1024])
+            self.assertEqual(rt.plan(1491, mode="chain"), [1024, 1024])
+
+    def test_plan_cheapest_never_costs_more_than_chain_or_fit(self):
+        rt = self._planner([256, 512, 1024, 1536, 2048], "cheapest")
+        cost = lambda plan: sum(rt.call_ms[w] for w in plan)  # noqa: E731
+        for n in (1, 255, 256, 257, 531, 797, 818, 1024, 1430, 1491, 2048):
+            plan = rt.plan(n)
+            self.assertGreaterEqual(sum(plan), n)
+            self.assertLessEqual(cost(plan), cost(rt.plan(n, mode="chain")) + 1e-9)
+            self.assertLessEqual(cost(plan), cost(rt.plan(n, mode="fit")) + 1e-9)
+        self.assertEqual(rt.plan(200), [256])
+        self.assertEqual(self._planner([256], "cheapest").plan(821), [256] * 4)
+
+    def test_prefill_mode_env_values(self):
+        self.assertEqual(jeff_coreai_runtime.prefill_mode(None), "cheapest")
+        self.assertEqual(jeff_coreai_runtime.prefill_mode(" Fit "), "fit")
+        with self.assertRaises(ValueError):
+            jeff_coreai_runtime.prefill_mode("widest")
 
 if __name__ == "__main__":
     unittest.main()

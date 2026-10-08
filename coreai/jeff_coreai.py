@@ -337,6 +337,20 @@ def softmax(logits: np.ndarray) -> np.ndarray:
     return (e / e.sum()).astype(np.float64)
 
 
+def apply_manifest_temperature(decision: dict, manifest: dict) -> dict:
+    """Use the temperature ``jeff-convert`` stored under ``manifest["convert"]``.
+
+    A published adapter's fitted temperature is written there. A top-level
+    ``temperature`` key is the fallback for an older manifest. Embeddings still
+    come from the checkpoint passed as ``--model``.
+    """
+    convert = manifest.get("convert") if isinstance(manifest.get("convert"), dict) else {}
+    fitted = convert.get("temperature", manifest.get("temperature"))
+    if fitted is None:
+        return decision
+    return {**decision, "temperature": float(fitted)}
+
+
 def readout_probs(hidden: np.ndarray, readout: np.ndarray, n_options: int, temperature: float) -> np.ndarray:
     if n_options < 1 or n_options > readout.shape[0]:
         raise ValueError(f"n_options {n_options} outside 1..{readout.shape[0]}")

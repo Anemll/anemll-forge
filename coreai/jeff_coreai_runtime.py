@@ -10,15 +10,19 @@ when a prefix cache is installed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
+import statistics
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-from coreai.runtime import AIModel
+from coreai.runtime import AIModel, NDArray
 
-from jeff_coreai import JeffCheckpoint, load_decision_config, load_text_config, rms_last, softmax
+from jeff_coreai import (JeffCheckpoint, apply_manifest_temperature, load_decision_config, load_text_config,
+                        rms_last, softmax)
 from jeff_prefix import resume_at
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -27,6 +31,66 @@ if str(SCRIPTS) not in sys.path:
 import ane_compile_mode as SOC  # noqa: E402
 from qwen38_coreai_model import _spec, buffer, pick_package, writable  # noqa: E402
 from qwen38_kv_cache import put_rows  # noqa: E402
+
+# How prefill splits the fresh rows over the compiled widths (JEFF_PREFILL, or prefill(mode=...)):
+#   chain     consecutive TP-row calls, the path of a single-width build
+#   fit       one call in the narrowest entry that holds the rows, else chain
+#   cheapest  the chain of compiled widths with the lowest summed per-call cost (see call_ms)
+PREFILL_MODES = ("chain", "fit", "cheapest")
+# Relative per-call cost by width, measured on chunk L00-03 of a 256..2048 build (ms per call of one chunk).
+# Used until calibrate() measures the loaded build; widths in between are interpolated per row.
+DEFAULT_CALL_MS = {256: 11.4, 512: 25.4, 1024: 53.8, 1536: 78.3, 2048: 105.3}
+
+
+def prefill_mode(raw: str | None) -> str:
+    mode = (raw or "cheapest").strip().lower()
+    if mode not in PREFILL_MODES:
+        raise ValueError(f"JEFF_PREFILL={raw!r}; use one of {', '.join(PREFILL_MODES)}")
+    return mode
+
+
+def default_call_ms(widths) -> dict[int, float]:
+    """Per-call cost of each width from DEFAULT_CALL_MS, interpolating the per-row cost between measured widths."""
+    pts = sorted((w, ms / w) for w, ms in DEFAULT_CALL_MS.items())
+    out = {}
+    for w in widths:
+        if w <= pts[0][0]:
+            per_row = pts[0][1]
+        elif w >= pts[-1][0]:
+            per_row = pts[-1][1]
+        else:
+            (a, fa), (b, fb) = next((x, y) for x, y in zip(pts, pts[1:]) if x[0] <= w <= y[0])
+            per_row = fa + (fb - fa) * (w - a) / (b - a)
+        out[w] = per_row * w
+    return out
+
+
+def cheapest_chain(n: int, call_ms: dict[int, float]) -> list[int]:
+    """Widths (widest first) whose calls cover n rows at the lowest summed cost; ties go to fewer calls."""
+    widths = sorted(call_ms)
+    best = [(0.0, 0, ())] * (n + 1)
+    for m in range(1, n + 1):
+        best[m] = min((call_ms[w] + best[max(0, m - w)][0], 1 + best[max(0, m - w)][1],
+                       (w, *best[max(0, m - w)][2])) for w in widths)
+    return sorted(best[n][2], reverse=True)
+
+
+@contextlib.asynccontextmanager
+async def outputs(fn, inputs: dict):
+    """Run an InferenceFunction and yield its outputs; they are freed when the block exits.
+
+    The binding (coreai.runtime, macOS 27) has no outputs= argument, and its native call keeps a reference to the
+    asyncio Future's set_result, so the Future and the result dict it holds are never collected. Every output
+    NDArray in that dict pinned one pooled IOSurface for the life of the process (~1 per output per call) until the
+    pool failed to allocate. Copy what you need inside the block; the dict is emptied on exit.
+    """
+    raw = await fn._function(inputs={k: v._tensor for k, v in inputs.items()}, state={})  # noqa: SLF001
+    out = {k: NDArray._wrap(v) for k, v in raw.items()}  # noqa: SLF001
+    try:
+        yield out
+    finally:
+        out.clear()
+        raw.clear()
 
 
 class JeffCoreAI:
@@ -37,7 +101,7 @@ class JeffCoreAI:
         if self.man.get("kind") != "jeff-decision":
             raise ValueError(f"{build} is not a jeff-decision package")
         c = self.cfg = load_text_config(self.model)
-        self.decision = load_decision_config(self.model)
+        self.decision = apply_manifest_temperature(load_decision_config(self.model), self.man)
         ck = ck or JeffCheckpoint(self.model)
         self.emb, self.norm, self.readout = ck.embed_table(), ck.norm_weight(), np.asarray(ck.readout, np.float32)
         self.eps = float(c["rms_norm_eps"])
@@ -45,6 +109,11 @@ class JeffCoreAI:
         self.ctx = int(self.man["pctxs"][0])
         self.L = int(self.man["pkv_len"][str(self.ctx)])
         self.entry = f"p{self.TP}_{self.ctx // 1024}k"
+        self.widths = sorted({self.TP, *(int(w) for w in self.man.get("TPS", ()))})
+        self.entries = {w: f"p{w}_{self.ctx // 1024}k" for w in self.widths}
+        self.mode = prefill_mode(os.environ.get("JEFF_PREFILL"))
+        self.call_ms = default_call_ms(self.widths)
+        self._plans: dict[tuple[str, int], list[int]] = {}
         hid, self.nkv, self.hd = int(c["hidden_size"]), int(c["num_key_value_heads"]), int(c["head_dim"])
         nv, dk, dv = (int(c[k]) for k in ("linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim"))
         cdim = 2 * int(c["linear_num_key_heads"]) * dk + nv * dv
@@ -71,11 +140,11 @@ class JeffCoreAI:
         self.head_pkg, hf = self.loop.run_until_complete(load(head["file"], [head.get("entry", "h1")]))
         self.head_fn = hf[head.get("entry", "h1")]
         self.load_s = time.time() - t0
-        TP = self.TP
-        self.pin = {n: buffer(s) for n, s in (
-            ("cos", (TP, rot)), ("sin", (TP, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
-            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, TP + 3)), ("valid", (1, TP, 1)),
-            ("x", (1, hid, 1, TP)), ("xb", (1, hid, 1, TP)), ("hx", (1, hid, 1, 1)))}
+        self.pins = {w: {n: buffer(s) for n, s in (
+            ("cos", (w, rot)), ("sin", (w, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
+            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, w + 3)), ("valid", (1, w, 1)),
+            ("x", (1, hid, 1, w)), ("xb", (1, hid, 1, w)))} for w in self.widths}
+        self.hx = buffer((1, hid, 1, 1))
         self.mask = buffer((1, self.L))
         self.pos = 0
         self._token_ids: list[int] = []
@@ -128,14 +197,47 @@ class JeffCoreAI:
                 ch["kv"][k][1][:] = arr
         self.pos = int(prefix["pos"])
         hidden = prefix.get("hidden")
-        self._last_hidden = None if hidden is None else np.asarray(hidden).reshape(self.pin["hx"][1].shape)
+        self._last_hidden = None if hidden is None else np.asarray(hidden).reshape(self.hx[1].shape)
 
-    def _block(self, ids, keep=None) -> np.ndarray:
-        """Up to TP prompt tokens at self.pos, all committed. Returns the last row's hidden state (1, hid, 1, 1).
-        keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
-        d, TP, n, p0 = self.pin, self.TP, len(ids), self.pos
+    def plan(self, n: int, chained: bool = False, mode: str | None = None) -> list[int]:
+        """Entry widths of the calls that prefill n rows, in call order (see PREFILL_MODES).
+        chained=True is mode="chain"."""
+        mode = "chain" if chained else prefill_mode(mode or self.mode)
+        key = (mode, n)
+        if key not in self._plans:
+            fit = [w for w in self.widths if w >= n] if mode == "fit" else []
+            if mode == "cheapest" and len(self.widths) > 1:
+                self._plans[key] = cheapest_chain(n, self.call_ms)
+            else:
+                self._plans[key] = [fit[0]] if fit else [self.TP] * -(-n // self.TP)
+        return list(self._plans[key])
+
+    def calibrate(self, reps: int = 5) -> dict[int, float]:
+        """Measure the ANE time of one full-width backbone call per compiled width (median of reps after a warmup)
+        and plan cheapest chains with it. Leaves the runtime reset."""
+        if len(self.widths) > 1:
+            ms = {}
+            for w in self.widths:
+                times = []
+                for i in range(reps + 1):
+                    self.reset()
+                    t0 = time.perf_counter()
+                    self._block([0] * w, None, w)
+                    if i:
+                        times.append(1e3 * (time.perf_counter() - t0))
+                ms[w] = statistics.median(times)
+            self.call_ms = ms
+            self._plans.clear()
+        self.reset()
+        return dict(self.call_ms)
+
+    def _block(self, ids, keep=None, width: int | None = None) -> np.ndarray:
+        """Up to width (default TP) prompt tokens at self.pos, all committed. Returns the last row's hidden state
+        (1, hid, 1, 1). keep: a list per chunk that receives this call's output rows (n, hid) (diagnostics)."""
+        TP = self.TP if width is None else width
+        d, n, p0, entry = self.pins[TP], len(ids), self.pos, self.entries[TP]
         if not 0 < n <= TP or p0 + n > self.L:
-            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {self.entry}")
+            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row KV cache of {entry}")
         d["x"][1][:] = 0
         d["x"][1][0, :, 0, :n] = self.emb[np.asarray(ids)].T
         pos = np.minimum(np.arange(p0, p0 + TP), p0 + n - 1)
@@ -151,7 +253,7 @@ class JeffCoreAI:
         d["valid"][1][0, :n, 0] = 1
         self.mask[1][:] = -1e4
         self.mask[1][0, :p0] = 0
-        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb", "hx")}
+        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb")}
         shared["mask"] = self.mask[0]
 
         async def run():
@@ -159,12 +261,12 @@ class JeffCoreAI:
             for ci, ch in enumerate(self.chunks):
                 ins = {**shared, "x": x, **{k: v[0] for k, v in ch["state"].items()},
                        **{k: v[0] for k, v in ch["kv"].items()}}
-                out = await ch["fns"][self.entry](inputs=ins)
-                for k, (_, w) in ch["state"].items():
-                    w[:] = writable(out[f"{k}_out"])
-                for k, (_, w) in ch["kv"].items():
-                    put_rows(w, out[f"{k}_new"].numpy()[:, :n], p0, n)
-                d["xb"][1][:] = writable(out["y"])
+                async with outputs(ch["fns"][entry], ins) as out:
+                    for k, (_, w) in ch["state"].items():
+                        w[:] = writable(out[f"{k}_out"])
+                    for k, (_, w) in ch["kv"].items():
+                        put_rows(w, out[f"{k}_new"].numpy()[:, :n], p0, n)
+                    d["xb"][1][:] = writable(out["y"])
                 x = d["xb"][0]
                 if keep is not None:
                     keep[ci].append(d["xb"][1][0, :, 0, :n].T.copy())
@@ -172,8 +274,16 @@ class JeffCoreAI:
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
 
-    def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None) -> dict:
+    async def _head(self) -> np.ndarray:
+        async with outputs(self.head_fn, {"x": self.hx[0]}) as out:
+            return np.array(out["logits"].numpy(), np.float32).reshape(-1)
+
+    def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None,
+                chained: bool = False, mode: str | None = None) -> dict:
         """Readout logits (ANE head), the last hidden state and timings.
+
+        The fresh rows run in the calls plan() picks for mode (default self.mode, from JEFF_PREFILL); chained=True
+        forces TP-row calls, the path of a single-width build.
 
         prefix=None resets and prefills every token (one independent decision).
         prefix= a capture_state() dict resumes GDN/KV at prefix["pos"] and prefills
@@ -194,20 +304,21 @@ class JeffCoreAI:
         self._token_ids = ids
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
-        calls = []
-        for i in range(start, len(ids), self.TP):
+        calls, widths = [], self.plan(len(ids) - start, chained, mode) if len(ids) > start else []
+        i = start
+        for w in widths:
             t1 = time.perf_counter()
-            last = self._block(ids[i:i + self.TP], keep)
+            last = self._block(ids[i:i + w], keep, w)
             calls.append(1e3 * (time.perf_counter() - t1))
+            i += w
         if last is None:
             raise ValueError("prefix covers the prompt but has no hidden state")
         self._last_hidden = last
         t1 = time.perf_counter()
-        self.pin["hx"][1][:] = last
-        out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.pin["hx"][0]}))
+        self.hx[1][:] = last
+        logits = self.loop.run_until_complete(self._head())
         head_ms = 1e3 * (time.perf_counter() - t1)
-        logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
-        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
+        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls, "call_widths": widths,
              "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0),
              "prefix_tokens": start}
         if keep is not None:
@@ -217,8 +328,8 @@ class JeffCoreAI:
         return r
 
     def decide(self, token_ids: list[int], n_options: int, temperature: float | None = None,
-               prefix: dict | None = None) -> dict:
-        r = self.prefill(token_ids, prefix=prefix)
+               prefix: dict | None = None, mode: str | None = None) -> dict:
+        r = self.prefill(token_ids, prefix=prefix, mode=mode)
         temp = float(self.decision["temperature"] if temperature is None else temperature)
         probs = softmax(r["logits"][:n_options] / temp)
         # the same readout applied on the host to the ANE hidden state: isolates head error from backbone error
@@ -234,8 +345,9 @@ class JeffCoreAI:
             "tokens": len(token_ids),
             "calls": len(r["calls_ms"]),
             "calls_ms": [round(t, 2) for t in r["calls_ms"]],
+            "call_widths": list(r["call_widths"]),
             "head_ms": round(r["head_ms"], 2),
             "prefill_ms": round(r["total_ms"], 2),
             "prefix_tokens": int(r["prefix_tokens"]),
-            "backend": f"coreai-ane {self.entry}",
+            "backend": f"coreai-ane {'+'.join(dict.fromkeys(self.entries[w] for w in r['call_widths'])) or self.entry}",
         }
