@@ -104,6 +104,31 @@ ATT_S8B_UNIT = float(os.environ.get("ATT_S8B_UNIT", "0.25"))
 ATT_S8R_SHIFT = float(os.environ.get("ATT_S8R_SHIFT", "8"))
 S8B_STATS = None  # host research only: max |score| per tile after the key scales, masked entries excluded
 ATT_INT8MM_UNITS = [float(u) for u in os.environ.get("ATT_INT8MM_UNITS", "0.0625,0.0078125,0.25").split(",")]  # act, cache, out
+# Jeff streamed LoRA. None on the 27B path. A StreamPlan (coreai/jeff_lora_weights.py) makes each adapted
+# QConv add y += (x @ A) @ sB with A and sB as entry inputs, so a new adapter is a buffer write, not a recompile.
+STREAM_LORA = None
+
+
+def stream_delta(x, a, b, layout: str):
+    """Dynamic LoRA on a channels-first activation [1, in, 1, T]. layout is a Python constant at trace time."""
+    if layout == "conv":
+        return F.conv2d(F.conv2d(x, a), b)
+    if layout == "matmul":
+        t = x.shape[-1]
+        rows = x.reshape(x.shape[1], t).transpose(0, 1)
+        delta = (rows @ a) @ b
+        return delta.transpose(0, 1).reshape(1, b.shape[-1], 1, t)
+    if layout == "nchw":
+        # a [1, in, 1, rank], b [1, rank, 1, out] -> conv weights
+        return F.conv2d(F.conv2d(x, a.permute(3, 1, 0, 2).contiguous()), b.permute(3, 1, 0, 2).contiguous())
+    raise ValueError(f"unknown streamed LoRA layout {layout!r}")
+
+
+def _lin(mod, x, lora):
+    """Base conv, or base conv plus this module's streamed factors when it was marked and a plan is bound."""
+    if lora is None or getattr(mod, "stream_index", None) is None:
+        return mod(x)
+    return mod(x, lora)
 
 
 def quant8(x, unit, zero, dtype=torch.int8, axis=0, minval=None):
@@ -162,6 +187,7 @@ class QConv(nn.Module):
 
     def __init__(self, W: dict, key: str) -> None:
         super().__init__()
+        self.stream_index = None
         self.register_buffer("scale", None)
         if f"{key}/lut" in W:
             lut, idx = W[f"{key}/lut"], W[f"{key}/idx"]
@@ -184,6 +210,9 @@ class QConv(nn.Module):
         if w is not None:
             self.conv = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
             self.conv.weight = nn.Parameter(torch.from_numpy(w).view(w.shape[0], w.shape[1], 1, 1), requires_grad=False)
+            plan = STREAM_LORA
+            if plan is not None and key in plan.keys:
+                self.stream_index = plan.add(key, int(w.shape[1]), int(w.shape[0]))
         self.lr_b = self.lr_a = None
         if f"{key}/lr_a" in W:  # + a @ (b @ x): fp16 low-rank error correction (two 1x1 convs, not palettized)
             a, b = W[f"{key}/lr_a"].astype(np.float16), W[f"{key}/lr_b"].astype(np.float16)
@@ -192,13 +221,17 @@ class QConv(nn.Module):
             self.lr_a = nn.Conv2d(a.shape[1], a.shape[0], 1, bias=False)
             self.lr_a.weight = nn.Parameter(torch.from_numpy(a.copy()).view(a.shape[0], a.shape[1], 1, 1), requires_grad=False)
 
-    def forward(self, x):
+    def forward(self, x, lora=None):
         if self.conv is None:  # INT8 constant: never expanded to an FP16 weight in the program
             y = F.conv2d(x, torch.ops.coreai.constexpr_blockwise_shift_scale(self.w8, self.w8_scale, None, None, torch.int8))
         else:
             y = self.conv(x)
         y = y if self.scale is None else y * self.scale
-        return y if self.lr_a is None else y + self.lr_a(self.lr_b(x))
+        y = y if self.lr_a is None else y + self.lr_a(self.lr_b(x))
+        if lora is None or self.stream_index is None:
+            return y
+        a, b = lora.pair(self.stream_index)
+        return y + stream_delta(x, a, b, lora.layout)
 
 
 class Hadamard(nn.Module):
@@ -321,10 +354,10 @@ class GDNW(nn.Module):
         self.register_buffer("dt", torch.from_numpy(W[p + "dt_bias"].reshape(nv, 1, 1).astype(np.float16)))
         self.register_buffer("normw", torch.from_numpy(W[p + "norm.weight"].astype(np.float16)))
 
-    def proj(self, h, T: int):
-        qkv = self.qkv(h).reshape(cdim, T)
-        z = self.z(h).reshape(nv, dv, T).permute(0, 2, 1)
-        return qkv, z, self.b(h).reshape(nv, T, 1), self.a(h).reshape(nv, T, 1)
+    def proj(self, h, T: int, lora=None):
+        qkv = _lin(self.qkv, h, lora).reshape(cdim, T)
+        z = _lin(self.z, h, lora).reshape(nv, dv, T).permute(0, 2, 1)
+        return qkv, z, _lin(self.b, h, lora).reshape(nv, T, 1), _lin(self.a, h, lora).reshape(nv, T, 1)
 
     def qkv_heads(self, rows, T: int):
         if GDN_FAST:  # the causal conv1d as one depthwise conv over the channel-major (1, cdim, 1, T + 3) rows
@@ -356,17 +389,17 @@ class GDNW(nn.Module):
         kd_ = kp * commit * torch.exp(torch.clamp(total - cum_p, max=0))
         return rec * torch.exp(total) + kd_.transpose(1, 2) @ (up - wkp @ rec)
 
-    def finish(self, o, z, T: int):
+    def finish(self, o, z, T: int, lora=None):
         # o = q . S carries the GDN_SQ * GDN_SV scale: eps * scale^2 makes the gated RMSNorm exactly the unscaled one
         o = rms_last(o, self.normw, EPS * (GDN_SQ * GDN_SV) ** 2) * silu(z)
         o = o.permute(0, 2, 1).reshape(1, vd, 1, T)
         if DBG_O:
             _DBG.append(o)
-        return self.out(o)
+        return _lin(self.out, o, lora)
 
-    def verify(self, h, conv_rows, conv_sel, rec, pend, commit, commit_last, T: int):
+    def verify(self, h, conv_rows, conv_sel, rec, pend, commit, commit_last, T: int, lora=None):
         """T = P rows, lazy commit: returns (y, conv rows (T + 3), committed state S', this call's pending rows)."""
-        qkv, z, b, a = self.proj(h, T)
+        qkv, z, b, a = self.proj(h, T, lora)
         rows = torch.cat([conv_sel @ conv_rows, qkv.transpose(0, 1)], 0)                  # (T + 3, cdim)
         qh, kh, vh = self.qkv_heads(rows, T)
         beta, g = torch.sigmoid(b), softplus(a + self.dt) * self.neg_a
@@ -382,12 +415,12 @@ class GDNW(nn.Module):
         pend_out = torch.cat([kh, u, wk, crow], 1)
         vn = u - wk @ s1
         o = (qh * torch.exp(cum)) @ s1 + ((qh @ kh.transpose(1, 2)) * pair) @ vn
-        return self.finish(o, z, T), rows, s1, pend_out
+        return self.finish(o, z, T, lora), rows, s1, pend_out
 
-    def prefill(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T: int):
+    def prefill(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T: int, lora=None):
         """T > P rows, all committed (padding rows: valid = 0 -> no state change). Returns (y, conv rows in the P-row
         layout (the 3 rows ending at the last valid token, then zeros), state, zero pending rows)."""
-        qkv, z, b, a = self.proj(h, T)
+        qkv, z, b, a = self.proj(h, T, lora)
         rows = torch.cat([conv_sel @ conv_rows, qkv.transpose(0, 1)], 0)                  # (T + 3, cdim)
         qh, kh, vh = self.qkv_heads(rows, T)
         v1 = valid.reshape(1, T, 1)
@@ -418,7 +451,7 @@ class GDNW(nn.Module):
                 outs.append(qd[:, bi] @ s + intra[:, bi] @ vn)
             s = s * torch.exp(total[:, bi]) + kdc[:, bi].transpose(1, 2) @ vn
         conv_out = torch.cat([conv_sel_out @ rows, torch.zeros(P, cdim, dtype=rows.dtype)], 0)  # (P + 3, cdim)
-        return self.finish(torch.cat(outs, 1), z, T), conv_out, s, pend * 0
+        return self.finish(torch.cat(outs, 1), z, T, lora), conv_out, s, pend * 0
 
 
 def dequant8(codes, unit, zero, axis=0, minval=None, input_dtype=None):
@@ -458,15 +491,15 @@ class AttnW(nn.Module):
             self.register_buffer("pf5_unit", torch.tensor(1 / 32768, dtype=torch.float16))  # pvf5: e5m2 max 57344
 
     def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None, kscale=None,
-                cache_k8=None):
+                cache_k8=None, lora=None):
         cache_v8 = self.cache_v8 if cache_v8 is None else cache_v8
         cache_k8 = self.cache_k8 if cache_k8 is None else cache_k8
         def tmajor(x, c):
             return x.reshape(c, T).transpose(0, 1)
-        qg = tmajor(self.q(h), 2 * nh * hd).reshape(T, nh, 2 * hd)
+        qg = tmajor(_lin(self.q, h, lora), 2 * nh * hd).reshape(T, nh, 2 * hd)
         qh, gate = rms_last(qg[:, :, :hd], self.qn), qg[:, :, hd:].reshape(T, nh * hd)
-        kh = rms_last(tmajor(self.k(h), nkv * hd).reshape(T, nkv, hd), self.kn)
-        vh = tmajor(self.v(h), nkv * hd).reshape(T, nkv, hd)
+        kh = rms_last(tmajor(_lin(self.k, h, lora), nkv * hd).reshape(T, nkv, hd), self.kn)
+        vh = tmajor(_lin(self.v, h, lora), nkv * hd).reshape(T, nkv, hd)
         c3, s3 = cos.reshape(T, 1, rot), sin.reshape(T, 1, rot)
 
         def rope(t):
@@ -674,7 +707,7 @@ class AttnW(nn.Module):
         o = o.transpose(0, 1).reshape(1, nh * hd, 1, T)
         if DBG_O:
             _DBG.append(o)
-        return self.o(o), kt, vt
+        return _lin(self.o, o, lora), kt, vt
 
 
 class LayerW(nn.Module):
@@ -690,14 +723,14 @@ class LayerW(nn.Module):
         self.rmid = Hadamard(CFG["intermediate_size"], int(seeds[1])) if seeds is not None else None
         self.ds = float(MLP_DS_TABLE[str(i)]) if MLP_DS_TABLE is not None else MLP_DS
 
-    def mlp(self, x):
+    def mlp(self, x, lora=None):
         h = rms_hidden(x, self.ln2)
         h = self.rin(h) if self.rin is not None else h
-        a = silu(self.gate(h), MLP_SILU) * self.up(h)
+        a = silu(_lin(self.gate, h, lora), MLP_SILU) * _lin(self.up, h, lora)
         a = self.rmid(a) if self.rmid is not None else a
         if self.ds != 1:  # keep the down projection's products out of fp16 subnormals (see MLP_DS_TABLE)
-            return x + self.down(a * self.ds) * (1 / self.ds)
-        return x + self.down(a)
+            return x + _lin(self.down, a * self.ds, lora) * (1 / self.ds)
+        return x + _lin(self.down, a, lora)
 
 
 ANE_MAX_DIM = 65536
@@ -733,10 +766,13 @@ class Entry(nn.Module):
         self.taps = [l.i for l in layers if l.i in TAPS and l.i != last]
 
     def input_names(self):
-        return (["x", "cos", "sin", "mask", "conv_sel", "commit", "commit_last"]
-                + (["conv_sel_out", "valid"] if self.prefill else [])
-                + [f"{s}{j}" for j in self.gdn_j for s in ("conv", "rec", "pend")]
-                + [f"{s}{j}" for j in self.att_j for s in KV_INPUTS[self.kv_mode]])
+        names = (["x", "cos", "sin", "mask", "conv_sel", "commit", "commit_last"]
+                 + (["conv_sel_out", "valid"] if self.prefill else [])
+                 + [f"{s}{j}" for j in self.gdn_j for s in ("conv", "rec", "pend")]
+                 + [f"{s}{j}" for j in self.att_j for s in KV_INPUTS[self.kv_mode]])
+        if STREAM_LORA is not None:
+            names = names + STREAM_LORA.input_names()
+        return names
 
     def output_names(self):
         return (["y"] + [f"tap{l}" for l in self.taps]
@@ -754,6 +790,11 @@ class Entry(nn.Module):
 
     def _forward(self, x, cos, sin, mask, conv_sel, commit, commit_last, *rest):
         _DBG.clear()
+        lora = None
+        if STREAM_LORA is not None:
+            n = STREAM_LORA.n_inputs
+            lora = STREAM_LORA.bind(rest[-n:])
+            rest = rest[:-n]
         it = iter(rest)
         if self.prefill:
             conv_sel_out, valid = next(it), next(it)
@@ -766,16 +807,16 @@ class Entry(nn.Module):
                 cr, rc, pd = gdn_in[j]
                 if self.prefill:
                     y, rows, s1, pend_out = layer.mix.prefill(h, cr, conv_sel, conv_sel_out, rc, pd, commit, commit_last,
-                                                              valid, self.T)
+                                                              valid, self.T, lora)
                 else:
-                    y, rows, s1, pend_out = layer.mix.verify(h, cr, conv_sel, rc, pd, commit, commit_last, self.T)
+                    y, rows, s1, pend_out = layer.mix.verify(h, cr, conv_sel, rc, pd, commit, commit_last, self.T, lora)
                 gdn_out += [rows, s1, pend_out]
             else:
                 c = att_in[j]
                 y, kt, vt = layer.mix(h, cos, sin, mask, c["k"], c["v"], self.ctx, self.T, c.get("vs"), self.cache_v8,
-                                      c.get("ks"), self.cache_k8)
+                                      c.get("ks"), self.cache_k8, lora)
                 att_out += [kt, vt]
-            x = layer.mlp(x + y)
+            x = layer.mlp(x + y, lora)
             if layer.i in self.taps:
                 taps.append(x)
         return (x, *taps, *gdn_out, *att_out, *_DBG)
@@ -795,6 +836,8 @@ class Entry(nn.Module):
                 shape = (nkv, hd, self.ctx) if s == "k" and KV_KEYS_T else (nkv, self.ctx, hd)
                 ex.append(torch.ones(nkv, self.ctx, dtype=f) / 128 if s in ("ks", "vs") else
                           torch.zeros(*shape, dtype=torch.int8 if int8[s] else f))
+        if STREAM_LORA is not None:
+            ex += STREAM_LORA.example_tensors()
         return tuple(ex)
 
 
