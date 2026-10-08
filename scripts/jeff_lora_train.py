@@ -21,9 +21,15 @@ accepts), and ``report.json``. Deploy the merged tree with the usual convert and
 compile into its own Core AI directory. The ANE package has the LoRA already folded
 into the weights.
 
-``--device auto`` is MPS when it is available, else CPU. An ANE compile does not
-move this job off the GPU. The first two steps are timed and then discarded so
-the run still starts from the base readout.
+``--device auto`` is CUDA, then MPS, then CPU. CUDA and MPS train in bfloat16.
+An ANE compile does not move this job off the GPU. The first two steps are timed
+and then discarded so the run still starts from the base readout.
+
+``--init-adapter DIR`` continues from a saved ``adapter/`` (LoRA factors plus
+``readout.safetensors``) instead of a zero LoRA and the base readout. The "base"
+numbers in the report are then the starting adapter's. ``--heldout-dataset``
+evaluates on a fixed JSONL (every ``--dataset`` row trains). ``--eval-only``
+loads, prints held-out accuracy, and exits without writing anything.
 """
 from __future__ import annotations
 
@@ -51,10 +57,44 @@ from jeff_tetris import generate_tetris_rows  # noqa: E402
 
 def pick_device(requested: str) -> str:
     if requested == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
         return "mps" if torch.backends.mps.is_available() else "cpu"
     if requested == "mps" and not torch.backends.mps.is_available():
         raise RuntimeError("MPS was requested and is not available")
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested and is not available")
     return requested
+
+
+def synchronize(device: str) -> None:
+    if device == "mps":
+        torch.mps.synchronize()
+    elif device == "cuda":
+        torch.cuda.synchronize()
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def load_init_adapter(directory: Path, layers, readout: nn.Linear) -> None:
+    """Copy saved LoRA factors and the readout into freshly attached layers (same rank and targets)."""
+    factors = load_file(str(directory / "adapter_model.safetensors"))
+    expected = set()
+    with torch.no_grad():
+        for layer in layers:
+            stem = layer.key.removesuffix(".weight")
+            a, b = factors[f"{stem}.lora_A"], factors[f"{stem}.lora_B"]
+            if a.shape != layer.A.shape or b.shape != layer.B.shape:
+                raise ValueError(f"{stem}: adapter shape {tuple(a.shape)} does not match rank {layer.rank}")
+            layer.A.copy_(a.float())
+            layer.B.copy_(b.float())
+            expected.update((f"{stem}.lora_A", f"{stem}.lora_B"))
+        extra = set(factors) - expected
+        if extra:
+            raise ValueError(f"{directory}: {len(extra)} factors match no attached layer, e.g. {sorted(extra)[:2]}")
+        readout.weight.copy_(load_file(str(directory / "readout.safetensors"))["weight"].float())
 
 
 def load_rows(path: Path | None, train_n: int, heldout_n: int, seed: int, task: str) -> tuple[list[dict], list[dict], str]:
@@ -76,11 +116,7 @@ def load_rows(path: Path | None, train_n: int, heldout_n: int, seed: int, task: 
                 if len(held) >= heldout_n:
                     break
         return train, held[:heldout_n], "snake"
-    rows = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if line:
-            rows.append(json.loads(line))
+    rows = read_jsonl(path)
     if len(rows) < 2:
         raise ValueError("--dataset needs at least two rows")
     cut = max(1, int(round(len(rows) * 0.8)))
@@ -115,7 +151,8 @@ def collate(batch: list[dict], pad_id: int, device: str) -> tuple[torch.Tensor, 
 
 
 def forward_logits(model, readout: nn.Linear, ids, mask, index, device: str) -> torch.Tensor:
-    autocast = torch.autocast(device_type="mps", dtype=torch.bfloat16) if device == "mps" else contextlib.nullcontext()
+    autocast = (torch.autocast(device_type=device, dtype=torch.bfloat16) if device in ("mps", "cuda")
+                else contextlib.nullcontext())
     with autocast:
         hidden = model(input_ids=ids, attention_mask=mask, use_cache=False).last_hidden_state
     picked = hidden[torch.arange(hidden.shape[0], device=hidden.device), index]
@@ -159,8 +196,7 @@ def run_epoch(model, readout, rows, batch_size, pad_id, device, optimizer=None) 
             loss.backward()
             torch.nn.utils.clip_grad_norm_([p for group in optimizer.param_groups for p in group["params"]], 1.0)
             optimizer.step()
-            if device == "mps":
-                torch.mps.synchronize()
+            synchronize(device)
         else:
             with torch.no_grad():
                 logits = masked_logits(forward_logits(model, readout, ids, mask, index, device), batch)
@@ -222,17 +258,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--batch", type=int, default=4)
     p.add_argument("--lr", type=float, default=2e-4, help="LoRA learning rate")
     p.add_argument("--readout-lr", type=float, default=5e-6, dest="readout_lr")
-    p.add_argument("--device", choices=("auto", "cpu", "mps"), default="auto")
+    p.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--play", type=int, default=0,
                    help="PyTorch self-play games per model (each move is a full forward). 0 skips them; use scripts/jeff_snake_eval.py on the server")
-    p.add_argument("--max-steps", type=int, default=48)
+    p.add_argument("--max-steps", type=int, default=48, help="Snake self-play move cap (--play only); does not limit training")
     p.add_argument("--skip-merge", action="store_true")
+    p.add_argument("--init-adapter", type=Path, dest="init_adapter",
+                   help="continue from this adapter/ directory (LoRA factors and readout.safetensors)")
+    p.add_argument("--heldout-dataset", type=Path, dest="heldout_dataset",
+                   help="fixed held-out JSONL; with --dataset every --dataset row trains")
+    p.add_argument("--eval-only", action="store_true", dest="eval_only",
+                   help="load (and --init-adapter), print held-out accuracy, and exit")
     a = p.parse_args(argv)
     if a.rank < 1 or a.alpha <= 0 or a.batch < 1 or a.epochs < 1:
         p.error("--rank, --alpha, --batch, and --epochs must be positive")
     output = a.output.expanduser().resolve()
-    if output.exists() and any(output.iterdir()):
+    if output.exists() and any(output.iterdir()) and not a.eval_only:
         p.error(f"Use a new or empty --output directory: {output}")
     model_path = a.model.expanduser().resolve()
     device = pick_device(a.device)
@@ -242,6 +284,12 @@ def main(argv: list[str] | None = None) -> int:
     decision = load_decision_config(model_path)
     temperature = float(decision["temperature"])
     train_rows, held_rows, task = load_rows(a.dataset, a.train, a.heldout, a.seed, a.task)
+    if a.heldout_dataset is not None:
+        if a.dataset is not None:
+            train_rows = read_jsonl(a.dataset)
+        held_rows = read_jsonl(a.heldout_dataset)
+    if a.eval_only:
+        train_rows = []
     tokenizer = AutoTokenizer.from_pretrained(str(model_path))
     pad_id = tokenizer.pad_token_id
     if pad_id is None:
@@ -251,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     held_enc = encode(model_path, held_rows, decision, tokenizer)
     hint_enc = encode(model_path, hint_rows(held_rows), decision, tokenizer) if task == "snake" else None
 
-    dtype = torch.bfloat16 if device == "mps" else torch.float32
+    dtype = torch.bfloat16 if device in ("mps", "cuda") else torch.float32
     print(f"loading {model_path} ({dtype})", flush=True)
     backbone = AutoModel.from_pretrained(str(model_path), dtype=dtype, attn_implementation="sdpa")
     backbone.to(device)
@@ -264,6 +312,15 @@ def main(argv: list[str] | None = None) -> int:
     with torch.no_grad():
         readout.weight.copy_(readout_weight.float())
     readout.to(device)
+    if a.init_adapter is not None:
+        init_dir = a.init_adapter.expanduser().resolve()
+        load_init_adapter(init_dir, layers, readout)
+        print(f"continuing from {init_dir}", flush=True)
+    if a.eval_only:
+        stats = run_epoch(backbone, readout, held_enc, a.batch, pad_id, device)
+        print(f"  eval heldout: acc {stats['accuracy']:.4f}  loss {stats['loss']:.4f}  n {stats['n']}  "
+              f"{stats['seconds_per_step']:.3f} s/step", flush=True)
+        return 0
     params = trainable_parameters(layers, readout)
     lora_params = [layer.A for layer in layers] + [layer.B for layer in layers]
 
@@ -306,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         "trainable": n_train,
         "lora_layers": len(layers),
         "timed_seconds_per_step": timed["seconds_per_step"],
+        "init_adapter": str(a.init_adapter.expanduser().resolve()) if a.init_adapter else None,
         "base": {},
         "adapter": {},
     }
