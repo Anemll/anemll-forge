@@ -44,16 +44,17 @@ def _modules(B, ck, layers: list[int]):
 
 
 def make_stream_entry(ck, factors, layers, layout: str, rank: int, ctx: int, width: int,
-                      max_proj: int | None = None):
+                      max_proj: int | None = None, pack: str = "none", n_pad: int = 0):
     """Build the streamed entry. Leaves B.STREAM_LORA set: forward and export read it.
 
     max_proj keeps the first projections in sorted key order. The rest stay constant base weights.
+    pack concatenates those factors into fewer inputs (none / layer / type / flat).
     """
     B = _builder(ck)
     keys = chunk_keys(factors, layers)
     if max_proj is not None:
         keys = set(sorted(keys)[:max_proj])
-    plan = StreamPlan(keys, layout, rank)
+    plan = StreamPlan(keys, layout, rank, pack=pack, n_pad=n_pad)
     B.STREAM_LORA = plan
     mods = _modules(B, ck, layers)
     wired = {spec["key"] for spec in plan.order}
@@ -76,16 +77,8 @@ def make_merged_entry(ck, factors, layers, ctx: int, width: int):
 def _fill_lora_example(example: list, plan: StreamPlan, factors, rank: int, zeros: bool):
     """Replace the trailing LoRA example tensors with triage or zeros. Returns new args tuple."""
     n = plan.n_inputs
-    head, tail = example[:-n], []
-    for spec in plan.order:
-        if zeros:
-            a = np.zeros(spec["a_shape"], np.float16)
-            b = np.zeros(spec["b_shape"], np.float16)
-        else:
-            a_mm, sb = factors[spec["key"]]
-            a, b = project_factors(a_mm, sb, plan.layout, rank)
-        tail.append(torch.from_numpy(np.ascontiguousarray(a)))
-        tail.append(torch.from_numpy(np.ascontiguousarray(b)))
+    head = example[:-n] if n else list(example)
+    tail = [torch.from_numpy(np.ascontiguousarray(a)) for a in plan.host(factors, zeros)]
     return head + tail
 
 
@@ -132,12 +125,18 @@ def save_chunk(B, entry, out: Path, width: int, ctx: int, entry_name: str | None
 
 
 def export_stream(ck, factors, layers, layout: str, rank: int, stream_path: Path,
-                 ctx: int, width: int, parity: dict | None = None, max_proj: int | None = None) -> dict:
+                 ctx: int, width: int, parity: dict | None = None, max_proj: int | None = None,
+                 pack: str = "none", n_pad: int = 0) -> dict:
     """Write only the streamed package. Its function name is not the const prefill name."""
     t1 = time.perf_counter()
-    stream, plan, B = make_stream_entry(ck, factors, layers, layout, rank, ctx, width, max_proj=max_proj)
+    stream, plan, B = make_stream_entry(ck, factors, layers, layout, rank, ctx, width,
+                                        max_proj=max_proj, pack=pack, n_pad=n_pad)
     try:
         name = stream_entry_name(width, ctx, layers)
+        if pack != "none":
+            name = f"{name}_{pack}"
+        if n_pad:
+            name = f"{name}_p{n_pad}"
         if max_proj is not None:
             name = f"{name}_n{max_proj}"
         name = save_chunk(B, stream, stream_path, width, ctx, entry_name=name)
@@ -234,8 +233,11 @@ def write_lora(inputs: dict, meta: dict, factors, rank: int, zeros: bool) -> Non
             continue
         a_mm, sb = factors[a_spec["key"]]
         a, b = project_factors(a_mm, sb, meta["layout"], rank)
-        inputs[a_spec["name"]].np[:] = a.reshape(inputs[a_spec["name"]].np.shape)
-        inputs[b_spec["name"]].np[:] = b.reshape(inputs[b_spec["name"]].np.shape)
+        for name, src in ((a_spec["name"], a), (b_spec["name"], b)):
+            dest = inputs[name].np
+            if src.shape != dest.shape and src.T.shape == dest.shape:
+                src = np.ascontiguousarray(src.T)
+            dest[:] = src.reshape(dest.shape)
 
 
 def time_calls(plan, repeats: int, warmup: int) -> list[float]:

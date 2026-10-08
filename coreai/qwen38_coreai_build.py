@@ -819,6 +819,11 @@ class Entry(nn.Module):
             x = layer.mlp(x + y, lora)
             if layer.i in self.taps:
                 taps.append(x)
+        if lora is not None and lora.pads:
+            acc = lora.pads[0].reshape(-1).sum()
+            for t in lora.pads[1:]:
+                acc = acc + t.reshape(-1).sum()
+            x = x + acc.to(dtype=x.dtype).reshape(1, 1, 1, 1)
         return (x, *taps, *gdn_out, *att_out, *_DBG)
 
     def example(self):
