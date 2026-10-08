@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "coreai"))
 import forge
-from jeff_coreai import (JEFF_DEFAULT, SYSTEM_PROMPT, chunk_plan, convert_plan, decision_messages, int8_per_channel,
-                         is_hybrid_qwen35, is_jeff_decision_checkpoint, layer_arrays, load_decision_config,
-                         load_text_config, question_options, readout_probs)
+from jeff_coreai import (JEFF_DEFAULT, SYSTEM_PROMPT, apply_manifest_temperature, chunk_plan, convert_plan,
+                         decision_messages, int8_per_channel, is_hybrid_qwen35, is_jeff_decision_checkpoint,
+                         layer_arrays, load_decision_config, load_text_config, question_options, readout_probs)
 
 JEFF_SRC = Path(os.environ.get("JEFF_SRC", "/Users/anemll/Models/jeff/jeff-src/src"))
 # Jeff v1.3's codes: A..Z, then the two-letter pairs that are one token ("BQ" is not, so index 68 is "BR")
@@ -151,6 +151,16 @@ class JeffPromptTests(unittest.TestCase):
 
 
 class JeffCoreAITests(unittest.TestCase):
+    def test_manifest_temperature_comes_from_convert(self):
+        decision = {"temperature": 1.075, "codes": ["A"]}
+        overlaid = apply_manifest_temperature(decision, {"convert": {"temperature": 0.794}})
+        self.assertAlmostEqual(overlaid["temperature"], 0.794)
+        self.assertEqual(decision["temperature"], 1.075)
+        self.assertAlmostEqual(apply_manifest_temperature(decision, {"temperature": 0.5})["temperature"], 0.5)
+        self.assertEqual(apply_manifest_temperature(decision, {})["temperature"], 1.075)
+        both = apply_manifest_temperature(decision, {"temperature": 0.5, "convert": {"temperature": 0.8}})
+        self.assertAlmostEqual(both["temperature"], 0.8)
+
     def test_readout_softmax_and_temperature(self):
         hidden = np.array([1.0, 0.0, 0.0], np.float32)
         readout = np.array([[1.0, 0, 0], [0, 0, 0], [0.5, 0, 0]], np.float32)

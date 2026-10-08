@@ -18,7 +18,8 @@ from pathlib import Path
 import numpy as np
 from coreai.runtime import AIModel
 
-from jeff_coreai import JeffCheckpoint, load_decision_config, load_text_config, rms_last, softmax
+from jeff_coreai import (JeffCheckpoint, apply_manifest_temperature, load_decision_config, load_text_config,
+                        rms_last, softmax)
 from jeff_prefix import resume_at
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -37,11 +38,7 @@ class JeffCoreAI:
         if self.man.get("kind") != "jeff-decision":
             raise ValueError(f"{build} is not a jeff-decision package")
         c = self.cfg = load_text_config(self.model)
-        self.decision = load_decision_config(self.model)
-        # A merged adapter's convert writes its own fitted temperature into the build manifest.
-        # Embeddings still come from --model (the base, unless that file was the merged checkpoint).
-        if "temperature" in self.man:
-            self.decision = {**self.decision, "temperature": float(self.man["temperature"])}
+        self.decision = apply_manifest_temperature(load_decision_config(self.model), self.man)
         ck = ck or JeffCheckpoint(self.model)
         self.emb, self.norm, self.readout = ck.embed_table(), ck.norm_weight(), np.asarray(ck.readout, np.float32)
         self.eps = float(c["rms_norm_eps"])
