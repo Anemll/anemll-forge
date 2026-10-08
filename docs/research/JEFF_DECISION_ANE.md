@@ -1,7 +1,7 @@
 # Jeff / Unsloth decision models on the ANE
 
 - **Scope:** run Jeff (Qwen3.5-0.8B decision head) on the Apple Neural Engine through a prefill-only Core AI path.
-- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). The live-last prefix cache snapshots GDN, conv and KV after the shared prefix and prefills only the changing suffix. With a 64-row entry that suffix is one call: about 18 ms, 54–56 decisions/s, against 2.1 decisions/s for a cold 2,018-token prefill. See [Live-last prefix cache](#live-last-prefix-cache). Not done: LoRA adapters, ANE temperature/ECE fit, a serving route.
+- **Status:** Path B runs end to end on an M5 Max (7 October 2026). `jeff-base` v1.3 FP16 converts in 27 s and compiles in 79 s. All six chunks and the readout head are cached fully on the ANE. A Jeff prompt prefills in 64 ms (up to 256 tokens), 254 ms (1,008 tokens) and 508 ms (2,018 tokens), and the option probabilities track the PyTorch FP32 reference within the FP16 noise band. See [M5 Max results](#m5-max-results-7-october-2026). The live-last prefix cache snapshots GDN, conv and KV after the shared prefix and prefills only the changing suffix. With a 64-row entry that suffix is one call: about 18 ms, 54–56 decisions/s, against 2.1 decisions/s for a cold 2,018-token prefill. See [Live-last prefix cache](#live-last-prefix-cache). A 1,024-row and a 2,048-row entry share weights with the 256-row entry and stay fully on the ANE; a 256-row chain is still the faster cold prefill (233 ms vs 305 ms at 1,008 tokens, 473 ms vs 610 ms at 2,018 tokens). See [Wide prefill entries](#wide-prefill-entries). Not done: LoRA adapters, ANE temperature/ECE fit, a serving route.
 - **Branch:** `cursor/jeff-decision-ane-85f5`.
 
 Evidence labels: **Source-verified** (this checkout), **External doc** (Jeff / Unsloth / Qwen cards, not fetched as weights), **Inferred**.
@@ -321,12 +321,35 @@ Argmax matches HF FP32 on every row except the 2,018-token 100-option prompt, wh
 
 `scripts/jeff_prefix_bench.py prepare` writes Snake, Tetris and the published parity rows (including a second ~2K-token, 100-option message) with the split and HF FP32 probabilities. `run` checks cache against a cold prefill and against that reference, and reports decisions/sec.
 
+## Wide prefill entries
+
+`jeff-convert --prefill 256 --prefill-extra 1024,2048` puts `p256_2k`, `p1024_2k` and `p2048_2k` in one package per chunk. Weights are shared. Each chunk is 179.5 MB (the 32+64+256 package is 159 MB). KV history stays 2,048 rows, the same buffer for every width. Build: `/Users/anemll/Models/jeff-coreai-wide/coreai`.
+
+The earlier 1,024-row-only package (`jeff-coreai-p1024`) compiled in about 6 minutes (61 s per chunk) and left one GPU region. Its graph contains one `mps.tile` and the string `Unsupported mps.tile op for this ANE architecture`. The producer is the causal mask in `AttnW.forward`: a `(T, T)` fp16 mask passed through `repeat(grp, 1)` with `grp = 4`. At 256 rows the compiler emits no `mps.tile`. Jeff's Gated DeltaNet head repeat has factor 1 (16 key heads, 16 value heads), so that path is a reshape.
+
+The mask is now added in `(group, T, T)` layout, which broadcasts the `(T, T)` constant. The factor-1 GDN repeat is omitted. KV stays fp16. The triangular mask is still an fp16 constant. `inspect_coreai_cache.py --strict` then reports `fully_ane` for `p256_2k`, `p1024_2k`, `p2048_2k` and the readout, bonded mode 1, three ANE regions per chunk, `mps.tile` count 0, no GPU region and no unsupported-op string. A standalone SDPA of the same shape (history 2,048, head dim 256) also lands entirely on the ANE at both widths. The existing split-softmax path and the 4,096-row prefill tile were left unchanged.
+
+Export of the six chunks and the head took 4 min 31 s. ANE specialization of one three-entry chunk took 4 min 55 s (layers 0–3) and 5 min 03–09 s for each of the other five chunks (30 min 16 s for the six chunks). The readout loaded from cache in under a second.
+
+One fixed-shape call, median of five, Swift bridge: **p256 58.5 ms, p1024 307 ms, p2048 604 ms**. The published prompts are 1,008 and 2,018 tokens, so the wide call is one partial entry (the extra rows stay invalid) and the chain is four or eight 256-row calls. Median of five prefills. JSON: `/Users/anemll/Models/jeff/spike/parity/wide_prefill.json`. An idle 27B server was resident at 0% CPU. `jeff_serve.py` was not running during this timing.
+
+| Prompt | Tokens | Plan | Prefill | KL vs HF FP32 | max \|Δp\| vs HF | Top answer |
+| --- | ---: | --- | ---: | ---: | ---: | --- |
+| 30 options | 1,008 | 1×1024 | 305 ms | 4.2e-4 | 0.0061 | B, same as HF |
+| 30 options | 1,008 | 4×256 | 233 ms | 6.6e-4 | 0.0091 | B, same as HF |
+| 100 options | 2,018 | 1×2048 | 610 ms | 9.1e-4 | 0.0140 | B, HF says A |
+| 100 options | 2,018 | 8×256 | 473 ms | 8.3e-4 | 0.0131 | B, HF says A |
+
+Wide versus the 256-row chain on the same ids: max |Δp| 0.0031 (1,008 tokens) and 0.0026 (2,018 tokens), same top answer on both. The 2,018-token row is the published near-tie (FP32 A 0.2460 vs B 0.2448); both ANE plans answer B, as the cold 256-row path did before. The previous GPU-spill 1,024-row call was 319 ms, and two of those calls covered 2,018 tokens in 639 ms. Fully on the ANE, one 1,024-row call is 305 ms and one 2,048-row call is 610 ms. Both are slower than the 256-row chain (233 ms and 473 ms; the published chain figures were 254 ms and 508 ms). A cold prefill uses the largest entry, so this build's cold path is the slower one. The prefix-cache build (`p64` beside `p256`) stays the one to serve.
+
+`scripts/jeff_wide_prefill.py` runs the two plans against the stored HF FP32 probabilities.
+
 The spike's Core ML readout head in `/Users/anemll/Models/jeff/spike/coreml/` is not used here. Its normalization multiplies `amax` back in and is scale-incorrect; the Core AI head uses `rms_hidden`. The live-last layout comes from `decision_config.json` (the external feasibility note's "state-first" was wrong for v1.3).
 
 ## What was verified where
 
 - **Linux cloud VM:** implemented Path B and ran the unit tests (no Core AI SDK, no Jeff weights).
-- **M5 Max (this section):** convert, compile, placement audit, prefill timing and FP32 parity with the local weights. Unit tests: `python -m unittest tests.test_jeff_coreai tests.test_launcher tests.test_checkpoint` (34 tests, including the upstream token-id check). The prefix-cache tests (`tests.test_jeff_prefix_cache`) cover the `Latest:` cut, Snake/Tetris shared prefixes and the ~2K-token split; the M5 bench is the table above.
+- **M5 Max (this section):** convert, compile, placement audit, prefill timing and FP32 parity with the local weights. Unit tests: `python -m unittest tests.test_jeff_coreai tests.test_launcher tests.test_checkpoint` (34 tests, including the upstream token-id check). The prefix-cache tests (`tests.test_jeff_prefix_cache`) cover the `Latest:` cut, Snake/Tetris shared prefixes and the ~2K-token split; the M5 bench is the table above. The wide-entry placement and the 1,008 / 2,018-token timings are in [Wide prefill entries](#wide-prefill-entries).
 
 ## See also
 
