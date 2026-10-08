@@ -70,7 +70,7 @@
   .readout {
     min-width: 280px;
     display: grid;
-    grid-template-rows: 64px 1.8em 1.8em 2.9em 148px 4.6em;
+    grid-template-rows: 64px 48px 1.8em 1.8em 2.9em 148px 4.6em;
     gap: 8px;
     align-content: start;
   }
@@ -267,6 +267,8 @@
       <div class="board" id="board" aria-label="Snake board"></div>
       <div class="readout">
         <div class="latency"><span id="ms">—</span><small>ms total</small><small class="avg" id="avg"></small></div>
+        <div class="stages" id="stages" aria-label="Time per move by stage, last move and game average"
+             title="other = browser wall time minus tokenize, prefill and head (server bookkeeping, queueing, JSON, network)"></div>
         <p id="move">Move: —</p>
         <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
         <p class="meta timing" id="timing"><span>Waiting for the first decision.</span><span></span></p>
@@ -619,22 +621,22 @@ function widthText(widths) {
   return runs.map(({ w, n }) => (n > 1 || runs.length === 1 ? `${n} × ${w}` : `${w}`)).join(" + ");
 }
 
-// Two lines: what ran (adapter, tokens, prefill calls), then where the time went.
+// Two lines: the build and prompt size, then the server stages of this move (other = server total minus them).
 function showTiming(prefix, payload, label) {
   const timing = payload.timings || {};
   const calls = timing.calls_ms || [];
   const widths = timing.call_widths || [];
   document.getElementById(`${prefix}ms`).textContent = Math.round(timing.total_ms ?? 0);
   const [what, where] = document.getElementById(`${prefix}timing`).children;
-  const prefill = widths.length === calls.length && widths.length
-    ? `prefill ${widthText(widths)} wide (${widths.reduce((a, b) => a + b, 0)} rows)`
-    : `${calls.length} prefill ${calls.length === 1 ? "call" : "calls"}`;
-  what.textContent = `${label} · ${payload.usage.input_tokens} tokens · ${prefill}`;
+  what.textContent = `${label} · ${payload.usage.input_tokens} tokens`;
   const ms = (v) => (Number(v) || 0).toFixed(1);
   const parts = (Number(timing.tokenize_ms) || 0) + (Number(timing.prefill_ms) || 0) + (Number(timing.head_ms) || 0);
   const other = Math.max(0, (Number(timing.total_ms) || 0) - parts);
-  const each = calls.length > 1 ? ` = ${calls.map((v) => Math.round(v)).join(" + ")}` : "";
-  where.textContent = `tokenize ${ms(timing.tokenize_ms)} · ANE prefill ${ms(timing.prefill_ms)}${each} · head ${ms(timing.head_ms)} · other ${ms(other)} ms`;
+  const count = `${calls.length} ${calls.length === 1 ? "call" : "calls"}`;
+  const shape = widths.length === calls.length && widths.length
+    ? (new Set(widths).size === 1 ? `${count} × ${widths[0]}` : widthText(widths))
+    : count;
+  where.textContent = `tokenize ${ms(timing.tokenize_ms)} · prefill ${ms(timing.prefill_ms)} ms (${shape}) · head ${ms(timing.head_ms)} · other ${ms(other)} ms`;
 }
 
 // Mean server total over the moves of the game in progress, per panel ("" Snake, "tetris-" Tetris), and the
