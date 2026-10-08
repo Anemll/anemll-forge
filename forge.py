@@ -43,6 +43,9 @@ def parser():
     jc.add_argument("--output", type=path, required=True, help="new empty directory (model/ + coreai/)")
     jc.add_argument("--ctx", type=int, default=2048, help="KV history of the prefill entry")
     jc.add_argument("--prefill", type=int, default=256, help="prefill rows (multiple of 8, > 8)")
+    jc.add_argument("--prefill-extra", default="",
+                    help="more prefill widths in the same chunks, e.g. 512,1024,1536,2048; the runtime runs a prompt "
+                         "in the narrowest one that holds it")
     jc.add_argument("--quant", choices=("fp16", "int8"), default="fp16")
     jc.add_argument("--chunk-layers", type=int, default=4)
     jc.add_argument("--dry-run", action="store_true")
@@ -160,6 +163,8 @@ def prepare_jeff(a):
             raise ValueError(f"Use a new or empty --output directory: {dest}")
         args = ["--model", str(a.model), "--output", str(a.output), "--ctx", str(a.ctx),
                 "--prefill", str(a.prefill), "--quant", a.quant, "--chunk-layers", str(a.chunk_layers)]
+        if a.prefill_extra:
+            args += ["--prefill-extra", a.prefill_extra]
         if a.dry_run:
             args.append("--dry-run")
         python = sys.executable if a.dry_run else coreai_python()

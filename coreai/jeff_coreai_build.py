@@ -118,9 +118,16 @@ class ReadoutHead:
         return Head().eval().to(torch.float16)
 
 
-def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, prefill: int,
+def prefill_entry(width: int, ctx: int) -> str:
+    return f"p{width}_{ctx // 1024}k"
+
+
+def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, prefill: int | list[int],
                         quant: str, out: Path) -> dict:
+    """One chunk package. A list of prefill widths gives one entry per width over one weight copy; every entry
+    reads and writes the same KV rows (kv_len does not depend on the width below 64K)."""
     import torch.nn as nn
+    widths = sorted({int(prefill)} if isinstance(prefill, int) else {int(w) for w in prefill})
     W = {}
     for i in layers:
         W.update(layer_arrays(ck, i, quant))
@@ -129,13 +136,13 @@ def build_prefill_chunk(B, ck: JeffCheckpoint, layers: list[int], ctx: int, pref
     mods = mods.to(torch.float16)
     del W
     gc.collect()
-    entry_name = f"p{prefill}_{ctx // 1024}k"
-    e = B.Entry(mods, ctx, prefill, kv_cache_dtype="fp16")
-    mb = save_dense_program(B, [(entry_name, e, e.input_names(), e.output_names())], out)
+    entries = [(prefill_entry(w, ctx), B.Entry(mods, ctx, w, kv_cache_dtype="fp16")) for w in widths]
+    e = entries[0][1]
+    mb = save_dense_program(B, [(name, m, m.input_names(), m.output_names()) for name, m in entries], out)
     return {
         "file": out.name,
         "layers": [layers[0], layers[-1]],
-        "entries": [entry_name],
+        "entries": [name for name, _ in entries],
         "gdn_j": e.gdn_j,
         "att_j": e.att_j,
         "taps": [],
@@ -154,10 +161,17 @@ def build_readout_head(B, ck: JeffCheckpoint, out: Path) -> dict:
 
 
 def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
-                quant: str = "fp16", chunk: int = 4) -> dict:
+                quant: str = "fp16", chunk: int = 4, extra_prefills: tuple[int, ...] = ()) -> dict:
+    """extra_prefills: more prefill widths in every chunk (manifest TPS). TP stays ``prefill``, the entry a runtime
+    without TPS support uses."""
     plan = convert_plan(ck, ctx, prefill, quant, chunk)
+    widths = sorted({int(prefill), *(int(w) for w in extra_prefills)})
+    for w in widths:
+        if w % 8 or w <= 8:
+            raise ValueError(f"prefill width {w}: use a multiple of 8 above 8")
+    plan["prefill_widths"] = widths
     B = load_builder(ck.cfg)
-    B.TPS = [prefill]
+    B.TPS = widths
     B.OUT = out_dir
     coreai = out_dir / "coreai"
     model_dir = out_dir / "model"
@@ -177,6 +191,7 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
         "kind": "jeff-decision",
         "T": 8,
         "TP": prefill,
+        "TPS": widths,
         "pend": B.P,
         "taps": [],
         "ctxs": [ctx],
@@ -195,7 +210,7 @@ def export_jeff(ck: JeffCheckpoint, out_dir: Path, ctx: int, prefill: int,
     chunks = []
     for layers in chunk_plan_from(plan):
         dest = coreai / f"chunk_L{layers[0]:02d}-{layers[-1]:02d}.aimodel"
-        info = build_prefill_chunk(B, ck, layers, ctx, prefill, quant, dest)
+        info = build_prefill_chunk(B, ck, layers, ctx, widths, quant, dest)
         chunks.append(info)
         man["chunks"] = chunks
         man_path.write_text(json.dumps(man, indent=1))

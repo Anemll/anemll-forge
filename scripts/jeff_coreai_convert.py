@@ -20,6 +20,10 @@ sys.path.insert(0, str(ROOT / "coreai"))
 from jeff_coreai import JEFF_DEFAULT, JeffCheckpoint, convert_plan, is_jeff_decision_checkpoint, load_text_config
 
 
+def widths(text: str) -> tuple[int, ...]:
+    return tuple(int(w) for w in text.split(",") if w.strip())
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", type=Path, default=JEFF_DEFAULT,
@@ -27,6 +31,8 @@ def parser():
     p.add_argument("--output", type=Path, required=True, help="new empty directory: model/ + coreai/")
     p.add_argument("--ctx", type=int, default=2048, help="KV history length of the prefill entry")
     p.add_argument("--prefill", type=int, default=256, help="prefill rows (multiple of 8, > 8)")
+    p.add_argument("--prefill-extra", type=widths, default=(),
+                   help="more prefill entries over the same weights, e.g. 512,1024,1536,2048 (each <= --ctx)")
     p.add_argument("--quant", choices=("fp16", "int8"), default="fp16",
                    help="fp16 dense (default) or per-channel INT8 projections; not GPTQ/VQ")
     p.add_argument("--chunk-layers", type=int, default=4)
@@ -46,6 +52,10 @@ def main(argv=None) -> int:
                          f"(layer_types + readout) at {model}")
     ck = JeffCheckpoint(model)
     plan = convert_plan(ck, a.ctx, a.prefill, a.quant, a.chunk_layers)
+    bad = [w for w in a.prefill_extra if w <= 8 or w % 8 or w > a.ctx]
+    if bad:
+        raise SystemExit(f"--prefill-extra {bad}: each width must be a multiple of 8, above 8 and at most --ctx")
+    plan["prefill_widths"] = sorted({a.prefill, *a.prefill_extra})
     if a.dry_run:
         print(json.dumps(plan, indent=2))
         return 0
@@ -53,7 +63,7 @@ def main(argv=None) -> int:
         raise SystemExit(f"Use a new or empty --output directory: {out}")
     out.mkdir(parents=True, exist_ok=True)
     from jeff_coreai_build import export_jeff
-    result = export_jeff(ck, out, a.ctx, a.prefill, a.quant, a.chunk_layers)
+    result = export_jeff(ck, out, a.ctx, a.prefill, a.quant, a.chunk_layers, extra_prefills=a.prefill_extra)
     print(json.dumps(result, indent=2))
     return 0
 
