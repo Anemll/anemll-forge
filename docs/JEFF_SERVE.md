@@ -144,7 +144,7 @@ $COREAI_PYTHON scripts/jeff_lora_parity.py \
   --rows "$HOME/Models/jeff-snake/parity_rows.json"
 ```
 
-`--model` on the parity script is the base checkpoint. Embeddings and temperature are unchanged. The Snake weights and readout are in the compiled build.
+`--model` on the parity script is the base checkpoint. Embeddings stay there. This Snake build keeps the base temperature. A published adapter's fitted temperature is read from its build manifest, under `convert.temperature`. The Snake weights and readout are in the compiled build.
 
 Serve both builds. `base` is `--build`. Each `--adapter` is `name=` plus that build's `coreai/` directory:
 
@@ -153,6 +153,10 @@ python forge.py jeff-serve \
   --model "$HOME/Models/jeff/jeff-base-v1.3" \
   --build "$HOME/Models/jeff-coreai/coreai" \
   --adapter snake="$HOME/Models/jeff-coreai/adapters/snake/coreai" \
+  --adapter triage="$HOME/Models/jeff-coreai/adapters/triage/coreai" \
+  --adapter tools="$HOME/Models/jeff-coreai/adapters/tools/coreai" \
+  --adapter guard="$HOME/Models/jeff-coreai/adapters/guard/coreai" \
+  --adapter spam="$HOME/Models/jeff-coreai/adapters/spam/coreai" \
   --host 127.0.0.1 --port 8787
 ```
 
@@ -255,8 +259,33 @@ uv run jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6 \
 
 ## Published adapters
 
-`triage`, `tools`, `guard`, and `spam` are the Apache-2.0 PEFT adapters on `mstrasser/jeff-adapter-*` (revision `v1.3`). Each is a LoRA plus its own readout and temperature. `scripts/jeff_peft_merge.py` folds one into a copy of jeff-base the same way `jeff.lora.merge_adapter` does (`W += (alpha / rank) B A`), then `jeff-convert` / `compile` write `/Users/anemll/Models/jeff-coreai/adapters/<name>/`. The demo dropdown lists every name `/health` returns. Choosing one loads that adapter's example and also scores the same question on base.
+`triage`, `tools`, `guard`, and `spam` are the Apache-2.0 PEFT adapters on `mstrasser/jeff-adapter-*` (revision `v1.3`). Each is a LoRA plus its own readout and fitted temperature. `scripts/jeff_peft_merge.py` folds one into a copy of jeff-base the same way `jeff.lora.merge_adapter` does (`W += (alpha / rank) B A`), then `jeff-convert` / `compile` write `/Users/anemll/Models/jeff-coreai/adapters/<name>/`. `jeff-convert` stores that temperature under `manifest["convert"]["temperature"]`. `JeffCoreAI` reads it from there, so a served adapter uses its own temperature while embeddings still come from `--model`.
+
+`scripts/jeff_peft_torch.py` scores the merged checkpoint (the weights the converter saw) on the published example plus two choice rows from `test.jsonl`. `scripts/jeff_lora_parity.py` compares those probabilities to the compiled head. On this Mac, 7 October 2026, every row that fits the 2048-token context matched argmax. One tools row was 3513 tokens, so it was scored in PyTorch only (it also matched its label).
+
+| Adapter | Compile | Rows (ANE) | Argmax match | Mean KL | Temperature |
+| --- | --- | --- | --- | --- | --- |
+| triage | 2 m 20 s | 3 | 3 | 3.2e-6 | 0.794 |
+| tools | 1 m 43 s | 2 | 2 | 7.3e-4 | 1.049 |
+| guard | 1 m 19 s | 3 | 3 | 1.1e-6 | 0.975 |
+| spam | 1 m 19 s | 3 | 3 | 1.5e-5 | 1.181 |
+
+`inspect_coreai_cache.py --executable python --strict` reports every chunk and `head_readout` as `fully_ane` for each of the four builds (bonded mode 1, one ANE region, no GPU region). The eight labeled rows all matched their gold choice on the merged PyTorch checkpoint.
+
+The same four examples on base Jeff, at the base temperature, pick a different top option or a much lower confidence: triage `other` 0.60 versus adapter `k1` 1.00; tools `t3` 0.53 versus adapter `answer_directly` 0.68; guard `indirect_injection` 0.53 versus adapter 1.00; spam `spam` 0.49 versus adapter `phishing` 0.97. The demo dropdown loads that example for the selected adapter and scores it on base as well.
+
+```sh
+python scripts/jeff_peft_torch.py \
+  --merged "$HOME/Models/jeff-published" \
+  --output "$HOME/Models/jeff-published" \
+  --adapter triage="$HOME/Models/jeff/adapters/jeff-adapter-triage"
+# then, with the Core AI interpreter:
+python scripts/jeff_lora_parity.py \
+  --model "$HOME/Models/jeff/jeff-base-v1.3" \
+  --build "$HOME/Models/jeff-coreai/adapters/triage/coreai" \
+  --rows "$HOME/Models/jeff-published/triage/parity_rows.json"
+```
 
 `--task tetris` uses `coreai/jeff_tetris.py`. A 256/64 El-Tetris dataset is generated with `generate_tetris_rows`; Tetris LoRA training is the next run, after this Snake adapter.
 
-Placement audit of the specializations this server loaded (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).
+Placement audit of the base build this server loads (`inspect_coreai_cache.py --executable python --strict`, cache key `python`, OS build `26B5091g`): all six chunks and `head_readout` are `fully_ane`, bonded compile mode 1, one ANE region and no GPU region on every entry (`p256_2k`, head `h1`).
