@@ -188,11 +188,22 @@ def place_food(snake, rng):
 
 
 # ---- server ------------------------------------------------------------------------------------------------------
-def post(url, body, timeout=60.0):
+BUSY = {"retries": 0}
+
+
+def post(url, body, timeout=60.0, busy_retries=30):
+    """One decision. A 529 (another client holds the model, e.g. the live demo page) is retried after Retry-After."""
     req = urllib.request.Request(url + "/v1/systemone", data=json.dumps(body).encode(),
                                  headers={"content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())
+    for attempt in range(busy_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as error:
+            if error.code != 529 or attempt == busy_retries:
+                raise
+            BUSY["retries"] += 1
+            time.sleep(float(error.headers.get("Retry-After") or 1))
 
 
 def server_pid(port):
@@ -323,7 +334,7 @@ def run_soak(a):
     after = [r for r in rows if r[0] >= a.warmup]
     span = (max(r[1] for r in after) - min(r[1] for r in after)) if after else 0
     print(f"done: {a.moves} moves, {games} Tetris games ended, IOSurfaces {s0} -> {s1}, footprint {m0:.0f} -> "
-          f"{m1:.0f} MB; after move {a.warmup}: {warm} -> {s1}, spread {span}")
+          f"{m1:.0f} MB; after move {a.warmup}: {warm} -> {s1}, spread {span}; busy retries {BUSY['retries']}")
     return 0 if span <= a.bound else 3
 
 
