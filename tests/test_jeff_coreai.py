@@ -17,6 +17,11 @@ from jeff_coreai import (JEFF_DEFAULT, SYSTEM_PROMPT, apply_manifest_temperature
                          decision_messages, int8_per_channel, is_hybrid_qwen35, is_jeff_decision_checkpoint,
                          layer_arrays, load_decision_config, load_text_config, question_options, readout_probs)
 
+try:  # needs the Core AI runtime (coreai.runtime); the interpreter forge.py uses for jeff-serve has it
+    import jeff_coreai_runtime
+except ImportError:
+    jeff_coreai_runtime = None
+
 JEFF_SRC = Path(os.environ.get("JEFF_SRC", "/Users/anemll/Models/jeff/jeff-src/src"))
 # Jeff v1.3's codes: A..Z, then the two-letter pairs that are one token ("BQ" is not, so index 68 is "BR")
 CODES = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ["AA", "AB"]
@@ -359,6 +364,37 @@ class JeffLauncherTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         run.assert_not_called()
         self.assertFalse(out.exists())
+
+
+@unittest.skipUnless(jeff_coreai_runtime is not None, "needs coreai.runtime")
+class JeffRuntimeOutputsTests(unittest.TestCase):
+    def test_outputs_empties_the_native_result_dict(self):
+        class Tensor:
+            pass
+
+        class Fn:
+            def __init__(self):
+                self.raw, self.seen = None, None
+
+            async def _function(self, inputs, state):
+                self.seen = inputs
+                self.raw = {"y": Tensor(), "logits": Tensor()}
+                return self.raw
+
+        class Arg:
+            _tensor = "x-storage"
+
+        async def run(fn):
+            async with jeff_coreai_runtime.outputs(fn, {"x": Arg()}) as out:
+                self.assertEqual(set(out), {"y", "logits"})
+                self.assertIs(out["y"]._tensor, fn.raw["y"])
+                return out
+
+        fn = Fn()
+        out = jeff_coreai_runtime.asyncio.run(run(fn))
+        self.assertEqual(fn.seen, {"x": "x-storage"})
+        self.assertEqual(fn.raw, {})
+        self.assertEqual(out, {})
 
 
 if __name__ == "__main__":

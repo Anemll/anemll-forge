@@ -10,13 +10,14 @@ when a prefix cache is installed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-from coreai.runtime import AIModel
+from coreai.runtime import AIModel, NDArray
 
 from jeff_coreai import (JeffCheckpoint, apply_manifest_temperature, load_decision_config, load_text_config,
                         rms_last, softmax)
@@ -28,6 +29,24 @@ if str(SCRIPTS) not in sys.path:
 import ane_compile_mode as SOC  # noqa: E402
 from qwen38_coreai_model import _spec, buffer, pick_package, writable  # noqa: E402
 from qwen38_kv_cache import put_rows  # noqa: E402
+
+
+@contextlib.asynccontextmanager
+async def outputs(fn, inputs: dict):
+    """Run an InferenceFunction and yield its outputs; they are freed when the block exits.
+
+    The binding (coreai.runtime, macOS 27) has no outputs= argument, and its native call keeps a reference to the
+    asyncio Future's set_result, so the Future and the result dict it holds are never collected. Every output
+    NDArray in that dict pinned one pooled IOSurface for the life of the process (~1 per output per call) until the
+    pool failed to allocate. Copy what you need inside the block; the dict is emptied on exit.
+    """
+    raw = await fn._function(inputs={k: v._tensor for k, v in inputs.items()}, state={})  # noqa: SLF001
+    out = {k: NDArray._wrap(v) for k, v in raw.items()}  # noqa: SLF001
+    try:
+        yield out
+    finally:
+        out.clear()
+        raw.clear()
 
 
 class JeffCoreAI:
@@ -160,18 +179,22 @@ class JeffCoreAI:
             for ci, ch in enumerate(self.chunks):
                 ins = {**shared, "x": x, **{k: v[0] for k, v in ch["state"].items()},
                        **{k: v[0] for k, v in ch["kv"].items()}}
-                out = await ch["fns"][self.entry](inputs=ins)
-                for k, (_, w) in ch["state"].items():
-                    w[:] = writable(out[f"{k}_out"])
-                for k, (_, w) in ch["kv"].items():
-                    put_rows(w, out[f"{k}_new"].numpy()[:, :n], p0, n)
-                d["xb"][1][:] = writable(out["y"])
+                async with outputs(ch["fns"][self.entry], ins) as out:
+                    for k, (_, w) in ch["state"].items():
+                        w[:] = writable(out[f"{k}_out"])
+                    for k, (_, w) in ch["kv"].items():
+                        put_rows(w, out[f"{k}_new"].numpy()[:, :n], p0, n)
+                    d["xb"][1][:] = writable(out["y"])
                 x = d["xb"][0]
                 if keep is not None:
                     keep[ci].append(d["xb"][1][0, :, 0, :n].T.copy())
         self.loop.run_until_complete(run())
         self.pos = p0 + n
         return d["xb"][1][:, :, :, n - 1:n].copy()
+
+    async def _head(self) -> np.ndarray:
+        async with outputs(self.head_fn, {"x": self.pin["hx"][0]}) as out:
+            return np.array(out["logits"].numpy(), np.float32).reshape(-1)
 
     def prefill(self, token_ids: list[int], keep_chunks: bool = False, prefix: dict | None = None) -> dict:
         """Readout logits (ANE head), the last hidden state and timings.
@@ -205,9 +228,8 @@ class JeffCoreAI:
         self._last_hidden = last
         t1 = time.perf_counter()
         self.pin["hx"][1][:] = last
-        out = self.loop.run_until_complete(self.head_fn(inputs={"x": self.pin["hx"][0]}))
+        logits = self.loop.run_until_complete(self._head())
         head_ms = 1e3 * (time.perf_counter() - t1)
-        logits = np.asarray(out["logits"].numpy(), np.float32).reshape(-1)
         r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
              "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0),
              "prefix_tokens": start}
