@@ -131,6 +131,9 @@ class ServerTests(unittest.TestCase):
         self.assertIn("latest", demo)
         self.assertIn('id="adapter"', demo)
         self.assertIn("Food eaten", demo)
+        self.assertIn("overflow-y: auto", demo)
+        self.assertIn("logStatus", demo)
+        self.assertIn('id="status"', demo)
         self.assertEqual(health["adapters"], ["base"])
         self.assertIn("x-request-id", {key.lower() for key in headers})
 

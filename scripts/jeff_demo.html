@@ -62,6 +62,11 @@
   .latency span { font-size: 64px; letter-spacing: -0.04em; line-height: 0.9; }
   .latency small { color: var(--muted); margin-left: 6px; font-size: 16px; }
   .meta { color: var(--muted); margin: 6px 0 12px; min-height: 1.4em; }
+  .scroll-box { overflow-y: auto; overscroll-behavior: contain; }
+  #timing { height: 2.9em; overflow-y: auto; }
+  #bars, #route-bars { height: 148px; }
+  #status { height: 4.6em; margin: 6px 0 12px; color: var(--muted); }
+  #status p { margin: 0 0 4px; }
   .bar { display: grid; grid-template-columns: 72px 1fr 52px; gap: 8px; align-items: center; margin: 6px 0; }
   .track { height: 10px; background: #0c100c; border-radius: 99px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); width: 0; }
@@ -124,9 +129,9 @@
     <div>
       <div class="latency"><span id="ms">—</span><small>ms total</small></div>
       <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
-      <p class="meta" id="timing">Waiting for the first decision.</p>
-      <div id="bars"></div>
-      <p class="meta" id="status"></p>
+      <p class="meta scroll-box" id="timing">Waiting for the first decision.</p>
+      <div id="bars" class="scroll-box"></div>
+      <div id="status" class="scroll-box" role="log" aria-live="polite"></div>
       <button id="toggle" type="button">Pause</button>
     </div>
   </section>
@@ -144,7 +149,7 @@
       <button id="classify" type="button">Classify</button>
       <span class="meta" id="route-ms"></span>
     </div>
-    <div id="route-bars"></div>
+    <div id="route-bars" class="scroll-box"></div>
     <div id="route-choice"></div>
     <div class="meta" id="route-base"></div>
   </section>
@@ -333,6 +338,15 @@ function draw() {
   }
 }
 
+function logStatus(text) {
+  const log = document.getElementById("status");
+  const line = document.createElement("p");
+  line.textContent = text;
+  log.prepend(line);
+  while (log.children.length > 40) log.lastChild.remove();
+  log.scrollTop = 0;
+}
+
 function bars(target, probabilities, chosen) {
   const host = document.getElementById(target);
   host.replaceChildren();
@@ -417,7 +431,7 @@ async function step() {
     const hit = next.r < 0 || next.c < 0 || next.r >= SIZE || next.c >= SIZE || (occupied(next.r, next.c, false) && !ontoTail);
     if (hit) {
       best = Math.max(best, score);
-      document.getElementById("status").textContent = `Chose ${answer.choice}. That hits a wall or the body. Food eaten this life: ${score}. Restarting.`;
+      logStatus(`Chose ${answer.choice}. That hits a wall or the body. Food eaten this life: ${score}. Restarting.`);
       snake = [{ r: 4, c: 2 }, { r: 4, c: 1 }, { r: 4, c: 0 }];
       score = 0;
       placeFood();
@@ -429,15 +443,15 @@ async function step() {
         best = Math.max(best, score);
         placeFood();
         document.getElementById("scoreline").textContent = `Food eaten ${score} · best ${best}`;
-        document.getElementById("status").textContent = `Chose ${answer.choice} and ate the food.`;
+        logStatus(`Chose ${answer.choice} and ate the food.`);
       } else {
         snake.pop();
-        document.getElementById("status").textContent = `Jeff chose ${answer.choice}.`;
+        logStatus(`Jeff chose ${answer.choice}.`);
       }
     }
     draw();
   } catch (error) {
-    document.getElementById("status").textContent = String(error.message || error);
+    logStatus(String(error.message || error));
   } finally {
     inflight = false;
     if (playing) setTimeout(step, 160);
@@ -452,9 +466,9 @@ document.getElementById("adapter").addEventListener("change", (event) => {
   const plays = adapter === "base" || adapter === "snake";
   playing = plays;
   document.getElementById("toggle").textContent = playing ? "Pause" : "Play";
-  document.getElementById("status").textContent = plays
+  logStatus(plays
     ? `Switched to ${adapter}. Board reset.`
-    : `Switched to ${adapter}. Snake is paused. The sample below is that adapter's example.`;
+    : `Switched to ${adapter}. Snake is paused. The sample below is that adapter's example.`);
   if (playing) step();
   if (!plays) document.getElementById("classify").click();
 });

@@ -474,7 +474,13 @@ def make_handler(app: App):
 
         def _dispatch(self, path: str):
             if self.command == "GET" and path in DEMO_PATHS:
-                return 200, app.demo_html.encode(), {}
+                # Read the file each request so a browser reload picks up a demo edit
+                # without restarting the ANE process.
+                try:
+                    page = load_demo().encode()
+                except OSError:
+                    page = app.demo_html.encode()
+                return 200, page, {}
             if self.command == "GET" and path == "/health":
                 return 200, app.health(), {}
             if self.command == "GET" and path == "/v1/models":
