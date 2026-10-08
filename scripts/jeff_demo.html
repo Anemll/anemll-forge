@@ -128,7 +128,7 @@
   .meta { color: var(--muted); margin: 6px 0 12px; }
   .scroll-box { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; min-width: 240px; }
   #scoreline { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
-  .timing { height: 2.9em; margin: 0; overflow: hidden; min-width: 240px; font-variant-numeric: tabular-nums; }
+  .timing { height: 2.9em; margin: 0; overflow: hidden; min-width: 240px; font-size: 14px; font-variant-numeric: tabular-nums; }
   .timing span { display: block; height: 1.45em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #bars, #route-bars { height: 148px; }
   #status { height: 4.6em; margin: 0; color: var(--muted); }
@@ -620,7 +620,11 @@ function showTiming(prefix, payload, label) {
     ? `prefill ${widthText(widths)} wide (${widths.reduce((a, b) => a + b, 0)} rows)`
     : `${calls.length} prefill ${calls.length === 1 ? "call" : "calls"}`;
   what.textContent = `${label} · ${payload.usage.input_tokens} tokens · ${prefill}`;
-  where.textContent = `tokenize ${timing.tokenize_ms} ms · prefill ${timing.prefill_ms} ms · head ${timing.head_ms} ms`;
+  const ms = (v) => (Number(v) || 0).toFixed(1);
+  const parts = (Number(timing.tokenize_ms) || 0) + (Number(timing.prefill_ms) || 0) + (Number(timing.head_ms) || 0);
+  const other = Math.max(0, (Number(timing.total_ms) || 0) - parts);
+  const each = calls.length > 1 ? ` = ${calls.map((v) => Math.round(v)).join(" + ")}` : "";
+  where.textContent = `tokenize ${ms(timing.tokenize_ms)} · ANE prefill ${ms(timing.prefill_ms)}${each} · head ${ms(timing.head_ms)} · other ${ms(other)} ms`;
 }
 
 // Mean server total over the moves of the game in progress, per panel ("" Snake, "tetris-" Tetris).
