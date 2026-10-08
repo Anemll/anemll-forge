@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 from transformers import AutoTokenizer
@@ -27,6 +28,9 @@ def main(argv=None) -> int:
     gen = tok.decode(ane["generation"]["new_token_ids"], skip_special_tokens=False)
     timing = ane["timing"]
     snake = ane["snake"]
+    snake_rows = meta["snake"]
+    torch_spaced = sum(r["pred_spaced"] == r["label"] for r in snake_rows) / len(snake_rows)
+    bare_counts = Counter(r["pred"] for r in snake_rows)
     lines = [
         "# Stock Qwen3.5-0.8B on the Apple Neural Engine",
         "",
@@ -101,11 +105,13 @@ def main(argv=None) -> int:
         "| Scorer | Accuracy |",
         "| --- | ---: |",
         f"| Torch fp32, bare tokens `up/down/left/right` | {fmt_pct(snake['torch_bare_accuracy'])} |",
+        f"| Torch fp32, leading-space tokens | {fmt_pct(torch_spaced)} |",
         f"| ANE, bare tokens | {fmt_pct(snake['ane_bare_accuracy'])} |",
         f"| ANE, leading-space tokens | {fmt_pct(snake['ane_spaced_accuracy'])} |",
         f"| ANE bare vs torch bare (same prediction) | {fmt_pct(snake['ane_vs_torch_bare'])} |",
         "",
         f"Torch snake correct {meta['snake_correct']} / {meta['snake_n']}.",
+        "Torch bare-token prediction counts: " + ", ".join(f"{k} {bare_counts[k]}" for k in ("up", "down", "left", "right")) + ".",
         "",
     ]
     args.out.write_text("\n".join(lines))

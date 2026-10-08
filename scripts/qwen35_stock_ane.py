@@ -3,11 +3,11 @@
 
 Waits while another agent's ANE compile is active, then specializes this build.
 Decode is one new token through the same 256-row prefill entry (Jeff's packages have no verify function).
+Inference goes through the Swift bridge: each tensor is one IOSurface, bound once and rewritten in place.
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import plistlib
@@ -27,10 +27,12 @@ sys.path.insert(0, str(ROOT / "coreai" / "swift_bridge"))
 import ane_compile_mode as SOC
 import coreai_bridge as B
 import coreai_compile_guide as G
-from coreai.runtime import AIModel
 from jeff_prefix import resume_at
-from qwen38_coreai_model import _spec, buffer, pick_package, writable
+from qwen38_coreai_model import pick_package
 from qwen38_kv_cache import put_rows
+
+# Host-written tensors shared by every backbone chunk. Per-layer state and KV stay on the chunk.
+SHARED_INPUTS = ("cos", "sin", "conv_sel", "commit", "commit_last", "conv_sel_out", "valid", "mask")
 
 OPTION_WORDS = ("up", "down", "left", "right")
 
@@ -145,7 +147,14 @@ def placement_of(package: Path, entries: list[str]) -> dict:
     return item
 
 
+def _as_np(buf: B.Buffer) -> np.ndarray:
+    """A numpy view of a bridge buffer. The Buffer stays referenced by the caller, not by the view's owner cycle."""
+    return np.asarray(buf)
+
+
 class StockRunner:
+    """Backbone chunks plus the split tied LM head. Bindings are created once and reused."""
+
     def __init__(self, build: Path, model_dir: Path):
         SOC.apply(strict=True)
         self.build = Path(build)
@@ -159,55 +168,118 @@ class StockRunner:
         self.ctx = int(self.man["pctxs"][0])
         self.L = int(self.man["pkv_len"][str(self.ctx)])
         self.entry = f"p{self.TP}_{self.ctx // 1024}k"
-        hid = int(cfg["hidden_size"])
-        self.hid = hid
+        self.hid = int(cfg["hidden_size"])
         self.nkv, self.hd = int(cfg["num_key_value_heads"]), int(cfg["head_dim"])
-        nv = int(cfg["linear_num_value_heads"])
-        dk, dv = int(cfg["linear_key_head_dim"]), int(cfg["linear_value_head_dim"])
-        cdim = 2 * int(cfg["linear_num_key_heads"]) * dk + nv * dv
-        gshapes = {"conv": (self.man["pend"] + 3, cdim), "rec": (nv, dk, dv),
-                   "pend": (nv, 3 * self.man["pend"] + 1, dv)}
         rot = int(cfg["head_dim"] * cfg["rope_parameters"]["partial_rotary_factor"])
         self.rot = rot
         self.inv = 1.0 / cfg["rope_parameters"]["rope_theta"] ** (np.arange(0, rot, 2) / rot)
-        self.loop = asyncio.new_event_loop()
         t0 = time.time()
-
-        async def load(file, entries):
-            target, _ = pick_package(self.build, file, None, print)
-            model = await AIModel.load(target, specialization_options=_spec())
-            return model, {e: model.load_function(e) for e in entries}
-
+        self.shared: dict[str, B.Buffer] = {}
+        self.shared_np: dict[str, np.ndarray] = {}
         self.chunks = []
         for ch in self.man["chunks"]:
             t1 = time.time()
-            pkg, fns = self.loop.run_until_complete(load(ch["file"], ch["entries"]))
-            state = {f"{n}{j}": buffer(gshapes[n]) for j in ch["gdn_j"] for n in gshapes}
-            kv = {f"{s}{j}": buffer((self.nkv, self.L, self.hd)) for j in ch["att_j"] for s in ("k", "v")}
-            self.chunks.append({**ch, "pkg": pkg, "fns": fns, "state": state, "kv": kv})
+            self.chunks.append(self._load_chunk(ch))
             print(f"loaded {ch['file']} in {time.time() - t1:.1f}s", flush=True)
         self.heads = []
+        self.hx: B.Buffer | None = None
+        self.hx_np: np.ndarray | None = None
         for sl in self.man["head"]["slices"]:
             t1 = time.time()
-            pkg, fns = self.loop.run_until_complete(load(sl["file"], [sl["entry"]]))
-            self.heads.append({**sl, "pkg": pkg, "fn": fns[sl["entry"]]})
+            self.heads.append(self._load_head(sl))
             print(f"loaded {sl['file']} in {time.time() - t1:.1f}s", flush=True)
         self.load_s = time.time() - t0
-        P = int(self.man["pend"])
-        self.pin = {n: buffer(s) for n, s in (
-            ("cos", (self.TP, rot)), ("sin", (self.TP, rot)), ("conv_sel", (3, P + 3)),
-            ("commit", (1, P, 1)), ("commit_last", (1, P, 1)), ("conv_sel_out", (3, self.TP + 3)),
-            ("valid", (1, self.TP, 1)), ("x", (1, hid, 1, self.TP)), ("xb", (1, hid, 1, self.TP)),
-            ("hx", (1, hid, 1, 1)))}
-        self.mask = buffer((1, self.L))
         self.pos = 0
         self._token_ids: list[int] = []
         self._rows: np.ndarray | None = None
 
+    def _load_model(self, file: str) -> B.Model:
+        target, _ = pick_package(self.build, file, None, print)
+        return B.Model(target, compute="ane")
+
+    def _shared_input(self, fn: B.Function, name: str) -> B.Buffer:
+        spec = fn.inputs[name]
+        existing = self.shared.get(name)
+        if existing is None:
+            buf = fn.buffer("input", name)
+            self.shared[name] = buf
+            self.shared_np[name] = _as_np(buf)
+            return buf
+        if (tuple(spec["shape"]) != existing.shape or tuple(spec["strides"]) != existing.strides
+                or np.dtype(B.DTYPES[spec["dtype"]][1]) != existing.dtype):
+            raise ValueError(f"shared input {name} layout differs across chunks")
+        return existing
+
+    def _load_chunk(self, ch: dict) -> dict:
+        model = self._load_model(ch["file"])
+        fn = model.function(self.entry)
+        missing = [n for n in SHARED_INPUTS if n not in fn.inputs]
+        if missing or "x" not in fn.inputs or "y" not in fn.outputs:
+            raise ValueError(f"{ch['file']} {self.entry} missing {missing or ['x/y']}")
+        inputs = {n: self._shared_input(fn, n) for n in SHARED_INPUTS}
+        for name in fn.input_names:
+            if name not in inputs:
+                inputs[name] = fn.buffer("input", name)
+        outputs = {n: fn.buffer("output", n) for n in fn.output_names}
+        state_names = []
+        kv_names = []
+        for name in fn.output_names:
+            if name == "y":
+                continue
+            if name.endswith("_out"):
+                base = name[:-4]
+                state_names.append(base)
+            elif name.endswith("_new"):
+                base = name[:-4]
+                kv_names.append(base)
+            else:
+                raise ValueError(f"{ch['file']} unexpected output {name}")
+            if base not in inputs or base in SHARED_INPUTS or base == "x":
+                raise ValueError(f"{ch['file']} output {name} does not map to a per-layer input")
+        y = outputs["y"]
+        x = inputs["x"]
+        if y.shape != x.shape:
+            raise ValueError(f"{ch['file']} y {y.shape} != x {x.shape}")
+        for name in kv_names:
+            if inputs[name].shape[1] != self.L:
+                raise ValueError(f"{ch['file']} {name} token axis {inputs[name].shape} != cache {self.L}")
+        return {
+            **ch,
+            "model": model,
+            "fn": fn,
+            "inputs": inputs,
+            "outputs": outputs,
+            "in_np": {n: _as_np(b) for n, b in inputs.items()},
+            "out_np": {n: _as_np(b) for n, b in outputs.items()},
+            "binding": fn.bind(inputs, outputs),
+            "state_names": state_names,
+            "kv_names": kv_names,
+        }
+
+    def _load_head(self, sl: dict) -> dict:
+        model = self._load_model(sl["file"])
+        fn = model.function(sl["entry"])
+        if list(fn.input_names) != ["x"] or "logits" not in fn.outputs:
+            raise ValueError(f"{sl['file']} inputs {fn.input_names} outputs {fn.output_names}")
+        if self.hx is None:
+            self.hx = fn.buffer("input", "x")
+            self.hx_np = _as_np(self.hx)
+        elif tuple(fn.inputs["x"]["shape"]) != self.hx.shape or tuple(fn.inputs["x"]["strides"]) != self.hx.strides:
+            raise ValueError(f"{sl['file']} x layout {fn.inputs['x']} != {self.hx.shape} {self.hx.strides}")
+        outputs = {n: fn.buffer("output", n) for n in fn.output_names}
+        return {
+            **sl,
+            "model": model,
+            "fn": fn,
+            "outputs": outputs,
+            "out_np": {n: _as_np(b) for n, b in outputs.items()},
+            "binding": fn.bind({"x": self.hx}, outputs),
+        }
+
     def reset(self):
         for ch in self.chunks:
-            for _, w in ch["state"].values():
-                w[:] = 0
+            for name in ch["state_names"]:
+                ch["in_np"][name][:] = 0
         self.pos = 0
         self._token_ids = []
         self._rows = None
@@ -220,8 +292,10 @@ class StockRunner:
             "token_ids": list(self._token_ids),
             "hidden": self._rows[-1].copy(),
             "chunks": [
-                {"state": {k: v[1].copy() for k, v in ch["state"].items()},
-                 "kv": {k: v[1].copy() for k, v in ch["kv"].items()}}
+                {
+                    "state": {k: ch["in_np"][k].copy() for k in ch["state_names"]},
+                    "kv": {k: ch["in_np"][k].copy() for k in ch["kv_names"]},
+                }
                 for ch in self.chunks
             ],
         }
@@ -230,51 +304,54 @@ class StockRunner:
         chunks = prefix["chunks"]
         for ch, saved in zip(self.chunks, chunks):
             for k, arr in saved["state"].items():
-                ch["state"][k][1][:] = arr
+                ch["in_np"][k][:] = arr
             for k, arr in saved["kv"].items():
-                ch["kv"][k][1][:] = arr
+                ch["in_np"][k][:] = arr
         self.pos = int(prefix["pos"])
         hidden = prefix.get("hidden")
         self._rows = None if hidden is None else np.asarray(hidden, np.float32).reshape(1, -1)
 
-    def _block(self, ids: list[int]) -> np.ndarray:
-        d, TP, n, p0 = self.pin, self.TP, len(ids), self.pos
-        if not 0 < n <= TP or p0 + n > self.L:
-            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row cache")
-        d["x"][1][:] = 0
-        d["x"][1][0, :, 0, :n] = self.emb[np.asarray(ids, np.int64)].T
-        pos = np.minimum(np.arange(p0, p0 + TP), p0 + n - 1)
+    def _fill_controls(self, p0: int, n: int) -> None:
+        d = self.shared_np
+        pos = np.minimum(np.arange(p0, p0 + self.TP), p0 + n - 1)
         ang = np.concatenate([np.outer(pos, self.inv)] * 2, axis=1)
-        d["cos"][1][:], d["sin"][1][:] = np.cos(ang), np.sin(ang)
-        d["conv_sel"][1][:] = 0
-        d["conv_sel"][1][np.arange(3), np.arange(3)] = 1
-        d["commit"][1][:] = 0
-        d["commit_last"][1][:] = 0
-        d["conv_sel_out"][1][:] = 0
-        d["conv_sel_out"][1][np.arange(3), n + np.arange(3)] = 1
-        d["valid"][1][:] = 0
-        d["valid"][1][0, :n, 0] = 1
-        self.mask[1][:] = -1e4
-        self.mask[1][0, :p0] = 0
-        shared = {k: v[0] for k, v in d.items() if k not in ("x", "xb", "hx")}
-        shared["mask"] = self.mask[0]
+        d["cos"][:], d["sin"][:] = np.cos(ang), np.sin(ang)
+        d["conv_sel"][:] = 0
+        d["conv_sel"][np.arange(3), np.arange(3)] = 1
+        d["commit"][:] = 0
+        d["commit_last"][:] = 0
+        d["conv_sel_out"][:] = 0
+        d["conv_sel_out"][np.arange(3), n + np.arange(3)] = 1
+        d["valid"][:] = 0
+        d["valid"][0, :n, 0] = 1
+        d["mask"][:] = -1e4
+        if p0:
+            d["mask"][0, :p0] = 0
 
-        async def run():
-            x = d["x"][0]
-            for ch in self.chunks:
-                ins = {**shared, "x": x, **{k: v[0] for k, v in ch["state"].items()},
-                       **{k: v[0] for k, v in ch["kv"].items()}}
-                out = await ch["fns"][self.entry](inputs=ins)
-                for k, (_, w) in ch["state"].items():
-                    w[:] = writable(out[f"{k}_out"])
-                for k, (_, w) in ch["kv"].items():
-                    put_rows(w, out[f"{k}_new"].numpy()[:, :n], p0, n)
-                d["xb"][1][:] = writable(out["y"])
-                x = d["xb"][0]
+    def _absorb(self, ch: dict, n: int, p0: int) -> None:
+        outs, ins = ch["out_np"], ch["in_np"]
+        for name in ch["state_names"]:
+            ins[name][:] = outs[f"{name}_out"]
+        for name in ch["kv_names"]:
+            put_rows(ins[name], outs[f"{name}_new"][:, :n], p0, n)
 
-        self.loop.run_until_complete(run())
+    def _block(self, ids: list[int]) -> np.ndarray:
+        n, p0 = len(ids), self.pos
+        if not 0 < n <= self.TP or p0 + n > self.L:
+            raise ValueError(f"{p0 + n} positions exceed the {self.L}-row cache")
+        x = self.chunks[0]["in_np"]["x"]
+        x[:] = 0
+        x[0, :, 0, :n] = self.emb[np.asarray(ids, np.int64)].T
+        self._fill_controls(p0, n)
+        prev_y = None
+        for ch in self.chunks:
+            if prev_y is not None:
+                np.copyto(ch["in_np"]["x"], prev_y)
+            B.run([ch["binding"]])
+            self._absorb(ch, n, p0)
+            prev_y = ch["out_np"]["y"]
         self.pos = p0 + n
-        return np.array(d["xb"][1][0, :, 0, :n].T, dtype=np.float32, copy=True)
+        return np.array(prev_y[0, :, 0, :n].T, dtype=np.float32, copy=True)
 
     def prefill(self, token_ids: list[int], prefix: dict | None = None) -> dict:
         ids = [int(t) for t in token_ids]
@@ -300,19 +377,15 @@ class StockRunner:
         return {"calls_ms": calls, "hidden_rows": self._rows, "prefix_tokens": start}
 
     def head_logits(self, hidden_row: np.ndarray) -> tuple[np.ndarray, float]:
-        self.pin["hx"][1][0, :, 0, 0] = np.asarray(hidden_row, np.float16)
+        if self.hx_np is None:
+            raise RuntimeError("LM head is not loaded")
+        self.hx_np[:] = 0
+        self.hx_np[0, :, 0, 0] = np.asarray(hidden_row, np.float16)
         t1 = time.perf_counter()
-
-        async def run():
-            parts = []
-            for sl in self.heads:
-                out = await sl["fn"](inputs={"x": self.pin["hx"][0]})
-                parts.append(np.array(out["logits"].numpy(), dtype=np.float32, copy=True).reshape(-1))
-            return parts
-
-        parts = self.loop.run_until_complete(run())
+        B.run([sl["binding"] for sl in self.heads])
         checked = []
-        for sl, part in zip(self.heads, parts):
+        for sl in self.heads:
+            part = np.array(sl["out_np"]["logits"], dtype=np.float32, copy=True).reshape(-1)
             if part.shape[0] != int(sl["rows"]):
                 raise ValueError(f"{sl['file']} logits {part.shape[0]} != {sl['rows']}")
             checked.append(part)
@@ -373,11 +446,71 @@ def score_words(logits: np.ndarray, ids: dict[str, int], surfaces: list[str]) ->
     return OPTION_WORDS[int(np.argmax(vals))]
 
 
+def _write_json(path: Path, obj: dict) -> None:
+    path.write_text(json.dumps(obj))
+
+
 def run_eval(runner: StockRunner, torch_dir: Path, out_dir: Path) -> dict:
     meta = json.loads((torch_dir / "torch_meta.json").read_text())
     torch_logits = np.load(torch_dir / "torch_final_logits.npy")
     torch_pre = np.load(torch_dir / "torch_pre_norm.npy")
     option_ids = {k: int(v) for k, v in meta["option_ids"].items()}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ids = meta["prompts"][0]["input_ids"]
+    runner.reset()
+    t0 = time.perf_counter()
+    cold = runner.prefill(ids)
+    cold_ms = 1e3 * (time.perf_counter() - t0)
+    warm = []
+    for _ in range(5):
+        runner.reset()
+        t1 = time.perf_counter()
+        runner.prefill(ids)
+        warm.append(1e3 * (time.perf_counter() - t1))
+    prefix = runner.capture_state()
+    t1 = time.perf_counter()
+    hit = runner.prefill(ids, prefix=prefix)
+    prefix_ms = 1e3 * (time.perf_counter() - t1)
+    runner.reset()
+    runner.prefill(ids)
+    decode = []
+    nxt = int(torch_logits[0].argmax())
+    for _ in range(8):
+        t1 = time.perf_counter()
+        block = runner._block([nxt])
+        backbone_ms = 1e3 * (time.perf_counter() - t1)
+        logits, head_ms = runner.head_logits(block[-1])
+        decode.append({"backbone_ms": backbone_ms, "head_ms": head_ms, "token": int(logits.argmax())})
+        nxt = int(logits.argmax())
+    gen_ids = list(meta["prompts"][1]["input_ids"])
+    eos = meta.get("eos_token_id")
+    runner.reset()
+    runner.prefill(gen_ids)
+    produced = []
+    hidden = runner._rows[-1]
+    for _ in range(24):
+        logits, _ms = runner.head_logits(hidden)
+        tok = int(logits.argmax())
+        produced.append(tok)
+        if eos is not None and tok == eos:
+            break
+        hidden = runner._block([tok])[-1]
+    timing = {
+        "prompt": meta["prompts"][0]["name"],
+        "tokens": len(ids),
+        "cold_prefill_ms": round(cold_ms, 2),
+        "cold_calls_ms": [round(x, 2) for x in cold["calls_ms"]],
+        "cached_prefill_ms": [round(x, 2) for x in warm],
+        "cached_prefill_median_ms": round(float(np.median(warm)), 2),
+        "prefix_hit_ms": round(prefix_ms, 2),
+        "prefix_hit_calls": len(hit["calls_ms"]),
+        "decode_steps": [{k: round(v, 2) if isinstance(v, float) else v for k, v in s.items()} for s in decode],
+        "decode_backbone_median_ms": round(float(np.median([s["backbone_ms"] for s in decode])), 2),
+        "decode_head_median_ms": round(float(np.median([s["head_ms"] for s in decode])), 2),
+        "decode_note": "Each decode step is one new token on the p256_2k prefill entry plus 16 LM-head slices.",
+    }
+    print(json.dumps(timing, indent=2)[:4000], flush=True)
+    _write_json(out_dir / "timing_partial.json", timing)
     parity = []
     for i, prompt in enumerate(meta["prompts"]):
         ids = prompt["input_ids"]
@@ -412,7 +545,12 @@ def run_eval(runner: StockRunner, torch_dir: Path, out_dir: Path) -> dict:
             match = ref[:n] == ane[:n]
             row["per_position_top1"] = float(match.mean()) if n else None
             row["per_position_n"] = int(n)
+            print(f"per-position top-1 {row['name']} {row['per_position_top1']:.4f} n={n}", flush=True)
             del row["ane_argmax"]
+    parity_out = [{k: v for k, v in row.items() if k != "ane_argmax"} for row in parity]
+    _write_json(out_dir / "parity_partial.json", {"load_s": round(runner.load_s, 2), "parity": parity_out,
+                                                   "timing": timing, "generation": {"prompt": meta["prompts"][1]["name"],
+                                                                                    "new_token_ids": produced}})
     snake = meta["snake"]
     snake_correct = 0
     snake_spaced = 0
@@ -425,54 +563,16 @@ def run_eval(runner: StockRunner, torch_dir: Path, out_dir: Path) -> dict:
         snake_spaced += int(pred_sp == row["label"])
         snake_vs_torch += int(pred == row["pred"])
         if row["i"] % 32 == 0:
-            print(f"ane snake {row['i']} pred={pred} label={row['label']}", flush=True)
+            done = row["i"] + 1
+            print(f"ane snake {row['i']} pred={pred} label={row['label']} "
+                  f"acc={snake_correct / done:.3f}", flush=True)
+            _write_json(out_dir / "snake_partial.json", {
+                "done": done, "correct": snake_correct, "spaced": snake_spaced, "vs_torch": snake_vs_torch,
+            })
     n = len(snake)
-    # timings on the first parity prompt
-    ids = meta["prompts"][0]["input_ids"]
-    runner.reset()
-    t0 = time.perf_counter()
-    cold = runner.prefill(ids)
-    cold_ms = 1e3 * (time.perf_counter() - t0)
-    warm = []
-    for _ in range(5):
-        runner.reset()
-        t1 = time.perf_counter()
-        runner.prefill(ids)
-        warm.append(1e3 * (time.perf_counter() - t1))
-    prefix = runner.capture_state()
-    t1 = time.perf_counter()
-    hit = runner.prefill(ids, prefix=prefix)
-    prefix_ms = 1e3 * (time.perf_counter() - t1)
-    # one-token decode on the prefill graph
-    runner.reset()
-    runner.prefill(ids)
-    decode = []
-    # continue with the torch final top-1 token, then greedy from the ANE head
-    nxt = int(torch_logits[0].argmax())
-    for _ in range(8):
-        t1 = time.perf_counter()
-        block = runner._block([nxt])
-        backbone_ms = 1e3 * (time.perf_counter() - t1)
-        logits, head_ms = runner.head_logits(block[-1])
-        decode.append({"backbone_ms": backbone_ms, "head_ms": head_ms, "token": int(logits.argmax())})
-        nxt = int(logits.argmax())
-    # short greedy from a fresh prompt, stop at eos or 24 tokens
-    gen_ids = list(meta["prompts"][1]["input_ids"])
-    eos = meta.get("eos_token_id")
-    runner.reset()
-    runner.prefill(gen_ids)
-    produced = []
-    hidden = runner._rows[-1]
-    for _ in range(24):
-        logits, _ms = runner.head_logits(hidden)
-        tok = int(logits.argmax())
-        produced.append(tok)
-        if eos is not None and tok == eos:
-            break
-        hidden = runner._block([tok])[-1]
     report = {
         "load_s": round(runner.load_s, 2),
-        "parity": [{k: v for k, v in row.items() if k != "ane_argmax"} for row in parity],
+        "parity": parity_out,
         "snake": {
             "n": n,
             "ane_bare_accuracy": snake_correct / n,
@@ -480,20 +580,7 @@ def run_eval(runner: StockRunner, torch_dir: Path, out_dir: Path) -> dict:
             "ane_vs_torch_bare": snake_vs_torch / n,
             "torch_bare_accuracy": meta["snake_accuracy"],
         },
-        "timing": {
-            "prompt": meta["prompts"][0]["name"],
-            "tokens": len(ids),
-            "cold_prefill_ms": round(cold_ms, 2),
-            "cold_calls_ms": [round(x, 2) for x in cold["calls_ms"]],
-            "cached_prefill_ms": [round(x, 2) for x in warm],
-            "cached_prefill_median_ms": round(float(np.median(warm)), 2),
-            "prefix_hit_ms": round(prefix_ms, 2),
-            "prefix_hit_calls": len(hit["calls_ms"]),
-            "decode_steps": [{k: round(v, 2) if isinstance(v, float) else v for k, v in s.items()} for s in decode],
-            "decode_backbone_median_ms": round(float(np.median([s["backbone_ms"] for s in decode])), 2),
-            "decode_head_median_ms": round(float(np.median([s["head_ms"] for s in decode])), 2),
-            "decode_note": "Each decode step is one new token on the p256_2k prefill entry plus 16 LM-head slices.",
-        },
+        "timing": timing,
         "generation": {"prompt": meta["prompts"][1]["name"], "new_token_ids": produced},
     }
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -512,9 +599,9 @@ def main(argv=None) -> int:
     p.add_argument("--no-wait", action="store_true")
     args = p.parse_args(argv)
     build = args.build.expanduser().resolve()
+    if (args.compile or not args.placement_only) and not args.no_wait:
+        wait_for_ane()
     if args.compile:
-        if not args.no_wait:
-            wait_for_ane()
         compile_build(build)
     man = json.loads((build / "manifest.json").read_text())
     place = [placement_of(build / c["file"], c["entries"]) for c in man["chunks"]]

@@ -48,20 +48,22 @@ def forward_row(model, input_ids: list[int], device: torch.device):
     def pre_hook(_module, inputs):
         captured["pre"] = inputs[0].detach()
 
-    handle = model.model.language_model.norm.register_forward_pre_hook(pre_hook)
+    def post_hook(_module, _inputs, output):
+        captured["post"] = output.detach()
+
+    norm = model.model.language_model.norm
+    pre_handle = norm.register_forward_pre_hook(pre_hook)
+    post_handle = norm.register_forward_hook(post_hook)
     try:
         tokens = torch.tensor([input_ids], dtype=torch.long, device=device)
         with torch.inference_mode():
             out = model(tokens, use_cache=False, logits_to_keep=len(input_ids))
     finally:
-        handle.remove()
-    logits = out.logits[0].float().cpu().numpy()
+        pre_handle.remove()
+        post_handle.remove()
+    logits = out.logits[0].detach().float().cpu().numpy()
     pre = captured["pre"][0, -1].float().cpu().numpy()
-    post = out.hidden_states[0][0, -1].float().cpu().numpy() if out.hidden_states else None
-    if post is None:
-        post = model.model.language_model.norm(
-            torch.from_numpy(pre).to(device).view(1, 1, -1)
-        )[0, 0].float().cpu().numpy()
+    post = captured["post"][0, -1].float().cpu().numpy()
     return logits, logits.argmax(axis=-1).astype(np.int32), pre, post
 
 
