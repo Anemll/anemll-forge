@@ -31,7 +31,7 @@ class FakeEngine:
         else:
             rest = 0.3 / (n_options - 1)
             probs = [0.7] + [rest] * (n_options - 1)
-        return {"option_probabilities": probs, "calls_ms": [3.25], "head_ms": 0.34,
+        return {"option_probabilities": probs, "calls_ms": [3.25], "call_widths": [256], "head_ms": 0.34,
                 "prefix_tokens": 0 if prefix is None else int(prefix["pos"])}
 
     def capture_state(self):
@@ -160,8 +160,10 @@ class ServerTests(unittest.TestCase):
         self.assertAlmostEqual(answer["confidence"], 0.55)
         self.assertEqual(body["usage"], {"input_tokens": 3, "output_tokens": 0, "orders": 1})
         timing = body["timings"]
-        self.assertEqual(set(timing) , {"tokenize_ms", "calls_ms", "prefill_ms", "head_ms", "total_ms", "questions"})
+        self.assertEqual(set(timing), {"tokenize_ms", "calls_ms", "call_widths", "prefill_ms", "head_ms", "total_ms",
+                                       "questions"})
         self.assertEqual(timing["calls_ms"], [3.25])
+        self.assertEqual(timing["call_widths"], [256])
         self.assertEqual(timing["prefill_ms"], 3.25)
         self.assertEqual(timing["head_ms"], 0.34)
         self.assertGreaterEqual(timing["total_ms"], 0)

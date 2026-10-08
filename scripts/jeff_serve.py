@@ -312,6 +312,7 @@ class App:
         timing = {
             "tokenize_ms": round(tokenize_ms, 2),
             "calls_ms": [round(value, 2) for value in calls],
+            "call_widths": [int(value) for value in raw.get("call_widths", [])],
             "prefill_ms": round(sum(calls), 2),
             "head_ms": round(float(raw["head_ms"]), 2),
             "tokens": len(ids),
@@ -354,6 +355,7 @@ class App:
             "timings": {
                 "tokenize_ms": round(sum(part["tokenize_ms"] for part in parts), 2),
                 "calls_ms": calls,
+                "call_widths": [value for part in parts for value in part["call_widths"]],
                 "prefill_ms": round(sum(part["prefill_ms"] for part in parts), 2),
                 "head_ms": round(sum(part["head_ms"] for part in parts), 2),
                 "total_ms": round(1e3 * (time.perf_counter() - started), 2),
@@ -366,6 +368,7 @@ def _merge_timing(first: dict, second: dict) -> dict:
     return {
         "tokenize_ms": round(first["tokenize_ms"] + second["tokenize_ms"], 2),
         "calls_ms": first["calls_ms"] + second["calls_ms"],
+        "call_widths": first["call_widths"] + second["call_widths"],
         "prefill_ms": round(first["prefill_ms"] + second["prefill_ms"], 2),
         "head_ms": round(first["head_ms"] + second["head_ms"], 2),
         "tokens": first["tokens"] + second["tokens"],
@@ -428,6 +431,7 @@ class CoreAIEngine:
             raise RuntimeError(f"runtime returned {len(probs)} probabilities for {n_options} options")
         calls = [float(value) for value in raw["calls_ms"]]
         return {"option_probabilities": probs, "calls_ms": calls, "head_ms": float(raw["head_ms"]),
+                "call_widths": [int(value) for value in raw.get("call_widths", [])],
                 "prefix_tokens": int(raw.get("prefix_tokens", 0))}
 
     def capture_state(self):

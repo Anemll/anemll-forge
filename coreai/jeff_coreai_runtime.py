@@ -218,11 +218,12 @@ class JeffCoreAI:
         self._token_ids = ids
         keep = [[] for _ in self.chunks] if keep_chunks else None
         t0 = time.perf_counter()
-        calls = []
+        calls, widths = [], []
         for i in range(start, len(ids), self.TP):
             t1 = time.perf_counter()
             last = self._block(ids[i:i + self.TP], keep)
             calls.append(1e3 * (time.perf_counter() - t1))
+            widths.append(self.TP)
         if last is None:
             raise ValueError("prefix covers the prompt but has no hidden state")
         self._last_hidden = last
@@ -230,7 +231,7 @@ class JeffCoreAI:
         self.pin["hx"][1][:] = last
         logits = self.loop.run_until_complete(self._head())
         head_ms = 1e3 * (time.perf_counter() - t1)
-        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls,
+        r = {"logits": logits, "hidden": last.reshape(-1).astype(np.float32), "calls_ms": calls, "call_widths": widths,
              "head_ms": head_ms, "total_ms": 1e3 * (time.perf_counter() - t0),
              "prefix_tokens": start}
         if keep is not None:
@@ -257,6 +258,7 @@ class JeffCoreAI:
             "tokens": len(token_ids),
             "calls": len(r["calls_ms"]),
             "calls_ms": [round(t, 2) for t in r["calls_ms"]],
+            "call_widths": list(r["call_widths"]),
             "head_ms": round(r["head_ms"], 2),
             "prefill_ms": round(r["total_ms"], 2),
             "prefix_tokens": int(r["prefix_tokens"]),

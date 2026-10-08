@@ -599,13 +599,27 @@ async function decide(body) {
   return payload;
 }
 
+// "4 × 256" or "512 + 256": the compiled widths of the prefill calls, runs of one width grouped.
+function widthText(widths) {
+  const runs = [];
+  for (const w of widths) {
+    if (runs.length && runs[runs.length - 1].w === w) runs[runs.length - 1].n += 1;
+    else runs.push({ w, n: 1 });
+  }
+  return runs.map(({ w, n }) => (n > 1 || runs.length === 1 ? `${n} × ${w}` : `${w}`)).join(" + ");
+}
+
 // Two lines: what ran (adapter, tokens, prefill calls), then where the time went.
 function showTiming(prefix, payload, label) {
   const timing = payload.timings || {};
   const calls = timing.calls_ms || [];
+  const widths = timing.call_widths || [];
   document.getElementById(`${prefix}ms`).textContent = Math.round(timing.total_ms ?? 0);
   const [what, where] = document.getElementById(`${prefix}timing`).children;
-  what.textContent = `${label} · ${payload.usage.input_tokens} tokens · ${calls.length} prefill ${calls.length === 1 ? "call" : "calls"}`;
+  const prefill = widths.length === calls.length && widths.length
+    ? `prefill ${widthText(widths)} wide (${widths.reduce((a, b) => a + b, 0)} rows)`
+    : `${calls.length} prefill ${calls.length === 1 ? "call" : "calls"}`;
+  what.textContent = `${label} · ${payload.usage.input_tokens} tokens · ${prefill}`;
   where.textContent = `tokenize ${timing.tokenize_ms} ms · prefill ${timing.prefill_ms} ms · head ${timing.head_ms} ms`;
 }
 
