@@ -243,7 +243,7 @@ Eight self-play games from the same openings, through `jeff-serve` on `127.0.0.1
 | base | 0.12 (1 total) | 3.0 | 32 | 67.0 ms |
 | snake | 0.25 (2 total) | 3.5 | 36 | 67.7 ms |
 
-Neither adapter survived to the 48-step cap. `/health` lists `adapters: ["base", "snake"]`, and `/v1/models` includes `snake`, which is what the demo dropdown reads.
+Neither adapter survived to the 48-step cap. That measurement used a server whose `/health` listed `base` and `snake`. The same port now also loads the four published builds below, and the dropdown reads whatever `/health` returns.
 
 Snake rows for a machine that can run upstream `jeff-train` use the adapter-kit shape (`id`, `suite`, `family`, `state`, `question`, `label`, `target`, `source`). `generate_kit_rows` writes that shape from the same oracle. One game is one family, so `jeff-kit split` can hold a game out. Upstream `jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6` is the trainer in `jeff-src`. It calls `torch.cuda` before the first step, so it does not start on this Mac. The sample here is the MPS run above, with the same rank, alpha, and the two learning rates. `mlx_lora.py` applies PEFT adapters at serve time. It does not train.
 
@@ -272,7 +272,7 @@ uv run jeff-train --lora-rank 16 --lr 2e-4 --readout-lr 5e-6 \
 
 `inspect_coreai_cache.py --executable python --strict` reports every chunk and `head_readout` as `fully_ane` for each of the four builds (bonded mode 1, one ANE region, no GPU region). The eight labeled rows all matched their gold choice on the merged PyTorch checkpoint.
 
-The same four examples on base Jeff, at the base temperature, pick a different top option or a much lower confidence: triage `other` 0.60 versus adapter `k1` 1.00; tools `t3` 0.53 versus adapter `answer_directly` 0.68; guard `indirect_injection` 0.53 versus adapter 1.00; spam `spam` 0.49 versus adapter `phishing` 0.97. The demo dropdown loads that example for the selected adapter and scores it on base as well.
+The same four official examples on base Jeff, at the base temperature, pick a different top option or a much lower confidence: triage `other` 0.60 versus adapter `k1` 1.00; tools `t3` 0.53 versus adapter `answer_directly` 0.68; guard `indirect_injection` 0.53 versus adapter 1.00; spam `spam` 0.49 versus adapter `phishing` 0.97. The demo dropdown loads a sample for the selected adapter and scores that question on base as well. On `127.0.0.1:8787` those page requests were triage `k1` 0.998 versus base `other` 0.392, tools `answer_directly` 0.650 versus base `t3` 0.453, guard `indirect_injection` 0.995 versus base `benign` 0.309, and spam `phishing` 0.939 versus base `spam` 0.242. The Snake opening on that server was base `up` at 0.117 and the snake adapter `left` at 0.222. `/health` lists `base`, `snake`, `triage`, `tools`, `guard`, and `spam`.
 
 ```sh
 python scripts/jeff_peft_torch.py \
