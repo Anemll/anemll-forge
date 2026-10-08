@@ -20,7 +20,7 @@ import torch
 from safetensors.torch import load_file
 
 TARGET_SUFFIXES = (
-    "in_proj_qkv", "in_proj_z", "out_proj",
+    "in_proj_qkv", "in_proj_z", "in_proj_a", "in_proj_b", "out_proj",
     "q_proj", "k_proj", "v_proj", "o_proj",
     "gate_proj", "up_proj", "down_proj",
 )
