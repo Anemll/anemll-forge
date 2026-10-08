@@ -245,6 +245,35 @@ Same token ids (port checked against upstream `jeff/model.py` on every row; unit
 
 FP16 stays the default: a 0.8B model has no memory pressure, and INT8 buys no speed.
 
+### W8A8
+
+`--quant int8` is weight-only. Chunk `L00-03` has 25 `coreai.blockwise_shift_scale` ops (INT8 weights, per-output-channel f16 scales) and each one returns f16. The following `coreai.conv2d` is f16 × f16. That chunk has 34 conv2d, 0 `quantize`, 0 `dequantize`, and 0 `f8E4M3`. The same counts hold for the other five chunks. The multiply-adds in that MIL are FP16, which is why the end-to-end speed matches the FP16 build.
+
+A fused INT8 multiply-add on this M5 is a constant-scale `quantize` / `dequantize` pair (zero point 0) on the activation, with the weight a compile-time INT8 constant. An isolated conv, 512 rows × 4096, stack of 2, all fully on the ANE:
+
+| Graph | Call | TOPS | vs torch |
+| --- | ---: | ---: | --- |
+| Per-tensor activation scale | 1.68 ms | 20.5 | within one bin |
+| Per-channel scale inside `quantize` | 2.31 ms | 14.9 | up to 11 bins |
+| Per-channel absolute max folded into the weight, then step 1/127 | 1.86 ms | 18.5 | max \|d\| 0.003 |
+
+The direct per-channel `quantize` stays on the ANE and is the slower kernel. The folded form keeps the scalar pair. MIL still types the conv as f16 × f16; the fusion happens in the ANE compiler. `/Library/Caches/com.apple.aned` is mode 700, so the HWX kernel format was not read. FP8 e4m3 is rejected on this M5 (`E4M3 not supported as kernel format on this architecture`, the probe places on the GPU). There is no FP8 Jeff build.
+
+One absolute max for a whole tensor is a poor scale here. On the 238-token prompt the layer-0 down-projection input has median absolute value 0.014 and max 3.94. That per-tensor build (`/Users/anemll/Models/jeff-coreai-w8a8`) is fully on the ANE and 51 ms per 256-row call, and the answers are wrong.
+
+`--quant w8a8` now records a per-channel absolute max on the 238 / 1,008 / 2,018-token prompts, folds it into the INT8 weight, and quantizes the divided activation at step 1/127. Query and key skip the output quantize: an output quantize in front of RoPE makes this M5's ANEC abort with "Must be connected" and the whole chunk leaves the ANE. Every chunk's MIL: 39 scalar `quantize` to si8, 39 `dequantize` to f16, 25 `blockwise_shift_scale`, 34 `conv2d`, 0 fp8. Shared input quantizes (q/k/v, gate/up) are commoned, which is why 39 is less than one pair per projection. Build `/Users/anemll/Models/jeff-coreai-w8a8pc`, 84 MB per chunk, `fully_ane` (`mps.fullyPlacedOnANE`, `mps.noGPUActivity`).
+
+Same harness as the rows above (median of 5). `jeff_serve` was resident under 1% CPU and no other ANE compile was running.
+
+| Build | MB/chunk | 256-row call | rows/s | 238 tok | 1,008 tok | 2,018 tok |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| FP16 `w256` | 166.4 | 60.2 ms | 4,250 | 60.2 ms, KL 4.6e-6, \|Δp\| 0.0012, C = C | 240 ms, 6.6e-4, 0.0091, B = B | 482 ms, 8.3e-4, 0.013, B vs A |
+| INT8 weight-only | 84.1 | 59.7 ms | 4,288 | 59.5 ms, 3.2e-4, 0.011, C = C | 240 ms, 2.2e-3, 0.019, B = B | 477 ms, 2.8e-3, 0.022, B vs A |
+| W8A8 per-tensor | 83.8 | 50.9 ms | 5,027 | 51.2 ms, 0.50, 0.29, D vs C | 208 ms, 1.24, 0.26, D vs B | 417 ms, 1.14, 0.22, I vs A |
+| W8A8 folded per-channel | 84.0 | 58.2 ms | 4,398 | 58.4 ms, 9.3e-3, 0.047, C = C | 232 ms, 0.084, 0.11, B = B | 463 ms, 0.135, 0.11, A = A |
+
+The folded build picks the HF top answer on all three prompts, including the 2,018-token near-tie. Its KL is about 20× to 100× the FP16 build, and the 256-row call is 58 ms against 60 ms. The chunk is dominated by the DeltaNet and attention elementwise work, so the 18 TOPS kernel does not show up end to end. FP16 stays the serve default.
+
 The 1.3 base without an adapter is uncertain on these rows (top probability 0.25–0.46). Parity on adapter-served prompts, where Jeff is confident, is still to be measured.
 
 ### Where the FP16 error comes from
