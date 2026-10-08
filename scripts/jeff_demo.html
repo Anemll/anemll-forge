@@ -35,7 +35,7 @@
   .kicker { margin: 0; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; }
   h1 { margin: 4px 0 0; font-size: 40px; font-weight: 650; letter-spacing: -0.03em; }
   h2 { margin: 0 0 8px; font-size: 22px; }
-  #health { color: var(--muted); text-align: right; font-size: 14px; }
+  #health { color: var(--muted); text-align: right; font-size: 14px; width: 280px; height: 4.4em; overflow: hidden; }
   #health strong { color: var(--ink); font-weight: 600; }
   main { display: grid; gap: 16px; padding-bottom: 40px; }
   section {
@@ -44,9 +44,41 @@
     border-radius: 16px;
     padding: 18px;
   }
-  #game { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: start; }
+  #game { display: flex; flex-direction: column; gap: 12px; }
+  .controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+    min-width: 560px;
+    overflow: hidden;
+  }
+  .controls h2 { margin: 0; flex: 0 0 auto; }
+  .controls label { flex: 0 0 auto; }
+  .controls select { flex: 0 0 148px; width: 148px; height: 36px; }
+  .controls button { flex: 0 0 auto; height: 36px; }
+  #game-blurb {
+    height: 1.45em;
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    min-width: 280px;
+  }
+  .play { display: grid; grid-template-columns: 332px minmax(280px, 1fr); gap: 22px; align-items: start; }
+  .readout {
+    min-width: 280px;
+    display: grid;
+    grid-template-rows: 64px 1.8em 2.9em 148px 4.6em;
+    gap: 8px;
+    align-content: start;
+  }
+  .readout > * { min-width: 0; min-height: 0; }
   .board {
     display: grid;
+    width: 332px;
+    height: 332px;
     grid-template-columns: repeat(8, 36px);
     grid-template-rows: repeat(8, 36px);
     gap: 4px;
@@ -58,16 +90,35 @@
   .cell.h { background: var(--accent); }
   .cell.b { background: var(--body); }
   .cell.f { background: var(--food); }
-  .latency { font-variant-numeric: tabular-nums; }
+  .latency { height: 64px; overflow: hidden; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .latency span { font-size: 64px; letter-spacing: -0.04em; line-height: 0.9; }
   .latency small { color: var(--muted); margin-left: 6px; font-size: 16px; }
-  .meta { color: var(--muted); margin: 6px 0 12px; min-height: 1.4em; }
-  .scroll-box { overflow-y: auto; overscroll-behavior: contain; }
-  #timing { height: 2.9em; overflow-y: auto; }
+  .meta { color: var(--muted); margin: 6px 0 12px; }
+  .scroll-box { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; min-width: 240px; }
+  #scoreline { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
+  #timing { height: 2.9em; margin: 0; }
   #bars, #route-bars { height: 148px; }
-  #status { height: 4.6em; margin: 6px 0 12px; color: var(--muted); }
+  #status { height: 4.6em; margin: 0; color: var(--muted); }
   #status p { margin: 0 0 4px; }
-  .bar { display: grid; grid-template-columns: 72px 1fr 52px; gap: 8px; align-items: center; margin: 6px 0; }
+  #route-blurb, #route-choice, #route-base, #route-ms {
+    height: 2.9em;
+    margin: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-width: 240px;
+  }
+  #route-ms { display: inline-block; height: 1.45em; line-height: 36px; white-space: nowrap; }
+  .bar {
+    display: grid;
+    grid-template-columns: minmax(88px, 40%) minmax(80px, 1fr) 52px;
+    gap: 8px;
+    align-items: center;
+    height: 28px;
+    min-width: 240px;
+    margin: 0 0 6px;
+    overflow: hidden;
+  }
+  .bar .name, .bar span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .track { height: 10px; background: #0c100c; border-radius: 99px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); width: 0; }
   .bar.chosen .name { color: var(--accent); }
@@ -84,8 +135,12 @@
   button:hover { border-color: var(--accent); }
   textarea {
     width: 100%;
+    min-width: 240px;
+    height: 88px;
     min-height: 88px;
-    resize: vertical;
+    max-height: 88px;
+    resize: none;
+    overflow-y: auto;
     background: #0c100c;
     color: var(--ink);
     border: 1px solid var(--line);
@@ -93,14 +148,14 @@
     padding: 12px;
     font: inherit;
   }
-  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-  .row { display: flex; gap: 8px; align-items: center; }
-  #route-choice { margin-top: 12px; font-size: 18px; }
+  .examples { display: flex; flex-wrap: nowrap; gap: 8px; margin: 10px 0; height: 44px; overflow-x: auto; overflow-y: hidden; }
+  .row { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; height: 44px; }
+  #route-choice { font-size: 18px; }
   @media (max-width: 760px) {
-    #game { grid-template-columns: 1fr; }
+    .play { grid-template-columns: 1fr; }
     header { flex-direction: column; align-items: start; }
-    #health { text-align: left; }
-    .board { grid-template-columns: repeat(8, minmax(0, 1fr)); width: min(100%, 360px); }
+    #health { text-align: left; width: 100%; }
+    .board { grid-template-columns: repeat(8, minmax(0, 1fr)); width: min(100%, 332px); height: auto; }
     .cell { aspect-ratio: 1; }
   }
 </style>
@@ -115,29 +170,30 @@
 </header>
 <main>
   <section id="game">
-    <div>
+    <div class="controls" id="controls">
       <h2>Snake</h2>
-      <p class="meta">Every move is one decision. Base has no task adapter. Snake is a LoRA merged into its own ANE build.</p>
-      <p class="row">
-        <label for="adapter">Adapter</label>
-        <select id="adapter" aria-label="Decision adapter">
-          <option value="base">base</option>
-        </select>
-      </p>
-      <div class="board" id="board" aria-label="Snake board"></div>
-    </div>
-    <div>
-      <div class="latency"><span id="ms">—</span><small>ms total</small></div>
-      <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
-      <p class="meta scroll-box" id="timing">Waiting for the first decision.</p>
-      <div id="bars" class="scroll-box"></div>
-      <div id="status" class="scroll-box" role="log" aria-live="polite"></div>
+      <label for="adapter">Adapter</label>
+      <select id="adapter" aria-label="Decision adapter">
+        <option value="base">base</option>
+      </select>
       <button id="toggle" type="button">Pause</button>
+      <button id="reset" type="button">Reset</button>
+    </div>
+    <p class="meta" id="game-blurb">Every move is one decision. Base has no task adapter. Snake is a LoRA merged into its own ANE build.</p>
+    <div class="play">
+      <div class="board" id="board" aria-label="Snake board"></div>
+      <div class="readout">
+        <div class="latency"><span id="ms">—</span><small>ms total</small></div>
+        <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
+        <p class="meta scroll-box" id="timing">Waiting for the first decision.</p>
+        <div id="bars" class="scroll-box"></div>
+        <div id="status" class="scroll-box" role="log" aria-live="polite"></div>
+      </div>
     </div>
   </section>
   <section id="route">
     <h2 id="route-title">Route a message</h2>
-    <p class="meta" id="route-blurb">One choice question on the base build. Pick another adapter to load that adapter's sample.</p>
+    <p class="meta scroll-box" id="route-blurb">One choice question on the base build. Pick another adapter to load that adapter's sample.</p>
     <textarea id="ticket">I sent the jacket back two weeks ago and still have not seen the money.</textarea>
     <div class="examples">
       <button type="button" data-text="I sent the jacket back two weeks ago and still have not seen the money.">Refund</button>
@@ -147,11 +203,11 @@
     </div>
     <div class="row">
       <button id="classify" type="button">Classify</button>
-      <span class="meta" id="route-ms"></span>
+      <span class="meta scroll-box" id="route-ms"></span>
     </div>
     <div id="route-bars" class="scroll-box"></div>
-    <div id="route-choice"></div>
-    <div class="meta" id="route-base"></div>
+    <div id="route-choice" class="scroll-box"></div>
+    <div class="meta scroll-box" id="route-base"></div>
   </section>
 </main>
 <script>
@@ -477,6 +533,11 @@ document.getElementById("toggle").addEventListener("click", () => {
   playing = !playing;
   document.getElementById("toggle").textContent = playing ? "Pause" : "Play";
   if (playing) step();
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  resetSnake();
+  logStatus("Board reset.");
 });
 
 document.getElementById("classify").addEventListener("click", async () => {
