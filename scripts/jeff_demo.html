@@ -158,8 +158,14 @@
     grid-template-columns: repeat(10, 16px); grid-template-rows: repeat(20, 16px);
     gap: 2px; background: #0c100c; padding: 8px; border-radius: 12px;
   }
-  .tcell { border-radius: 3px; background: #232b21; }
-  .tcell.on { background: var(--accent); }
+  .tcell { border-radius: 2px; background: #232b21; border: 1px solid rgba(255, 255, 255, 0.14); }
+  .tcell.I { background: #00f0f0; }
+  .tcell.O { background: #f0f000; }
+  .tcell.T { background: #a000f0; }
+  .tcell.S { background: #00f000; }
+  .tcell.Z { background: #f00000; }
+  .tcell.J { background: #0000f0; }
+  .tcell.L { background: #f0a000; }
   .next-piece {
     width: 72px; height: 72px; display: grid;
     grid-template-columns: repeat(4, 16px); grid-template-rows: repeat(4, 16px);
@@ -704,11 +710,11 @@ function tDropRow(board, shape, col) {
   return row;
 }
 
-function tPaint(board, shape, row, col) {
+function tPaint(board, shape, row, col, piece) {
   const next = board.map((line) => line.slice());
   for (const [dr, dc] of shape) {
     const r = row + dr;
-    if (r >= 0) next[r][col + dc] = 1;
+    if (r >= 0) next[r][col + dc] = piece;
   }
   return next;
 }
@@ -743,7 +749,7 @@ function tPlacements(board, piece) {
     for (let col = 0; col <= T_W - width; col += 1) {
       const row = tDropRow(board, shape, col);
       if (row === null) continue;
-      const cleared = tClear(tPaint(board, shape, row, col));
+      const cleared = tClear(tPaint(board, shape, row, col, piece));
       const holes = tHoles(cleared.board);
       const cols = shape.map((cell) => col + cell[1]);
       const lo = Math.min(...cols);
@@ -772,17 +778,30 @@ function tDrawCells(host, board, rows, cols) {
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
       const cell = document.createElement("div");
-      cell.className = "tcell" + (board[r] && board[r][c] ? " on" : "");
+      const kind = board[r] && board[r][c];
+      cell.className = "tcell" + (kind ? ` ${kind}` : "");
       host.appendChild(cell);
     }
   }
 }
 
+function tWithFalling(board, piece) {
+  const view = board.map((line) => line.slice());
+  const shape = T_PIECES[piece][0];
+  const width = Math.max(...shape.map((cell) => cell[1])) + 1;
+  const col = Math.floor((T_W - width) / 2);
+  for (const [dr, dc] of shape) {
+    const r = dr;
+    const c = col + dc;
+    if (r >= 0 && r < T_H && c >= 0 && c < T_W && !view[r][c]) view[r][c] = piece;
+  }
+  return view;
+}
+
 function tDraw() {
-  tDrawCells(document.getElementById("tetris-board"), tBoard, T_H, T_W);
-  const preview = tEmpty().slice(0, 4).map((line) => line.slice(0, 4));
-  const shape = T_PIECES[tNext][0];
-  for (const [dr, dc] of shape) preview[dr][dc] = 1;
+  tDrawCells(document.getElementById("tetris-board"), tWithFalling(tBoard, tPiece), T_H, T_W);
+  const preview = Array.from({ length: 4 }, () => Array(4).fill(0));
+  for (const [dr, dc] of T_PIECES[tNext][0]) preview[dr][dc] = tNext;
   tDrawCells(document.getElementById("tetris-next"), preview, 4, 4);
   document.getElementById("tetris-score").textContent = `Lines ${tLines} · pieces ${tPieces}`;
 }
