@@ -127,7 +127,8 @@
   .meta { color: var(--muted); margin: 6px 0 12px; }
   .scroll-box { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; min-width: 240px; }
   #scoreline { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
-  #timing { height: 2.9em; margin: 0; }
+  .timing { height: 2.9em; margin: 0; overflow: hidden; min-width: 240px; font-variant-numeric: tabular-nums; }
+  .timing span { display: block; height: 1.45em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #bars, #route-bars { height: 148px; }
   #status { height: 4.6em; margin: 0; color: var(--muted); }
   #status p { margin: 0 0 4px; }
@@ -218,7 +219,7 @@
     grid-template-columns: repeat(4, 16px); grid-template-rows: repeat(4, 16px);
     gap: 2px;
   }
-  #tetris-readout { min-width: 280px; display: grid; grid-template-rows: 64px 1.8em 180px 4.6em; gap: 8px; align-content: start; }
+  #tetris-readout { min-width: 280px; display: grid; grid-template-rows: 64px 1.8em 2.9em 180px 4.6em; gap: 8px; align-content: start; }
   #tetris-readout > * { min-width: 0; min-height: 0; }
   #tetris-score { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
   #tetris-bars { height: 180px; }
@@ -261,7 +262,7 @@
         <div class="latency"><span id="ms">—</span><small>ms total</small></div>
         <p id="move">Move: —</p>
         <p class="meta" id="scoreline">Food eaten 0 · best 0</p>
-        <p class="meta scroll-box" id="timing">Waiting for the first decision.</p>
+        <p class="meta timing" id="timing"><span>Waiting for the first decision.</span><span></span></p>
         <div id="bars" class="scroll-box"></div>
         <div id="status" class="scroll-box" role="log" aria-live="polite"></div>
       </div>
@@ -291,6 +292,7 @@
       <div id="tetris-readout">
         <div class="latency"><span id="tetris-ms">—</span><small>ms total</small></div>
         <p class="meta" id="tetris-score">Lines 0 · pieces 0</p>
+        <p class="meta timing" id="tetris-timing"><span>Waiting for the first decision.</span><span></span></p>
         <div id="tetris-bars" class="scroll-box"></div>
         <div id="tetris-status" class="scroll-box" role="log" aria-live="polite"></div>
       </div>
@@ -595,12 +597,21 @@ async function decide(body) {
   return payload;
 }
 
-function showTiming(payload, label) {
+// Two lines: what ran (adapter, tokens, prefill calls), then where the time went.
+function showTiming(prefix, payload, label) {
   const timing = payload.timings || {};
-  const calls = (timing.calls_ms || []).join(" + ");
-  document.getElementById("ms").textContent = Math.round(timing.total_ms ?? 0);
-  document.getElementById("timing").textContent =
-    `${label} · ${payload.usage.input_tokens} tokens · tokenize ${timing.tokenize_ms} ms · prefill ${calls || "—"} ms · head ${timing.head_ms} ms`;
+  const calls = timing.calls_ms || [];
+  document.getElementById(`${prefix}ms`).textContent = Math.round(timing.total_ms ?? 0);
+  const [what, where] = document.getElementById(`${prefix}timing`).children;
+  what.textContent = `${label} · ${payload.usage.input_tokens} tokens · ${calls.length} prefill ${calls.length === 1 ? "call" : "calls"}`;
+  where.textContent = `tokenize ${timing.tokenize_ms} ms · prefill ${timing.prefill_ms} ms · head ${timing.head_ms} ms`;
+}
+
+function clearTiming(prefix) {
+  document.getElementById(`${prefix}ms`).textContent = "—";
+  const [what, where] = document.getElementById(`${prefix}timing`).children;
+  what.textContent = "Waiting for the first decision.";
+  where.textContent = "";
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -614,7 +625,7 @@ async function step() {
     const payload = await decide(snakeRequest());
     if (generation !== sGeneration) return;
     const answer = payload.answers.move;
-    showTiming(payload, payload.adapter || adapter);
+    showTiming("", payload, payload.adapter || adapter);
     bars("bars", answer.probabilities, answer.choice);
     document.getElementById("scoreline").textContent = `Food eaten ${score} · best ${best}`;
     const delta = DIRS[answer.choice];
@@ -923,7 +934,7 @@ function tReset() {
   tNext = tRandomPiece();
   tOver = false;
   document.getElementById("tetris-over").hidden = true;
-  document.getElementById("tetris-ms").textContent = "—";
+  clearTiming("tetris-");
   document.getElementById("tetris-bars").replaceChildren();
   document.getElementById("tetris-status").replaceChildren();
   tDraw();
@@ -984,7 +995,7 @@ async function tStep() {
     });
     if (generation !== tGeneration) return;
     const answer = payload.answers.move;
-    document.getElementById("tetris-ms").textContent = Math.round((payload.timings || {}).total_ms ?? 0);
+    showTiming("tetris-", payload, payload.adapter || which);
     const ranked = Object.entries(answer.probabilities)
       .map(([key, value]) => ({ key, value, text: criteria[key] || key }))
       .sort((a, b) => b.value - a.value)
