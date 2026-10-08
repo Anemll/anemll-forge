@@ -102,6 +102,20 @@ try {
   check("snake reset clears target", afterReset.target === null && afterReset.move === "Move: —" && afterReset.len === 3,
     JSON.stringify(afterReset));
 
+  const cachedLines = await page.evaluate(() => {
+    const saved = [...document.querySelectorAll("#tetris-timing span")].map((s) => s.textContent);
+    showTiming("tetris-", {
+      usage: { input_tokens: 821 },
+      timings: { tokenize_ms: 1, calls_ms: [40, 11], call_widths: [512, 256], prefill_ms: 51, head_ms: 0.5,
+                 total_ms: 53, questions: [{ prefix_tokens: 136 }] },
+    }, "tetris");
+    const lines = [...document.querySelectorAll("#tetris-timing span")].map((s) => s.textContent);
+    document.querySelectorAll("#tetris-timing span").forEach((s, i) => { s.textContent = saved[i]; });
+    return lines;
+  });
+  check("timing lines: prefilled tokens exclude the prefix cache", cachedLines[0] === "tetris · 821 tokens · 136 from the prefix cache"
+    && cachedLines[1] === "tokenize 1.0 · prefill 685 tok (512 + 256) 51.0 ms · head 0.5 · server other 0.5 ms", JSON.stringify(cachedLines));
+
   // Tetris: play, then Reset mid-game while a request is in flight.
   await page.click("#tetris-toggle");
   await waitFor(() => tPieces >= 3);
