@@ -125,6 +125,12 @@
   .latency span { font-size: 64px; letter-spacing: -0.04em; line-height: 0.9; }
   .latency small { color: var(--muted); margin-left: 6px; font-size: 16px; }
   .latency small.avg { font-size: 13px; margin-left: 10px; opacity: 0.85; }
+  .stages { display: grid; grid-template-columns: repeat(6, max-content); gap: 0 14px; height: 48px; margin: 0;
+            overflow: hidden; font-size: 12px; line-height: 1.3; color: var(--muted); font-variant-numeric: tabular-nums;
+            white-space: nowrap; }
+  .stages span { text-align: right; }
+  .stages span.head { opacity: 0.7; }
+  .stages span:nth-child(6n + 1) { text-align: left; }
   .meta { color: var(--muted); margin: 6px 0 12px; }
   .scroll-box { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; min-width: 240px; }
   #scoreline { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
@@ -220,7 +226,7 @@
     grid-template-columns: repeat(4, 16px); grid-template-rows: repeat(4, 16px);
     gap: 2px;
   }
-  #tetris-readout { min-width: 280px; display: grid; grid-template-rows: 64px 1.8em 2.9em 180px 4.6em; gap: 8px; align-content: start; }
+  #tetris-readout { min-width: 280px; display: grid; grid-template-rows: 64px 48px 1.8em 2.9em 180px 4.6em; gap: 8px; align-content: start; }
   #tetris-readout > * { min-width: 0; min-height: 0; }
   #tetris-score { height: 1.8em; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 240px; }
   #tetris-bars { height: 180px; }
@@ -292,6 +298,8 @@
       <div class="next-piece" id="tetris-next" aria-label="Next piece"></div>
       <div id="tetris-readout">
         <div class="latency"><span id="tetris-ms">—</span><small>ms total</small><small class="avg" id="tetris-avg"></small></div>
+        <div class="stages" id="tetris-stages" aria-label="Time per move by stage, last move and game average"
+             title="other = browser wall time minus tokenize, prefill and head (server bookkeeping, queueing, JSON, network)"></div>
         <p class="meta" id="tetris-score">Lines 0 · pieces 0</p>
         <p class="meta timing" id="tetris-timing"><span>Waiting for the first decision.</span><span></span></p>
         <div id="tetris-bars" class="scroll-box"></div>
@@ -584,6 +592,7 @@ function resetSnake() {
 }
 
 async function decide(body) {
+  const started = performance.now();
   const response = await fetch("/v1/systemone", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -596,6 +605,7 @@ async function decide(body) {
     error.status = response.status;
     throw error;
   }
+  payload.wall_ms = performance.now() - started;
   return payload;
 }
 
@@ -627,20 +637,65 @@ function showTiming(prefix, payload, label) {
   where.textContent = `tokenize ${ms(timing.tokenize_ms)} · ANE prefill ${ms(timing.prefill_ms)}${each} · head ${ms(timing.head_ms)} · other ${ms(other)} ms`;
 }
 
-// Mean server total over the moves of the game in progress, per panel ("" Snake, "tetris-" Tetris).
-const moveTimes = { "": { sum: 0, n: 0 }, "tetris-": { sum: 0, n: 0 } };
+// Mean server total over the moves of the game in progress, per panel ("" Snake, "tetris-" Tetris), and the
+// per-stage sums behind the stage table of a panel that has one.
+const STAGE_KEYS = ["tok", "pre", "calls", "head", "other", "wall"];
+const noStages = () => Object.fromEntries(STAGE_KEYS.map((key) => [key, 0]));
+const moveTimes = {
+  "": { sum: 0, n: 0, stages: noStages(), last: null },
+  "tetris-": { sum: 0, n: 0, stages: noStages(), last: null },
+};
+
+// other = browser wall time minus the three server stages: server bookkeeping, queueing, JSON and the network.
+function moveStages(payload) {
+  const timing = payload.timings || {};
+  const tok = Number(timing.tokenize_ms) || 0;
+  const pre = Number(timing.prefill_ms) || 0;
+  const head = Number(timing.head_ms) || 0;
+  const wall = Number(payload.wall_ms) || Number(timing.total_ms) || 0;
+  return { tok, pre, calls: (timing.calls_ms || []).length, head, other: Math.max(0, wall - tok - pre - head), wall };
+}
+
+function showStages(prefix) {
+  const box = document.getElementById(`${prefix}stages`);
+  if (!box) return;
+  const { stages, last, n } = moveTimes[prefix];
+  if (!n) {
+    box.replaceChildren();
+    return;
+  }
+  const f = (v) => (v >= 100 ? `${Math.round(v)}` : v.toFixed(1));
+  const avgCalls = stages.calls / n;
+  const row = (label, s, calls) => [label, f(s.tok), `${f(s.pre)} (${calls})`, f(s.head), f(s.other), f(s.wall)];
+  const avg = Object.fromEntries(STAGE_KEYS.map((key) => [key, stages[key] / n]));
+  const cells = [
+    "ms", "tokenize", "prefill (calls)", "head", "other", "wall",
+    ...row("last", last, last.calls),
+    ...row(`avg ${n}`, avg, Number.isInteger(avgCalls) ? avgCalls : avgCalls.toFixed(1)),
+  ];
+  box.replaceChildren(...cells.map((text, i) => {
+    const cell = document.createElement("span");
+    cell.textContent = text;
+    if (i < 6 || i % 6 === 0) cell.className = "head";
+    return cell;
+  }));
+}
 
 function addMoveTime(prefix, payload) {
   const avg = moveTimes[prefix];
   avg.sum += Number((payload.timings || {}).total_ms) || 0;
   avg.n += 1;
+  avg.last = moveStages(payload);
+  for (const key of STAGE_KEYS) avg.stages[key] += avg.last[key];
   document.getElementById(`${prefix}avg`).textContent =
     `avg ${Math.round(avg.sum / avg.n)} ms/move · ${avg.n} ${avg.n === 1 ? "move" : "moves"}`;
+  showStages(prefix);
 }
 
 function resetMoveTime(prefix) {
-  moveTimes[prefix] = { sum: 0, n: 0 };
+  moveTimes[prefix] = { sum: 0, n: 0, stages: noStages(), last: null };
   document.getElementById(`${prefix}avg`).textContent = "";
+  showStages(prefix);
 }
 
 function clearTiming(prefix) {

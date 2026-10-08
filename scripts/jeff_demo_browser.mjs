@@ -107,10 +107,19 @@ try {
   await waitFor(() => tPieces >= 3);
   await waitFor(() => tInflight === true);
   const before = await state();
+  const stagesText = () => page.evaluate(() => [...document.querySelectorAll("#tetris-stages span")].map((s) => s.textContent));
+  const stages = await stagesText();
+  const num = (text) => Number.parseFloat(text);
+  const [, tok, pre, head, other, wall] = stages.slice(6, 12);
+  check("stage table: last move and game average", stages.length === 18 && stages[6] === "last"
+    && /^avg \d+$/.test(stages[12]) && /^\d+(\.\d)? \(\d+\)$/.test(pre)
+    && Math.abs(num(tok) + num(pre) + num(head) + num(other) - num(wall)) <= 2.5, JSON.stringify(stages));
   await page.click("#tetris-reset");
   const reset0 = await state();
   await page.waitForTimeout(2500);
   const reset1 = await state();
+  check("reset clears the stage table and average", (await stagesText()).length === 0
+    && (await page.evaluate(() => document.getElementById("tetris-avg").textContent)) === "");
   check("mid-game reset with a request in flight", before.inflight && before.pieces >= 3 && !reset0.playing
     && reset0.generation > before.generation && reset1.pieces === 0 && reset1.lines === 0 && reset1.filled === 0
     && !reset1.playing && !reset1.overlay, `before ${JSON.stringify(before)} after 2.5 s ${JSON.stringify(reset1)}`);
