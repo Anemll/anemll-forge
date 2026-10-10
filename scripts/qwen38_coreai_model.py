@@ -229,6 +229,25 @@ def att8_words(forms: str, nums: dict) -> str:
     return ", ".join(out)
 
 
+RELEASES = {  # published target weights (manifest "export") -> ANEMLL release
+    "mix25in_mixr_lr64mix": "0.1",
+    "release_vq3pA_mixh_s600_k1_mat": "0.2",
+}
+
+
+def model_release(man: dict) -> str | None:
+    """The ANEMLL release of a build's weights: the manifest's "release" field, else its export if published (a local
+    build records the export's path; its folder name is the export name)."""
+    return man.get("release") or RELEASES.get(Path(man.get("export") or "").name)
+
+
+def release_line(man: dict) -> str:
+    rel, export = model_release(man), Path(man.get("export") or "").name or None
+    if rel:
+        return f"model: ANEMLL Qwen3.8-27B release {rel} (weights {export or 'not recorded'})"
+    return f"model: custom build (weights {export})" if export else "model: weights not recorded in the manifest"
+
+
 def graph_line(man: dict, root: Path) -> str:
     g = target_graph(man)
     fast = g["gdn_fast"] if isinstance(g["gdn_fast"], list) else int(g["gdn_fast"])
@@ -256,6 +275,8 @@ class CoreAIQwen:
         self.kv_cache_formats = cache_formats(man)
         self.keys_t = key_layout(man) == "dim_token"
         self.graph = target_graph(man)
+        self.release = model_release(man)
+        self.log(release_line(man))
         self.log(graph_line(man, root))
         if self.kv_cache_dtype in ("v8", "kv8") or len(self.kv_cache_formats) > 1:
             raise ValueError("V8/KV8/selectable KV cache requires the Swift bridge; set COREAI_BRIDGE=1")
@@ -288,6 +309,8 @@ class CoreAIQwen:
         ck = M.Checkpoint()
         import torch
         self.emb = ck.embed_table()
+        import rot1_runtime  # rot1: refuse timing-only builds and an embedding table from another basis
+        rot1_runtime.check_build(man, Path(os.path.expanduser(os.environ.get("EMBED_NPY", "~/Models/vq27b/embed_tokens_fp16.npy"))))
         rot = int(c["head_dim"] * c["rope_parameters"]["partial_rotary_factor"])
         self.inv = 1.0 / c["rope_parameters"]["rope_theta"] ** (np.arange(0, rot, 2) / rot)
         # per-call inputs shared by every chunk (written in place)
@@ -578,6 +601,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.kv_cache_formats = cache_formats(man)
         self.keys_t = key_layout(man) == "dim_token"
         self.graph = target_graph(man)
+        self.release = model_release(man)
+        self.log(release_line(man))
         self.log(graph_line(man, root))
         self.log("KV cache: " + {"fp16": "FP16 K / FP16 V", "v8": "FP16 K / INT8 V + FP16 token/head scales",
                                  "kv8": "INT8 K / INT8 V + FP16 token/head scales"}[self.kv_cache_dtype]
@@ -614,6 +639,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         ck = M.Checkpoint()
         import torch
         self.emb = ck.embed_table()
+        import rot1_runtime  # rot1: refuse timing-only builds and an embedding table from another basis
+        rot1_runtime.check_build(man, Path(os.path.expanduser(os.environ.get("EMBED_NPY", "~/Models/vq27b/embed_tokens_fp16.npy"))))
         rot = int(c["head_dim"] * c["rope_parameters"]["partial_rotary_factor"])
         self.inv = 1.0 / c["rope_parameters"]["rope_theta"] ** (np.arange(0, rot, 2) / rot)
         # per-call inputs shared by every chunk, in the entries' preferred layouts

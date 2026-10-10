@@ -26,7 +26,7 @@ NEG = -1e4
 
 
 class CoreAIDrafter:
-    def __init__(self, pkg, cfg, w_sel, emb):
+    def __init__(self, pkg, cfg, w_sel, emb, unrot=None):
         sys.path.insert(0, str(BRIDGE_DIR))
         import coreai_bridge as B
         # torch's multithreaded CPU pool (the top-k over 7 x 248320 logits below) keeps its threads spinning on the
@@ -49,6 +49,7 @@ class CoreAIDrafter:
         self.ring = [(self.din[f"kc{i}"].np, self.din[f"vc{i}"].np) for i in range(self.L)]
         self.has_head = "logits" in self.dout
         self.cfg, self.emb = cfg, emb
+        self.unrot = unrot  # rot1 fix B (rot1_runtime.Unrotate): target taps / anchor row back to the unrotated basis
         self.pc = w_sel["candidate_selector.predecessor_codebook"].float()
         self.sc = w_sel["candidate_selector.successor_codebook"].float()
         self.theta = cfg["rope_parameters"]["rope_theta"]
@@ -67,7 +68,10 @@ class CoreAIDrafter:
         feat[:] = 0
         pos = np.zeros(n, np.int64)
         for j, (f, p) in enumerate(rows):
-            feat[0, :, 0, j] = f.astype(np.float32) * self.feat_scale
+            f = f.astype(np.float32)
+            if self.unrot is not None:  # five taps of 5120, each x' -> x' R
+                f = self.unrot(f.reshape(-1, 5120)).reshape(-1)
+            feat[0, :, 0, j] = f * self.feat_scale
             pos[j] = p
         cos, sin = rope_cos_sin(pos, 128, self.theta)
         ins["ctx_cos"].np[:] = cos.numpy()
@@ -108,7 +112,9 @@ class CoreAIDrafter:
             mask[np.abs(qpos - p) < self.window, W + j] = 0
         mask[:, W + R:] = 0
         self.din["mask"].np[:] = mask
-        self.din["anchor"].np[:] = np.asarray(self.emb[anchor], f16).reshape(1, -1, 1, 1)
+        e = np.asarray(self.emb[anchor], np.float32)
+        e = self.unrot(e) if self.unrot is not None else e
+        self.din["anchor"].np[:] = e.astype(f16).reshape(1, -1, 1, 1)
         self.draft_plan.run()
         self._commit(self.dout, rows)
         hp = torch.from_numpy(self.dout["hp"].np[0, :, 0, 1:].T.astype(np.float32))           # (7, 256)

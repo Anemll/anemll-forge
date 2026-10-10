@@ -64,6 +64,18 @@ ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
 # tile is transposed inside the program (otherwise a pass per tile before every QK); the new key rows are still
 # returned as (KV head, T, head dim) and the runtime writes them transposed
 KV_KEYS_T = os.environ.get("KV_KEYS_T", "0") == "1"
+# rot1 (next/rot1/RUNBOOK.md R0.6): online block-Hadamard rotations. The MLP's rin / rmid and the mixers' input /
+# writer-input rotations follow the export metadata (layer_NN[_mixer].safetensors: basis, seed_in, seed_mid,
+# seed_out); ROT_IN=0 / ROT_MID=0 drop the MLP ones, ROT_ALL_OFF=1 drops every rotation, MIX_ROT=readers |
+# readers+writers adds mixer rotations (seeds 3000 + i / 4000 + i) where the export has none. Any switch that makes
+# the graph differ from what the export's weights were fitted for marks the build TIMING_ONLY (wrong numerics; the
+# runtime refuses to serve it).
+ROT_IN = os.environ.get("ROT_IN", "1") == "1"
+ROT_MID = os.environ.get("ROT_MID", "1") == "1"
+ROT_ALL_OFF = os.environ.get("ROT_ALL_OFF", "0") == "1"
+MIX_ROT = os.environ.get("MIX_ROT", "")
+assert MIX_ROT in ("", "readers", "readers+writers"), MIX_ROT
+_TIMING_ONLY: set = set()  # layers whose rotations differ from their export (filled while building)
 # timing research only (wrong numerics): INT8 x INT8 history matmuls on kv8 caches. qk quantizes the queries, pv the
 # exp weights, each with a fixed scale, as quantize -> dequantize next to the matmul so the ANE compiler can fuse them
 # variants: qk | qkt (keys untransposed) | pv | both | botht | pvdq (control: V dequantized per tile, FP16 weights); the
@@ -120,6 +132,7 @@ SMALL = ("input_layernorm.weight", "post_attention_layernorm.weight", "linear_at
          "linear_attn.A_log", "linear_attn.dt_bias", "linear_attn.in_proj_a.weight", "linear_attn.in_proj_b.weight",
          "linear_attn.norm.weight", "self_attn.q_norm.weight", "self_attn.k_norm.weight")
 KNOWN_LUTS: dict[str, tuple[np.ndarray, np.ndarray]] = {}   # sha1(fp16 dense weight) -> (lut, idx)
+_PAL_BITS: int | None = None                                 # index width of the weight being palettized
 
 
 def wkey(a: np.ndarray) -> str:
@@ -129,14 +142,42 @@ def wkey(a: np.ndarray) -> str:
 
 
 # ---- weights -----------------------------------------------------------------------------------------------------
+def rot_numerics(layers) -> dict:
+    """Rotation switches for a chunk's manifest numerics (empty for a default build of a plain-mixer export)."""
+    out = {**({"ROT_IN": False} if not ROT_IN else {}), **({"ROT_MID": False} if not ROT_MID else {}),
+           **({"ROT_ALL_OFF": True} if ROT_ALL_OFF else {}), **({"MIX_ROT": MIX_ROT} if MIX_ROT else {})}
+    if any(l in _TIMING_ONLY for l in layers):
+        out["TIMING_ONLY"] = True
+    return out
+
+
+def rot1_basis_check(export_dir, model_dir):
+    """rot1 basis of the export (its basis.json sidecar, written by GPTQ / QAT / materialize), or None for a plain
+    export. A folded export must be converted with the matching rotated small checkpoint as MODEL (unit norms,
+    rotated in_proj_a / b): the two basis.json files must carry the same basis_id, else the build would silently mix
+    bases. A plain export must not be paired with a rotated MODEL either."""
+    ex, mo = Path(export_dir) / "basis.json", Path(model_dir) / "basis.json"
+    eb = json.loads(ex.read_text()) if ex.exists() else None
+    mb = json.loads(mo.read_text()) if mo.exists() else None
+    if eb is None and mb is None:
+        return None
+    if eb is None or mb is None or eb.get("basis_id") != mb.get("basis_id"):
+        raise SystemExit(f"rot1 basis mismatch: export {ex} = {eb and eb.get('basis_id')}, MODEL {mo} = "
+                         f"{mb and mb.get('basis_id')}; a folded export needs MODEL = its rot1/ckpt/<name>/ "
+                         f"directory, a plain export the original small checkpoint")
+    if eb.get("r_kind") not in (None, "identity") and not (Path(model_dir) / "R.npy").exists():
+        raise SystemExit(f"rot1: {model_dir}/R.npy missing (needed by the drafter's fix B at run time)")
+    return eb
+
+
 def layer_arrays(ck, i: int) -> dict:
     """The layer's weights exactly as the v4 build consumes them (checkpoint small tensors + export matrices)."""
     w = ck.layer(i)
     q = M.layer_quant(ck, i, w)
     arrs = {f"{i}/{k}": w[k].float().numpy() for k in SMALL if k in w}
     for k, v in q.items():
-        if k == "mlp.rotation":
-            arrs[f"{i}/mlp.rotation"] = np.array(v, np.int64)
+        if k in ("mlp.rotation", "mix.rotation"):
+            arrs[f"{i}/{k}"] = np.array([-1 if x is None else x for x in v], np.int64)
             continue
         lr = None
         if isinstance(v[0], str) and v[0] == "int8":
@@ -216,6 +257,40 @@ class Hadamard(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
+
+def _seed(v):
+    """A rotation seed from the weight dict (-1 / None: no rotation on that side)."""
+    return None if v is None or int(v) < 0 else int(v)
+
+
+def mlp_rotation(W: dict, i: int):
+    """(seed_in, seed_mid) the MLP is built with: the export's, minus ROT_IN / ROT_MID / ROT_ALL_OFF."""
+    r = W.get(f"{i}/mlp.rotation")
+    e_in, e_mid = (_seed(r[0]), _seed(r[1])) if r is not None else (None, None)
+    s_in = e_in if ROT_IN and not ROT_ALL_OFF else None
+    s_mid = e_mid if ROT_MID and not ROT_ALL_OFF else None
+    if (s_in, s_mid) != (e_in, e_mid):
+        _TIMING_ONLY.add(i)
+    return s_in, s_mid
+
+
+def mixer_rotation(W: dict, i: int):
+    """(seed_in, seed_out) the mixer is built with: the export's (layer_NN_mixer metadata), plus MIX_ROT, minus
+    ROT_ALL_OFF. seed_in rotates the normalized input of the quantized readers (GDN in_proj_qkv / z, attention
+    q / k / v; the BF16 in_proj_a / b keep the unrotated input), seed_out the writer input (GDN out_proj, o_proj)."""
+    r = W.get(f"{i}/mix.rotation")
+    e_in, e_out = (_seed(r[0]), _seed(r[1])) if r is not None else (None, None)
+    s_in, s_out = e_in, e_out
+    if MIX_ROT:
+        s_in = s_in if s_in is not None else 3000 + i
+        if MIX_ROT == "readers+writers":
+            s_out = s_out if s_out is not None else 4000 + i
+    if ROT_ALL_OFF:
+        s_in = s_out = None
+    if (s_in, s_out) != (e_in, e_out):
+        _TIMING_ONLY.add(i)
+    return s_in, s_out
 
 
 def rms_hidden(x, w_plus):
@@ -320,10 +395,15 @@ class GDNW(nn.Module):
         self.register_buffer("neg_a", torch.from_numpy((-np.exp(W[p + "A_log"])).reshape(nv, 1, 1).astype(np.float16)))
         self.register_buffer("dt", torch.from_numpy(W[p + "dt_bias"].reshape(nv, 1, 1).astype(np.float16)))
         self.register_buffer("normw", torch.from_numpy(W[p + "norm.weight"].astype(np.float16)))
+        s_in, s_out = mixer_rotation(W, i)
+        self.rmix = Hadamard(hid, s_in) if s_in is not None else None
+        self.rout = Hadamard(vd, s_out) if s_out is not None else None
 
     def proj(self, h, T: int):
-        qkv = self.qkv(h).reshape(cdim, T)
-        z = self.z(h).reshape(nv, dv, T).permute(0, 2, 1)
+        rmix = getattr(self, "rmix", None)  # (getattr: modules built without __init__ in tests have none)
+        hq = rmix(h) if rmix is not None else h  # quantized readers only; a / b read h
+        qkv = self.qkv(hq).reshape(cdim, T)
+        z = self.z(hq).reshape(nv, dv, T).permute(0, 2, 1)
         return qkv, z, self.b(h).reshape(nv, T, 1), self.a(h).reshape(nv, T, 1)
 
     def qkv_heads(self, rows, T: int):
@@ -359,7 +439,8 @@ class GDNW(nn.Module):
         o = o.permute(0, 2, 1).reshape(1, vd, 1, T)
         if DBG_O:
             _DBG.append(o)
-        return self.out(o)
+        rout = getattr(self, "rout", None)
+        return self.out(rout(o) if rout is not None else o)
 
     def verify(self, h, conv_rows, conv_sel, rec, pend, commit, commit_last, T: int):
         """T = P rows, lazy commit: returns (y, conv rows (T + 3), committed state S', this call's pending rows)."""
@@ -430,6 +511,9 @@ class AttnW(nn.Module):
         p = f"{i}/self_attn."
         self.layer_index = i
         self.q, self.k, self.v, self.o = (QConv(W, p + f"{m}_proj.weight") for m in "qkvo")
+        s_in, s_out = mixer_rotation(W, i)
+        self.rmix = Hadamard(hid, s_in) if s_in is not None else None
+        self.rout = Hadamard(nh * hd, s_out) if s_out is not None else None
         self.register_buffer("qn", torch.from_numpy((1 + W[p + "q_norm.weight"]).astype(np.float16)))
         self.register_buffer("kn", torch.from_numpy((1 + W[p + "k_norm.weight"]).astype(np.float16)))
         self.cache_v8, self.cache_k8 = KV_CACHE_DTYPE in ("v8", "kv8"), KV_CACHE_DTYPE == "kv8"
@@ -460,10 +544,12 @@ class AttnW(nn.Module):
         cache_k8 = self.cache_k8 if cache_k8 is None else cache_k8
         def tmajor(x, c):
             return x.reshape(c, T).transpose(0, 1)
-        qg = tmajor(self.q(h), 2 * nh * hd).reshape(T, nh, 2 * hd)
+        rmix = getattr(self, "rmix", None)
+        hq = rmix(h) if rmix is not None else h
+        qg = tmajor(self.q(hq), 2 * nh * hd).reshape(T, nh, 2 * hd)
         qh, gate = rms_last(qg[:, :, :hd], self.qn), qg[:, :, hd:].reshape(T, nh * hd)
-        kh = rms_last(tmajor(self.k(h), nkv * hd).reshape(T, nkv, hd), self.kn)
-        vh = tmajor(self.v(h), nkv * hd).reshape(T, nkv, hd)
+        kh = rms_last(tmajor(self.k(hq), nkv * hd).reshape(T, nkv, hd), self.kn)
+        vh = tmajor(self.v(hq), nkv * hd).reshape(T, nkv, hd)
         c3, s3 = cos.reshape(T, 1, rot), sin.reshape(T, 1, rot)
 
         def rope(t):
@@ -668,7 +754,8 @@ class AttnW(nn.Module):
         o = o.transpose(0, 1).reshape(1, nh * hd, 1, T)
         if DBG_O:
             _DBG.append(o)
-        return self.o(o), kt, vt
+        rout = getattr(self, "rout", None)
+        return self.o(rout(o) if rout is not None else o), kt, vt
 
 
 class LayerW(nn.Module):
@@ -679,9 +766,9 @@ class LayerW(nn.Module):
         self.register_buffer("ln1", torch.from_numpy((1 + W[f"{i}/input_layernorm.weight"]).reshape(1, -1, 1, 1).astype(np.float16)))
         self.register_buffer("ln2", torch.from_numpy((1 + W[f"{i}/post_attention_layernorm.weight"]).reshape(1, -1, 1, 1).astype(np.float16)))
         self.gate, self.up, self.down = (QConv(W, f"{i}/mlp.{m}_proj.weight") for m in ("gate", "up", "down"))
-        seeds = W.get(f"{i}/mlp.rotation")
-        self.rin = Hadamard(hid, int(seeds[0])) if seeds is not None else None
-        self.rmid = Hadamard(CFG["intermediate_size"], int(seeds[1])) if seeds is not None else None
+        s_in, s_mid = mlp_rotation(W, i)
+        self.rin = Hadamard(hid, s_in) if s_in is not None else None
+        self.rmid = Hadamard(CFG["intermediate_size"], s_mid) if s_mid is not None else None
         self.ds = float(MLP_DS_TABLE[str(i)]) if MLP_DS_TABLE is not None else MLP_DS
 
     def mlp(self, x):
@@ -828,7 +915,9 @@ def patch_palettizer():
     orig = wp._blockwise_compress
 
     def compress(original_data, mode, *args, **kwargs):
+        global _PAL_BITS
         known = KNOWN_LUTS.get(wkey(original_data))
+        _PAL_BITS = None if known is None else int(np.log2(known[0].shape[0]))
         if known is not None:
             lut, idx = known
             cd = lut.shape[1]
@@ -837,6 +926,15 @@ def patch_palettizer():
                              lut=lut.reshape(*(1,) * original_data.ndim, *lut.shape), vector_axis=0 if cd > 1 else None)
         return orig(original_data, "UNIQUE", *args, **kwargs)   # Hadamard (+-1/32): exact unique values
     wp._blockwise_compress = compress
+    it = wp.IntegerType
+
+    class _IndexType:  # IntegerType for the pass: unsigned index width from the LUT just compressed
+        get_signed = staticmethod(it.get_signed)
+
+        @staticmethod
+        def get_unsigned(n):
+            return it.get_unsigned(n if _PAL_BITS is None else _PAL_BITS)
+    wp.IntegerType = _IndexType
     wp._is_cluster_dim_valid = lambda op, cluster_dim, channel_axis: list(op.result.type.shape)[channel_axis] % cluster_dim == 0
     wp._qwen38_patched = True
 
@@ -862,12 +960,15 @@ def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path, lu
     def cached(data, mode, *args, **kwargs):
         # Identical weights recur across contexts and cache formats. Preserve the
         # exact compressor result, including None; never refit the exported LUT.
+        global _PAL_BITS
         key = (wkey(data), data.shape, mode, repr(args), repr(sorted(kwargs.items())))
         if key not in memo:
             memo[key] = exact(data, mode, *args, **kwargs)
+        known = KNOWN_LUTS.get(key[0])  # a cache hit skips compress(): set this weight's index width here too
+        _PAL_BITS = None if known is None else int(np.log2(known[0].shape[0]))
         return memo[key]
     wp._blockwise_compress = cached
-    try:
+    try:  # n_bits=4 is nominal: each exported LUT sets its own index width (patch_palettizer)
         prog = palettize_weights(prog, lut_dtype=lut_dtype, n_bits=4, granularity=CompressionGranularity.PER_TENSOR,
                                  cluster_dim=2, weight_num_threshold=1024, enable_fast_kmeans_mode=False)
     finally:
@@ -961,7 +1062,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                             if any(k in layers for k in ATT_INT8MM_BY_LAYER) else {}),
                          **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
                          **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {}),
-                         **({"KV_KEYS_T": True} if KV_KEYS_T else {})}}
+                         **({"KV_KEYS_T": True} if KV_KEYS_T else {}),
+                         **rot_numerics(layers)}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
     if m5_forms is not None:
@@ -1013,6 +1115,7 @@ def main():
         OUT = OUT.with_name(OUT.name + "_stable")
     ctxs = [int(x) for x in a.ctx.split(",") if x]
     pctxs = [int(x) for x in a.pctx.split(",") if x]
+    basis = rot1_basis_check(M.EXPORT_DIR, M.MODEL)
     ck = M.Checkpoint()
     if a.what == "chunk":
         print(json.dumps(build_chunk(ck, parse_plan(a.layers)[0], ctxs, pctxs, a.name)))
@@ -1028,6 +1131,13 @@ def main():
         man.update({"version": "coreai1", "T": 8, "TP": 64 if pctxs else 0, "pend": P, "taps": TAPS, "ctxs": ctxs,
                     "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
                     "pkv_len": {str(c): kv_len(c, 64) for c in pctxs}, "export": str(M.EXPORT_DIR)})
+        if basis is not None:  # rot1: the build carries its basis (the runtime checks the embedding table and
+            # gives the drafter R for fix B); R.npy and basis.json are copied next to the manifest
+            man["rot1_basis"] = {k: basis[k] for k in ("basis_id", "name", "r_kind", "r_seed", "fold_norms")}
+            OUT.mkdir(parents=True, exist_ok=True)
+            for f in ("basis.json", "R.npy"):
+                if (M.MODEL / f).exists():
+                    shutil.copy2(M.MODEL / f, OUT / f)
         def layout(mode):
             q8 = mode in ("v8", "kv8")
             return {"format": mode, "keys": "int8" if mode == "kv8" else "float16",

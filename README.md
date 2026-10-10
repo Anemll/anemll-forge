@@ -4,12 +4,14 @@
 
 The first model is an independent ANEMLL adaptation of **[Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B)**, developed by the **Qwen Team / Alibaba Cloud**. The release runs a **Core AI target with a Swift bridge and the matching Core AI DFlash2 speculative drafter**. Both target and drafter are included in the model bundle. Core ML conversion code and research findings remain available for reproduction and learning.
 
+**Release 0.2** replaces the quantized weights: every MLP matrix is a three-bit vector lookup table, the token mixers get online Hadamard rotations, and the weights are fitted by GPTQ and quantization-aware training (QAT) against the BF16 model. On the M6 ANE, KL-512 to BF16 falls from 0.184 to **0.052** and top-1 agreement rises from 86.0% to **91.9%**, at the previous packages' speed and with less compiled ANE memory. Details: [quantization](docs/QUANTIZATION.md#release-02-three-bit-mlp-and-token-mixer-rotations).
+
 ## Hardware and software
 
 - **M6 is the main development and performance target.** M5, M5 Pro, and M5 Max are also supported; expect roughly half the M6 throughput (about 2× slower) for comparable ANE workloads. This is approximate guidance, not a matched benchmark across every chip and context size.
 - **macOS 27 with a compatible Xcode 27 / Core AI SDK.** The bridge was checked with Apple Swift 6.4. Older macOS/SDK versions without `CoreAI` cannot build this runtime.
 - **Python 3.11** for inference; **Node.js 22.19 or newer** and npm for optional Pi coding sessions.
-- **32 GB or more unified memory is recommended.** Start with 16K context. The paired bundle is approximately 15 GB; allow additional disk space for downloads and compilation caches (11–14 GB was observed for a cold target compilation).
+- **32 GB or more unified memory is recommended.** Start with 16K context. The paired bundle is approximately 16 GB; allow additional disk space for downloads and compilation caches (11–14 GB was observed for a cold target compilation).
 
 The first start of a model on a given macOS build compiles every package for the ANE once (about 20 to 25 minutes for the full target on M6); later starts load from the cache in seconds. Startup prints `[ANE compile]` lines: how many packages still need compiling, an estimate, per-package progress with the time left, and build options that compile faster ([measured times and a sample readout](docs/SERVER.md#first-start-compile-time-and-readout)). Stopping is safe at any point (Ctrl-C, or `scripts/qwen38_server.sh stop`): finished packages stay cached and the next start resumes. To compile ahead without starting the server, run `python forge.py compile --build "$FORGE_BUNDLE/coreai"` with the same Python as the server (the cache is keyed by macOS build and Python: its bundle identifier, such as `org.python.python` for Homebrew's framework Python, else its executable name); add `--force` to drop that Python's cached specializations of the build and recompile every package. If a load crashes on a cached package, `forge.py compile` and `forge.py serve` purge that package and retry once. M5-family users should read the [cold-compilation issue and cache pre-warming workaround](docs/SESSION_LESSONS.md#release-preparation-diagnostic-m5m5-max-cold-compile-crash-bonded-vs-non-bonded-september-29) if the compiler reports a topological-sort failure. The runtime selects the ANE bonded compile mode by SoC generation: `1` on the M5 family (H17) and `2` on M6 and newer (H18+); pre-M5 chips are unsupported and fail before loading. An explicit `MPSGRAPH_ANE_BONDED_COMPILE_MODE` still overrides the policy, and startup and `/health` report the effective mode. See the [ANE compile mode policy](docs/ANE_COMPILE_MODE_POLICY.md). [Environment details](docs/ENVIRONMENT.md) distinguish prepared-bundle inference from the separate conversion toolchain.
 
@@ -163,7 +165,7 @@ With DFlash2, server cold prefill was 26 to 41% faster and decode 21 to 25% fast
 
 ### 8-bit attention for M6 and M5 in one download (research build)
 
-A research build, not yet the published packages, runs most of the attention in 8-bit. **C2T** (M6) computes the
+The published packages run most of the attention in 8-bit. **C2T** (M6) computes the
 scores in INT8 and the softmax probabilities, softmax sum and PV probabilities in FP8 (attention activations at run time; the model
 weights are the same in every build), and stores the key cache transposed
 (head dimension x token) so the ANE no longer transposes every key tile before QK. Its conversion settings are
@@ -177,8 +179,8 @@ weights are the same in every build), and stores the key cache transposed
 | 32K | 275 / 272 | 54.5 / 52.0 | 29% less | 42% less |
 | 64K | 237 / 231 | 47.9 / 48.7 | 33% less | 41% less |
 
-Splash's model file is closer to BF16 on the same KL-512 (0.163 against 0.184), so this is not an equal-quality
-comparison. Details: [M6 compute acceleration](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md).
+These runs used the first release's weights, and Splash's model file was closer to BF16 on the same KL-512 (0.163 against 0.184).
+Release 0.2's weights reverse that (0.052 against 0.163) at prefill within 2 to 3% of these numbers. Details: [M6 compute acceleration](docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md).
 
 **M5.** The M5 ANE compiler does not support FP8: C2T's attention fails to compile there and Core AI runs the chunk
 on the GPU at about 2 s per call. The M5 instead runs C2T with FP16 in place of FP8 (INT8 scores and transposed keys

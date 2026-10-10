@@ -15,7 +15,7 @@ tags:
 
 # ANEMLL Forge · Qwen3.8-27B for ANE
 
-**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. This update replaces the 16 target chunks with **8-bit attention** and a **transposed key cache**, with an **M6 and an M5 function set in the same packages**. On M6 the attention scores are INT8 and the softmax and PV probabilities FP8; the M5 functions keep the INT8 scores and run the softmax in FP16, because the M5 ANE compiler does not support FP8. Model-weight quantization is unchanged and quality matches the previous packages. Full server on M6: prefill **237 to 306 tok/s** from 64K to 8K. On an M5 Max the M5 set prefills **3 to 7% faster** than the previous packages at 32K to 64K.
+**Research project for inference of large dense models on the M6 Apple Neural Engine.** ANEMLL Forge shares quantization, conversion, Core AI inference and measured limitations. **This update (release 0.2) replaces the quantized weights.** Every MLP matrix is now a **three-bit vector lookup table** (previously two-bit in 38 layers and four-bit in 26), the token mixers get **online Hadamard rotations** like the MLP's, and the weights are fitted by GPTQ and **quantization-aware training (QAT)** against the BF16 model. On the M6 ANE, KL to BF16 falls from **0.184 to 0.052** (KL-512) and top-1 agreement rises from 86.0% to **91.9%**, at the previous packages' speed and with 0.35 GB less compiled ANE memory. The packages keep the previous update's 8-bit attention, transposed key cache and **M6 and M5 function sets in one download**: on M6 the attention scores are INT8 and the softmax and PV probabilities FP8; the M5 functions keep the INT8 scores and run the softmax in FP16, because the M5 ANE compiler does not support FP8.
 
 The normal inference path uses the included, tested **Core AI DFlash2 speculative drafter**. Each T=8 verifier cycle checks one anchor and seven draft proposals. T=8 target functions are verification functions; the separate `drafter/` package generates the proposals. Do not substitute a Core ML or unpaired drafter.
 
@@ -23,9 +23,9 @@ ANEMLL independently converts and quantizes [Qwen/Qwen3.8-27B](https://huggingfa
 
 ## Files and runtime compatibility
 
-- [coreai/](coreai): 16 target chunks (8-bit attention with M6 and M5 function sets, transposed keys, V8 cache, faster graph), the output head and the manifest. Target recipe: `mix25in_mixr_lr64mix`, with mixed two-bit/four-bit GPTQ, per-channel scaling, online rotations and rank-64 residual corrections.
+- [coreai/](coreai): 16 target chunks (8-bit attention with M6 and M5 function sets, transposed keys, V8 cache, faster graph), the output head and the manifest. Target weights: `release_vq3pA_mixh_s600_k1_mat` (release 0.2): three-bit vector LUTs for every MLP matrix, two-bit/four-bit LUTs for the token mixers with rank-64 low-rank factors, INT8 attention K/V projections, a four-bit LUT head, per-channel scaling and online Hadamard rotations on the MLP and token-mixer inputs, fitted by GPTQ and then quantization-aware training (QAT, below).
 - [model/](model): matching tokenizer/configuration files and FP16 host embedding table.
-- [drafter/](drafter): `dflash2_lut4_gptq.aimodel`, numerical metadata, configuration, compact BF16 selector codebooks and source licenses/notices. These assets are unchanged from the previous paired release.
+- [drafter/](drafter): `dflash2_lut4_gptq.aimodel`, numerical metadata, configuration, compact BF16 selector codebooks and source licenses/notices. The drafter's own quantized layers are unchanged; the package was rebuilt because it drafts with the target's LM head, which release 0.2 retrained.
 - [release.json](release.json): complete per-file SHA-256/size inventory and target/drafter pairing.
 - [config.json](config.json): exact copy of `model/config.json` for Hub discovery and download counting, recorded separately as `hub_config` in the release inventory. The runtime continues to use the matching files under `model/`.
 
@@ -37,9 +37,68 @@ V8 caches store historical values as INT8 with FP16 scales per token and KV head
 
 **Source:** these packages need the ANEMLL Forge source with the transposed-key runtime and the M5 build derivation (October 5, 2026 or later); earlier source refuses them at load (key-layout check). On an M5, the first start also needs the Core AI authoring package: `python -m pip install coreai-core`. The V8 runtime preserves V codes/scales through context growth and speculative commits and uses the Swift bridge. The source README provides setup and installation steps. The legacy Python binding is not the V8 runtime.
 
-This update replaces the 16 target chunks, the manifest and the output head (re-exported from the same LUT4 head weights), and updates the inventory, [MODIFICATIONS.md](MODIFICATIONS.md) and this card. The model assets and drafter are byte-identical to the previous revision. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
+This update replaces the 16 target chunks, the output head, the drafter package and the manifest, and updates the inventory, [MODIFICATIONS.md](MODIFICATIONS.md) and this card. The tokenizer, embedding table, drafter configuration and selector are byte-identical to the previous revision. **A precision flag alone cannot add V8 support to the earlier FP16-only model files.** Original BF16 checkpoints are unnecessary for prepared inference; rebuilding requires the separate source weights and conversion environment. Vision and MTP are outside this text-generation bundle.
 
-## 8-bit attention for M6 and M5 (this update)
+## Release 0.2: three-bit MLP, token-mixer rotations, distilled weights (this update)
+
+| Part | Previous packages | **Release 0.2** |
+| --- | --- | --- |
+| MLP gate / up / down | two-bit vector LUT (2x16) in 38 layers, four-bit LUT in 26 | **three-bit vector LUT (2x64) in all 64 layers** |
+| Token mixers (DeltaNet and attention projections) | two-bit vector LUT in layers 0-23, four-bit LUT in 24-63, attention K/V INT8, rank-64 factors | same formats, **plus online Hadamard rotations** of the projections' inputs |
+| LM head | four-bit LUT | four-bit LUT, retrained |
+| Quantized weights, excluding the FP16 embedding | 9.07 GiB (9.36 with the FP16 factors) | 9.44 GiB (9.74), 3.17 bits per weight |
+| Compiled ANE memory on M6 (chunks and head) | 13.32 GB | 12.97 GB |
+
+- **Three bits per MLP weight:** 64 two-component centroids per matrix and one six-bit index per pair of output channels, with per-channel scales. In tests on eight layers it removes about 80% of the gap between the two-bit and four-bit formats, in every layer and matrix type; at the same size as a two-bit/four-bit split (`u48`) it lowered KL by 23%. On the ANE it decodes faster per byte than the four-bit tables, and it avoids a second compiled copy the four-bit `down_proj` needs, so the model uses less ANE memory than before.
+- **Token-mixer rotations:** the inputs of DeltaNet's `in_proj_qkv`, `in_proj_z` and `out_proj` and of attention's `q_proj`, `k_proj`, `v_proj` and `o_proj` are multiplied online by 1,024-wide Hadamard blocks with seeded signs, the weights stored in the rotated basis, as the MLP already did. Against a matched control (two seeds) this lowered KL by 6 to 10%; it costs about 1% of decode time on M6 and 2 to 3% on the M5 Max.
+- **Fitting:** GPTQ with the rank-64 factors inside the sequential pass and 128 calibration rows (WikiText, BF16 chat traces with thinking, rendered agentic coding sessions), then 600 steps of quantization-aware training (QAT, by distillation to BF16) that train the lookup-table values, per-channel scales, low-rank factors and LM head to match BF16's next-token distribution (top-256 plus tail), with every index frozen. Training data: the calibration rows plus about 640 rows of BF16 responses, thinking included, to new prompts across code, agentic tool use, multilingual text, math and rare tokens; the best step was chosen on 128 further held-out prompts.
+
+Quality on the ANE (compiled packages, the same harness as the previous updates):
+
+| | Previous packages | **Release 0.2** |
+| --- | ---: | ---: |
+| KL-512 to BF16, M6 (64 chats, 40,023 positions) | 0.1838 | **0.0518** |
+| KL-512 median / p99 | 0.030 / 2.28 | 0.009 / 0.50 |
+| Top-1 agreement with BF16 | 86.0% | 91.9% |
+| KL-512 to BF16, M5 Max (M5 functions) | | 0.0517 |
+| Perplexity, KL-512 chats (BF16 2.136) | 2.414 | 2.131 |
+| Perplexity, verify path (64 + 4,096 tokens) | 6.645 | 6.052 |
+| Perplexity, 8K (7,600 + 512) | 8.096 | 7.552 |
+| Perplexity, 64K (64,000 + 1,024) | 5.068 | 4.537 |
+
+The ANE results match the PyTorch evaluation of the same weights (KL 0.0515). In PyTorch against BF16, with the shared system prompt excluded, KL falls from 0.1512 to 0.0536 on the development chat trace and from 0.1617 to 0.0565 on the held-out trace; on WikiText KL is 0.0707, and on the last 2K tokens of 16K-token windows 0.762 (a larger experimental model with four-bit late MLP layers measured 0.0784 and 0.811). The training rows were checked against every evaluation set: their 13-gram overlap covers 0.04 to 0.12% of evaluation windows, all generic phrasing, and per-sequence gains do not track overlap.
+
+Full server, the same synthetic coding workload as the previous updates, greedy, thinking off, 256 tokens, DFlash2 (previous packages in parentheses):
+
+| Context | M6: prefill / decode tok/s | M5 Max: prefill / decode tok/s |
+| --- | --- | --- |
+| 8K | 299 / 59.5 (306 / 60.8) | 175 / 27.0 (172 / 28.8) |
+| 16K | 290 / 53.3 (297 / 60.3) | 170 / 26.0 (171 / 27.8) |
+| 32K | 269 / 49.7 (275 / 54.5) | 153 / 23.8 (156 / 24.5) |
+| 48K | 250 / 45.5 (253 / 46.1) | 140 / 20.1 (143 / 24.1) |
+| 64K | 235 / not measured (237 / 47.9) | 129 / 20.3 (132 / 22.6) |
+
+Prefill is within 2 to 3% of the previous packages. Decode with a drafter depends on how many drafted tokens the target accepts, which depends on the text being generated: on this fixed prompt release 0.2 accepts fewer (79% at 8K against 87 to 89% for earlier weights), so its benchmark decode is lower. Over 24 varied chat and coding prompts on M6, its acceptance and decode match the previous weights' layout (37.5 against 37.6 tok/s). On the M5 Max, over the same 24 prompts, release 0.2 decodes at 16.6 tok/s against 17.2 for weights in the previous formats (-3.5%); there the token-mixer rotations cost 1.8 to 3.3% per chunk (1.2% on M6), and the bit width of the lookup tables does not change speed. The M5 Max's 64K evaluation gives perplexity 4.534 (M6 4.537) at 130 tok/s prefill.
+
+64K on a 32 GB M6: the 64K evaluation runs without swapping; serving a 64K prompt with the drafter needs about 2 GB of swap headroom, as the previous packages do.
+
+### Comparison with other quantizations of Qwen3.8-27B
+
+Teacher-forced KL divergence against the BF16 model, the same evaluation for every model: 64 chats (40,023 positions; "dev", with the shared 45-token system prompt excluded unless marked full), held-out chats (37,076 positions), WikiText (16 x 1,024 tokens) and the last 2K tokens of 16 windows of 16,384 tokens from 12 long sessions. GGUF files were scored with llama.cpp on an M3 Ultra (the BF16 GGUF reproduces the PyTorch reference within 0.0004), Mirai S decoded to BF16 and scored in PyTorch, ANEMLL in PyTorch.
+
+| Model | Size (GiB, bpw) | dev KL (excl. prompt) | held-out KL | dev KL, full | top-1 | p99 | WikiText KL | 16K windows, last 2K |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **ANEMLL release 0.2 (this)** | 9.44 (3.17)* | **0.0536** | **0.0565** | **0.0515** | **91.9%**† | **0.50**† | 0.0707 | **0.762** |
+| [Unsloth UD-IQ3_XXS](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) | 9.46 (3.17) | 0.0619 | 0.0651 | 0.1625 | 89.4% | 3.34 | **0.0506** | 1.108 |
+| [DT-IQ3_XXS](https://huggingface.co/drawthingsai/Qwen3.8-27B-GGUF) | 8.94 (3.00) | 0.0789 | 0.0833 | 0.0763 | 90.4% | 0.75 | 0.1246 | 1.204 |
+| Mirai S (2.4-bit trellis) | 7.56 (2.54) | 0.1226 | 0.1279 | 0.2716 | 85.1% | 5.73 | 0.1674 | not run |
+| ANEMLL release 1 (previous packages) | 9.07 (3.04)* | 0.1512 | 0.1617 | 0.1852 | 86.1% | 2.25 | not run | 1.514 |
+
+\* Size counts the quantized linear weights and the head, excluding the embedding (and MTP for the GGUF files); ANEMLL adds 0.30 GiB of rank-64 FP16 factors. † From the ANE run of the same trace.
+
+At the same size as UD-IQ3_XXS, release 0.2 is 13% closer to BF16 on the chats, 31% on the 16K windows and has a far smaller worst-case tail; UD-IQ3_XXS is closer on WikiText. UD-IQ3_XXS and Mirai S carry most of their full-trace KL on the shared system prompt, which BF16 predicts almost deterministically. KL measures closeness to BF16 on these texts; it is not a coding, reasoning or retrieval benchmark, and the GGUF models run on the GPU, not the ANE.
+
+## 8-bit attention for M6 and M5 (previous update)
 
 The 16 full-attention layers now run most of their history attention in 8-bit, with every 8-bit operand as an explicit quantize / dequantize pair so the ANE compiler fuses it:
 
@@ -63,7 +122,7 @@ Full server, the same synthetic coding workload, greedy, thinking off, 256 token
 
 The M6 numbers come from the same build with only the M6 functions (identical weights and M6 functions); the M5 Max numbers from these packages, derived on the M5 Max, which had other applications running. Against the previous packages this run measured prefill -4% at 8K to +6.5% at 64K and decode 0 to +2%; an earlier run of the same M5 functions (built as a separate package) measured prefill +1.2 to +7.4% and decode +3.7 to +8.2%. One workload with three decode repeats is not a general benchmark. On M6 the 8-bit attention used about 30% less whole-machine energy per prompt token than a GPU runtime on the same Mac (details and limits in the source repository's research notes).
 
-**First start on M6 compiles both function sets** of each package; that compile time has not been measured yet (the M6-only build compiled in about 23 minutes). On an M5 Max the derived M5 build compiled in about 26 minutes.
+**First start on M6 compiles both function sets** of each package: about 46 minutes for release 0.2 (37 for the previous packages; an M6-only build about 23). On an M5 Max the derived M5 build compiled in about 28 minutes (previous packages 26).
 
 ## Faster exact graph (previous update)
 
@@ -154,7 +213,7 @@ PY="python" CTX=64K \
 bash scripts/qwen38_server.sh start
 ```
 
-The default Core AI download includes the paired drafter and selector assets. The runtime reads the V8 cache format from `coreai/manifest.json`. The full `quick-test` performs the one-time ANE compile (about 23 minutes on M6, above), so the server then starts in seconds. `CTX=64K` sets the growth cap; the runtime starts with a smaller entry and grows its KV state. For the FP16-cache fallback, download revision `cd7dfc605ccad091b961f7788939c30d01c3793e` instead and set `KV_CACHE_DTYPE=fp16` on the wrapper command, or use `--kv-cache-dtype fp16` with `forge.py serve`. `--plain` is a target-only diagnostic. The integrity-only check does not run inference; a short smoke generation does not establish sustained performance or broad quality.
+The default Core AI download includes the paired drafter and selector assets. The runtime reads the V8 cache format from `coreai/manifest.json`. The full `quick-test` performs the one-time ANE compile (about 46 minutes on M6, above), so the server then starts in seconds. `CTX=64K` sets the growth cap; the runtime starts with a smaller entry and grows its KV state. For the FP16-cache fallback, download revision `cd7dfc605ccad091b961f7788939c30d01c3793e` instead and set `KV_CACHE_DTYPE=fp16` on the wrapper command, or use `--kv-cache-dtype fp16` with `forge.py serve`. `--plain` is a target-only diagnostic. The integrity-only check does not run inference; a short smoke generation does not establish sustained performance or broad quality.
 
 ## Attribution and licenses
 
@@ -162,6 +221,6 @@ The default Core AI download includes the paired drafter and selector assets. Th
 - Drafter: [`ProCreations/Ternary-Bonsai-2-27B-DFlash2` at `4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b`](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2/tree/4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b). Its original [LICENSE](drafter/LICENSE) and [NOTICE](drafter/NOTICE) remain unchanged.
 - The drafter notice records donor [`z-lab/Qwen3.8-27B-DFlash2` at `50307d4c4cde6860d4eee73e2547cd786fe8e8a4`](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2/tree/50307d4c4cde6860d4eee73e2547cd786fe8e8a4) and training target [`prism-ml/Ternary-Bonsai-2-27B-gguf` at `6ed5e12bf84b7a63069882c91dd9e9218647d17b`](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/6ed5e12bf84b7a63069882c91dd9e9218647d17b).
 
-[MODIFICATIONS.md](MODIFICATIONS.md) describes the converted derivatives and V8 graph changes. The original BF16 drafter checkpoint was rehashed against the pinned upstream LFS digest, and compact selector tables retain identical tensor bytes. The Core AI drafter body has not been independently rebuilt from that checkpoint and GPTQ export; calibration and head linkage remain supported by its sidecar/export metadata. Reusing this tested pairing does not resolve that reconstruction gap.
+[MODIFICATIONS.md](MODIFICATIONS.md) describes the converted derivatives and V8 graph changes. The original BF16 drafter checkpoint was rehashed against the pinned upstream LFS digest, and compact selector tables retain identical tensor bytes. The release 0.2 drafter package was rebuilt from the published drafter GPTQ export with the release 0.2 LM head; the export's build inputs match the original drafter and target checkpoints exactly (see the quantized-weights repository).
 
 **Model-derived assets follow their upstream Apache-2.0 licenses and notices. ANEMLL Forge source code and documentation are MIT-licensed.** Why Apache-2.0: these packages are converted from Apache-2.0 models (Qwen3.8-27B and the ProCreations drafter), so they keep that license; LICENSE, NOTICE and MODIFICATIONS.md carry the license, the upstream notices and what ANEMLL changed. The MIT license covers the ANEMLL Forge code, not the weights. Preserve the applicable model licenses, copyright and modification notices when redistributing derivatives.

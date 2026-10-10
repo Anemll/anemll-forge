@@ -42,6 +42,19 @@ HEAD_EXPORT = Path(E(os.environ.get("HEAD_EXPORT", str(TARGET_EXPORT / "lm_head.
 MODEL = Path(E(os.environ.get("MODEL", "~/Models/Qwen3.8-27B")))
 OUT = Path(E(os.environ.get("OUT", "~/Models/dflash2/coreai")))
 NO_HEAD = os.environ.get("NO_HEAD") == "1"
+
+
+def rot1_fix_b_check():
+    """rot1 fix B (next/rot1/RUNBOOK.md R0.8): the drafter keeps its unrotated weights, so it needs an unrotated LM head
+    (no folded final-norm gain, no R) and the original checkpoint's mask-token row. A head export or MODEL carrying a
+    rot1 basis.json would silently mismatch the drafter's hidden state; refuse it."""
+    for what, d in (("HEAD_EXPORT", HEAD_EXPORT.parent), ("MODEL", MODEL)):
+        f = Path(d) / "basis.json"
+        if f.exists():
+            b = json.loads(f.read_text())
+            raise SystemExit(f"rot1 fix B: {what} {d} belongs to rot1 basis {b.get('name')} "
+                             f"({str(b.get('basis_id'))[:12]}); the drafter needs the base export's unrotated head "
+                             f"and the original small checkpoint")
 W, T, R, RP = 2048, 8, 8, 64
 RESID_SCALE = 256.0
 LUT_F = {"down": 1 / 64, "default": 1 / 16}
@@ -292,6 +305,7 @@ class CtxEntry(nn.Module):
 
 
 def main():
+    rot1_fix_b_check()
     cfg = json.loads((DRAFTER / "config.json").read_text())
     assert cfg["sliding_window"] == W and cfg["dflash_config"]["block_size"] == T
     t0 = time.time()

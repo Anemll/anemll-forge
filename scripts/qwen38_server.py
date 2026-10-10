@@ -217,16 +217,20 @@ class Engine:
             import dflash2_ane_drafter as D
             from dflash2_coreai_drafter import CoreAIDrafter
             guide = getattr(self.model, "compile_guide", None)
+            import rot1_runtime  # rot1 fix B: un-rotate the drafter's taps / anchor for a folded-R1 target
+            unrot = rot1_runtime.unrotate_for(mdir) if self.runtime == "coreai" else None
+            if unrot is not None:
+                log(f"rot1: target basis {unrot.name} ({unrot.kind}); drafter inputs un-rotated on the host (fix B)")
             def make():
                 try:
-                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
+                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, unrot=unrot)
                 except Exception as e:  # noqa: BLE001  a stale cached specialization (nilError): recompile once
                     import coreai_compile_guide as G
                     n = G.purge(Path(dpath))
                     if not n:
                         raise
                     log(f"drafter load failed ({str(e)[:60]}); purged {n} cached specializations, recompiling")
-                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
+                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, unrot=unrot)
             self.drafter = guide.load(f"drafter {Path(dpath).name}", make) if guide else make()
             log(f"drafter: Core AI {dpath.name}")
         self.tok = AutoTokenizer.from_pretrained(str(hf))
@@ -752,6 +756,7 @@ def make_handler(engine):
                                  "position": engine.model.pos,
                                  "kv_cache_dtype": getattr(engine.model, "kv_cache_dtype", "fp16"),
                                  "kv_cache_formats": list(getattr(engine.model, "kv_cache_formats", ("fp16",))),
+                                 "model_release": getattr(engine.model, "release", None),
                                  "target_graph": getattr(engine.model, "graph", None),
                                  "soc_generation": getattr(getattr(engine.model, "soc", None), "generation", None),
                                  "soc_class": getattr(getattr(engine.model, "soc", None), "klass", None),

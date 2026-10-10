@@ -48,6 +48,9 @@ TAPS = [5, 19, 33, 47, 61]                          # v2: hidden states after th
 STEP_MAX = 3                                        # v2: prompt remainders up to this many tokens use decode steps
 PREFILL_SPLIT = int(os.environ.get("PREFILL_SPLIT", "64"))  # v2: layers per prefill function (default: the whole chunk)
 KV_IO = os.environ.get("KV_IO", "0") == "1"                # v2: KV caches as I/O (slower decode) instead of MLState
+MIX_READERS = ("linear_attn.in_proj_qkv", "linear_attn.in_proj_z", "self_attn.q_proj", "self_attn.k_proj",
+               "self_attn.v_proj")  # rot1: rotated by a mixer seed_in (in_proj_a / b are not: BF16, unrotated input)
+MIX_WRITERS = ("linear_attn.out_proj", "self_attn.o_proj")  # rot1: rotated by seed_out
 MIXERS = ("linear_attn.in_proj_qkv", "linear_attn.in_proj_z", "linear_attn.out_proj",
           "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj")
 torch.set_grad_enabled(False)
@@ -127,15 +130,28 @@ def layer_quant(ck, i, w):
         meta = f.metadata()
     t = load_file(path)
     online = meta.get("basis") == "online"
+    # rot1: either side may be absent (e.g. a folded-R1 export without rin keeps only seed_mid)
+    s_in = int(meta["seed_in"]) if online and "seed_in" in meta else None
+    s_mid = int(meta["seed_mid"]) if online and "seed_mid" in meta else None
     for m in ("gate", "up", "down"):
-        seed = (int(meta["seed_in"]) if m != "down" else int(meta["seed_mid"])) if online else None
-        q[f"mlp.{m}_proj.weight"] = as_quant(t, m, seed)
-    if meta.get("basis") == "online":
-        q["mlp.rotation"] = (int(meta["seed_in"]), int(meta["seed_mid"]))
+        q[f"mlp.{m}_proj.weight"] = as_quant(t, m, s_mid if m == "down" else s_in)
+    if online:
+        q["mlp.rotation"] = (s_in, s_mid)
     mixer = EXPORT_DIR / f"layer_{i:02d}_mixer.safetensors"
     tm = load_file(mixer) if mixer.exists() else {}
+    mmeta = {}
+    if mixer.exists():
+        with safe_open(mixer, framework="pt") as f:
+            mmeta = f.metadata() or {}
+    # rot1 mixer rotation (RUNBOOK R0.6 / R0.7): seed_in rotates the quantized readers' input, seed_out the writer
+    # input; the factors' b moves to that basis like the MLP's (as_quant rot_seed)
+    mon = mmeta.get("basis") == "online"
+    m_in = int(mmeta["seed_in"]) if mon and "seed_in" in mmeta else None
+    m_out = int(mmeta["seed_out"]) if mon and "seed_out" in mmeta else None
+    if mon:
+        q["mix.rotation"] = (m_in, m_out)
     for name in MIXERS:  # the export's quantized matrix; the checkpoint's dense one only where the export has none
-        quant = as_quant(tm, name)
+        quant = as_quant(tm, name, m_in if name in MIX_READERS else m_out if name in MIX_WRITERS else None)
         if quant is not None:
             q[f"{name}.weight"] = quant
         elif f"{name}.weight" in w:
