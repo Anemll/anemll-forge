@@ -16,6 +16,8 @@
 #   SUMMARY_THINK 1: keep thinking for context-summary requests (Pi's compaction); default 0: they run without
 #   PORT          listen port (default: 8765)
 #   BIND_HOST     listen address (default: 127.0.0.1; set 0.0.0.0 to expose)
+#   CORS_ORIGINS  browser origins (comma list, or *) allowed to read GET /health and /v1/models, e.g. a live
+#                 readout page (default: none; completions are never readable cross-origin)
 #   DRAFT         on (default, sibling drafter/), off/--plain, or a path to a *.aimodel package
 #   DRAFTER       directory holding the drafter config.json + selector.safetensors (default: package parent)
 #   PY            python with the inference environment (default: .venv/bin/python if present, else python3)

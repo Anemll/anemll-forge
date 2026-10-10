@@ -57,6 +57,9 @@ def parse(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--cors-origin", default=os.environ.get("CORS_ORIGINS", ""),
+                   help="comma-separated browser origins (or *) that may read GET /health and /v1/models, e.g. a live "
+                        "readout page; default: none (env CORS_ORIGINS). Completions are never readable cross-origin")
     p.add_argument("--model-dir", required=True, help="Core AI target package directory")
     p.add_argument("--hf", required=True, help="checkpoint/bundle dir: tokenizer, chat template, embedding")
     p.add_argument("--runtime", choices=("coreai", "coreml"), default="coreai")
@@ -496,7 +499,13 @@ class Engine:
         b = self.budgets.get(effort or "medium", self.budgets.get("medium", 0)) if thinking else 0
         return min(b, max(max_tokens - ANSWER_RESERVE, max_tokens // 2)) if b else 0
 
-    def generate(self, ids, max_tokens, temp, top_p, top_k, stop, seed, on_text, presence=None, dry=None,
+    def generate(self, *args, **kwargs):
+        try:
+            return self._generate(*args, **kwargs)
+        finally:
+            self.decode_live = None  # /health reports idle after every turn, including a failed one
+
+    def _generate(self, ids, max_tokens, temp, top_p, top_k, stop, seed, on_text, presence=None, dry=None,
                  think_budget=0):
         logits, reused = self.prefill(ids)
         self.think_forced, self.think_n = 0, None
@@ -539,6 +548,9 @@ class Engine:
                 log(f"decode: {len(out)} tok, {el:.0f}s, {len(out) / max(el, 1e-9):.1f} tok/s"
                     + (f", {len(out) / max(1, self.cycles):.2f} tok/verify, accept {self.accept_rate():.0f}%, {self.cycle_ms()}"
                        if self.drafter is not None else ""))
+            el = time.perf_counter() - decode_started  # live stats for /health (visible while the turn runs)
+            self.decode_live = {"active": True, "tokens": len(out), "seconds": el,
+                                "tokens_per_second": len(out) / max(el, 1e-9)}
             if not done and len(out) >= next_check:  # loop guard: the tail repeats with a fixed period
                 next_check = len(out) + 32
                 per = loop_period(out, self.a.loop_guard)
@@ -732,20 +744,47 @@ class StreamSplitter:
         return out
 
 
+CORS_PATHS = ("/health", "/v1/models", "/models")
+
+
 def make_handler(engine):
+    cors = {o.strip() for o in (engine.a.cors_origin or "").split(",") if o.strip()}
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def log_message(self, *args):
             pass
 
+        def _cors(self):  # read-only status for an allowed browser origin; never on completions
+            if not cors or self.command not in ("GET", "OPTIONS") or self.path.split("?")[0].rstrip("/") not in CORS_PATHS:
+                return False
+            origin = self.headers.get("Origin")
+            if "*" in cors:
+                self.send_header("Access-Control-Allow-Origin", "*")
+            elif origin in cors:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            else:
+                return False
+            return True
+
         def _json(self, code, obj):
             body = json.dumps(obj).encode()
             self.send_response(code)
+            self._cors()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_OPTIONS(self):  # preflight: only GET of the status endpoints, only for allowed origins
+            ok = self.headers.get("Access-Control-Request-Method", "GET") == "GET"
+            self.send_response(204 if ok else 403)
+            if ok and self._cors():
+                self.send_header("Access-Control-Allow-Methods", "GET")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def do_GET(self):
             if self.path.rstrip("/") in ("/v1/models", "/models"):
@@ -763,7 +802,8 @@ def make_handler(engine):
                                  "ane_bonded_compile_mode": getattr(engine.model, "bonded_compile_mode", None),
                                  "active_context_entry": getattr(engine.model, "ctx", engine.ctx),
                                  "prefill": getattr(engine, "prefill_stats", None),
-                                 "decode": getattr(engine, "decode_stats", None)})
+                                 "decode": getattr(engine, "decode_stats", None),
+                                 "decode_live": getattr(engine, "decode_live", None)})
             else:
                 self._json(404, {"error": {"message": "not found"}})
 
