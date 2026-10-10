@@ -39,7 +39,7 @@ The requirements file provides starting version pins for inference from prepared
 
 Model files: **[anemll/anemll-forge-qwen3.8-27B](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main)** — [Core AI target](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/coreai), [DFlash2 drafter](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/drafter), and [tokenizer/config/embeddings](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/main/model).
 
-**Model update (4 October 2026):** the published target packages ([revision `1192a9c`](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/1192a9c83d1b3e7ad76602ed6ec6d05e6852cad2)) use the [faster exact ANE graph](#faster-ane-graph-conversion-default) and a V8-only cache: FP16 keys, INT8 values. The target weights, output head, tokenizer/embeddings and tested Core AI DFlash2 drafter are unchanged. The first start compiles the new packages once (about 23 minutes on M6). Prepared context entries are **8K, 16K, 32K, 48K and 64K**. The previous revision [`cd7dfc6`](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/cd7dfc605ccad091b961f7788939c30d01c3793e) has selectable FP16/V8 packages with the earlier graph; older revisions are FP16-only. The server startup line and `/health` report which graph and cache format are loaded.
+**Model update (10 October 2026, release 0.2):** the published target packages use three-bit MLP weights and online token-mixer rotations fitted with GPTQ and QAT, with the faster ANE graph, transposed FP16 keys and INT8 values. The matching output head and DFlash2 package were also rebuilt; download the complete pair into a new directory. Both M6 and M5 function sets ship in the bundle. Prepared context entries are **8K, 16K, 32K, 48K and 64K**. The first start compiles the new packages once. The server startup line and `/health` report the loaded release, graph and cache format. The [4 October revision `1192a9c`](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/1192a9c83d1b3e7ad76602ed6ec6d05e6852cad2) retains release 0.1 weights; the older [`cd7dfc6`](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B/tree/cd7dfc605ccad091b961f7788939c30d01c3793e) has selectable FP16/V8 packages with the earlier graph.
 
 Use the helper to download the complete matching pair and verify its file inventory:
 
@@ -57,6 +57,14 @@ python forge.py quick-test \
 The helper resolves `main` to a Hub commit, downloads the target, drafter, tokenizer/config, embeddings, and license/provenance documents, and verifies hashes. Use a full Hub commit instead of `main` for reproducible runs. If access requires authentication, use `hf auth login` with your own account. Keep the bundle layout intact; original BF16 weights and Core ML model packages are unnecessary for this inference path. See the [download and bundle guide](docs/HUGGING_FACE.md).
 
 When upgrading an existing download, choose a **new output directory**, for example `export FORGE_BUNDLE="$HOME/Models/anemll-forge-qwen3.8-27B-v8"`, before running the download and quick-test commands. The helper rejects an output directory containing a different release inventory. A runtime flag cannot add V8 inputs to an older FP16-only model package.
+
+### Check an installed bundle for updates
+
+```sh
+python scripts/check_update_model.py --bundle "$FORGE_BUNDLE"
+```
+
+This fetches only the latest release inventory, compares model, tokenizer and matching drafter hashes, and reports whether model files or only release metadata changed. It prints a download command pinned to the checked Hub commit with a new output directory. It does not replace the installed model or restart the server. `--bundle` defaults to `FORGE_BUNDLE`, then `~/Models/anemll-forge-qwen3.8-27B`; `--repo` and `--revision` select another repository or release. Add `--json` for scripts: completed checks exit 0, and failed checks exit 1. This is an inventory comparison; use `forge.py quick-test --check-only` to verify local file integrity. After downloading, test the new bundle, stop the server, and switch `FORGE_BUNDLE` to the new directory before restarting.
 
 ## 3. Run a quick inference test
 

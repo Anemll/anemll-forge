@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -114,7 +115,14 @@ class ConverterSwitchTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        import qwen38_coreai_build as B
+        # These CPU tests need architecture dimensions, not a downloaded checkpoint.
+        config = dict(linear_num_key_heads=16, linear_num_value_heads=48,
+                      linear_key_head_dim=128, linear_value_head_dim=128,
+                      num_attention_heads=24, num_key_value_heads=4, head_dim=256,
+                      hidden_size=5120, intermediate_size=17408, rms_norm_eps=1e-6,
+                      rope_parameters={"partial_rotary_factor": 0.25})
+        with patch("qwen38_ane_model.cfg", return_value=config):
+            import qwen38_coreai_build as B
         cls.B = B
 
     def setUp(self):

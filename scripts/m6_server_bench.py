@@ -131,6 +131,13 @@ def main():
                 raise TimeoutError("startup deadline exceeded")
             assert h["kv_cache_dtype"] == a.format
             r["load_wall_s"] = time.time() - r["started_at"]
+            loaded_build = Path(h.get("model_build") or a.build)
+            r["loaded_build"] = str(loaded_build)
+            loaded_manifest = json.loads((loaded_build / "manifest.json").read_text())
+            r["source_numerics"] = r["numerics"]
+            r["numerics"] = loaded_manifest["chunks"][0].get("numerics")
+            r["soc_class"] = h.get("soc_class")
+            r["model_release"] = h.get("model_release")
             save()
             warm = {"model": "qwen38-27b-ane", "temperature": 0, "max_tokens": 1, "stream": False,
                     "chat_template_kwargs": {"enable_thinking": False},
@@ -163,7 +170,7 @@ def main():
                      draft_accept_percent=[q["decode"]["draft_accept_percent"] for q in r["requests"][1:]],
                      replies_identical=len({q["content_sha256"] for q in r["requests"]}) == 1,
                      reply_sha256=cold["content_sha256"])
-            audit = subprocess.run([a.python, str(ROOT / "coreai/inspect_coreai_cache.py"), "--model-dir", str(a.build),
+            audit = subprocess.run([a.python, str(ROOT / "coreai/inspect_coreai_cache.py"), "--model-dir", str(loaded_build),
                                     "--kv-cache-dtype", a.format, "--drafter", str(draft), "--executable", a.python,
                                     "--strict"], capture_output=True, text=True, timeout=300)
             r["strict_cached_graph_audit_returncode"] = audit.returncode

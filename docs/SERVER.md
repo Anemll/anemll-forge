@@ -88,7 +88,7 @@ How to read it:
 - **Time left** starts from a model of the build settings (here 27m33s, about 20% high) and is rescaled by the measured package times, so it is close after the first package. A slow package (2m33s here) raises it until the next ones finish.
 - **Later starts** print `all 18 packages already compiled for this Mac (macOS 26A434): loading from cache`.
 
-`GET /health` reports the loaded state: `kv_cache_dtype`, `kv_cache_formats`, `target_graph`, `context` (the cap), `active_context_entry`, `position`, and the last prefill and decode statistics.
+`GET /health` reports the loaded state: `model_release`, `model_build` (the actual loaded directory, including the derived M5 build), `kv_cache_dtype`, `kv_cache_formats`, `target_graph`, `context` (the cap), `active_context_entry`, `position`, and the last prefill and decode statistics. `decode_live` reports the running turn's token count, elapsed seconds and tokens per second, and returns to `null` when the turn finishes or fails. Browser reads of status require an allowed `--cors-origin` / `CORS_ORIGINS`; completions do not receive CORS headers.
 
 ## Generation defaults (per request)
 

@@ -197,7 +197,7 @@ class CliTests(unittest.TestCase):
 
     def test_mil_skeleton_without_coremltools_does_not_build(self):
         buf = io.StringIO()
-        with unittest.mock.patch("sys.stdout", buf):
+        with unittest.mock.patch("sys.stdout", buf), unittest.mock.patch("m6_attn_compute.ct", None):
             code = main(["mil-skeleton", "--ctx", "64", "--build"])
         self.assertEqual(code, 0)
         payload = json.loads(buf.getvalue())

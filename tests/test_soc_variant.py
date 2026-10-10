@@ -53,16 +53,23 @@ class SocVariantTests(unittest.TestCase):
                     (root / name).mkdir()
                     (root / name / "main.mlirb").write_bytes(b"x" * 100)
                 (root / "manifest.json").write_text(json.dumps(manifest()))
+                (root / "basis.json").write_text('{"basis_id": "test"}')
+                (root / "R.npy").write_bytes(b"rotation fixture")
                 self.assertEqual(soc_variant.prepare(root, "m6", log=lambda m: None, state=state), root)
                 out = soc_variant.prepare(root, "m5", log=lambda m: None, state=state)
                 self.assertNotEqual(out, root)
                 self.assertEqual(calls, [("chunk_0.aimodel", {"v8_8k_m5": "v8_8k", "p64_8k_m5": "p64_8k"}),
                                          ("chunk_1.aimodel", {"v8_8k_m5": "v8_8k", "p64_8k_m5": "p64_8k"})])
                 self.assertTrue((out / "head_T8.aimodel").is_symlink())
+                for name in ("basis.json", "R.npy"):
+                    self.assertEqual((out / name).read_bytes(), (root / name).read_bytes())
                 self.assertEqual(json.loads((out / "manifest.json").read_text())["chunks"][1]["entries"],
                                  ["v8_8k", "p64_8k"])
                 self.assertFalse(any(p.name.endswith(".partial.aimodel") for p in out.iterdir()))
                 self.assertEqual(soc_variant.prepare(root, "m5", log=lambda m: None, state=state), out)
+                (out / "R.npy").unlink()
+                self.assertEqual(soc_variant.prepare(root, "m5", log=lambda m: None, state=state), out)
+                self.assertEqual((out / "R.npy").read_bytes(), (root / "R.npy").read_bytes())
                 self.assertEqual(len(calls), 2)  # reused, not derived again
         finally:
             sys.modules.pop("strip_functions", None)

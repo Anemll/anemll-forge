@@ -56,6 +56,10 @@ def prepare(root: Path, soc: str, log=print, state: Path | None = None) -> Path:
     state = Path(state or os.environ.get("ANEMLL_FORGE_STATE") or Path.home() / ".anemll-forge")
     out = state / "builds" / f"{root.name}-{soc}-{hashlib.sha256(raw).hexdigest()[:12]}"
     if (out / "manifest.json").exists():
+        # Repair cached builds derived before rotation sidecars were preserved.
+        for name in ("basis.json", "R.npy"):
+            if (root / name).is_file() and not (out / name).exists():
+                shutil.copy2(root / name, out / name)
         log(f"[{soc}] using the {soc} build derived from {root}: {out}")
         return out
     sys.path.insert(0, str(ROOT / "coreai"))
@@ -85,6 +89,10 @@ def prepare(root: Path, soc: str, log=print, state: Path | None = None) -> Path:
     head = man["head"]["file"]
     if not (out / head).exists():
         (out / head).symlink_to((root / head).resolve(), target_is_directory=True)
+    # Folded residual builds need these alongside the derived manifest too.
+    for name in ("basis.json", "R.npy"):
+        if (root / name).is_file():
+            shutil.copy2(root / name, out / name)
     (out / "manifest.json").write_text(json.dumps(derived_manifest(man, soc, root), indent=1))
     log(f"[{soc}] {soc} build ready in {time.time() - t0:.0f}s")
     return out

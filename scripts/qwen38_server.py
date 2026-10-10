@@ -787,15 +787,17 @@ def make_handler(engine):
             self.end_headers()
 
         def do_GET(self):
-            if self.path.rstrip("/") in ("/v1/models", "/models"):
+            path = self.path.split("?", 1)[0].rstrip("/")
+            if path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "anemll",
                                                              "max_model_len": engine.ctx}]})
-            elif self.path.rstrip("/") in ("/health", "/v1/health"):
+            elif path in ("/health", "/v1/health"):
                 self._json(200, {"status": "ok", "model": MODEL_ID, "context": engine.ctx,
                                  "position": engine.model.pos,
                                  "kv_cache_dtype": getattr(engine.model, "kv_cache_dtype", "fp16"),
                                  "kv_cache_formats": list(getattr(engine.model, "kv_cache_formats", ("fp16",))),
                                  "model_release": getattr(engine.model, "release", None),
+                                 "model_build": str(engine.model.root) if hasattr(engine.model, "root") else None,
                                  "target_graph": getattr(engine.model, "graph", None),
                                  "soc_generation": getattr(getattr(engine.model, "soc", None), "generation", None),
                                  "soc_class": getattr(getattr(engine.model, "soc", None), "klass", None),

@@ -15,7 +15,7 @@ class QuantizationRoundTrip(unittest.TestCase):
         w = torch.randn(32, 32)
         x = torch.randn(96, 32)
         h = x.T @ x / len(x)
-        for name in ("vector 2x16 + pcs", "LUT4 per-tensor + pcs", "INT8 per-channel"):
+        for name in ("vector 2x16 + pcs", "vector 2x64 + pcs", "LUT4 per-tensor + pcs", "INT8 per-channel"):
             with self.subTest(format=name):
                 rnd = make_rounder(w, FORMATS[name][1], device="cpu")
                 q = gptq(w, h, rnd, block=16)

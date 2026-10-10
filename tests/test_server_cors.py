@@ -3,6 +3,7 @@ import http.client
 import sys
 import threading
 import unittest
+from unittest.mock import Mock
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +31,18 @@ def request(srv, method, path, headers, body=None):
 class CorsTests(unittest.TestCase):
     ORIGIN = {"Origin": "http://localhost:5173"}
 
+    def test_live_decode_cleared_on_success_and_failure(self):
+        engine = S.Engine.__new__(S.Engine)
+        engine.decode_live = {"active": True}
+        engine._generate = Mock(return_value="done")
+        self.assertEqual(engine.generate(), "done")
+        self.assertIsNone(engine.decode_live)
+        engine.decode_live = {"active": True}
+        engine._generate = Mock(side_effect=RuntimeError("test failure"))
+        with self.assertRaises(RuntimeError):
+            engine.generate()
+        self.assertIsNone(engine.decode_live)
+
     def test_off_by_default(self):
         srv = serve("")
         try:
@@ -42,6 +55,8 @@ class CorsTests(unittest.TestCase):
         srv = serve("http://localhost:5173")
         try:
             self.assertEqual(request(srv, "GET", "/health", self.ORIGIN)[:2], (200, "http://localhost:5173"))
+            for path in ("/health/?t=1", "/v1/models?t=1"):
+                self.assertEqual(request(srv, "GET", path, self.ORIGIN)[:2], (200, "http://localhost:5173"))
             self.assertEqual(request(srv, "GET", "/health", {"Origin": "https://evil.example"})[1], None)
             post = {**self.ORIGIN, "Content-Type": "application/json"}
             self.assertEqual(request(srv, "POST", "/v1/chat/completions", post, b"{bad")[1], None)  # never on completions
