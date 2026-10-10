@@ -56,12 +56,14 @@ def probe(pkg: Path) -> dict:
     import numpy as np
     import coreai_bridge as B
     alog = pkg.parent / f".aned_{pkg.stem}.log"
-    ls = subprocess.Popen(["/usr/bin/log", "stream", "--info", "--predicate", 'process == "aned"'],
-                          stdout=open(alog, "w"), stderr=subprocess.STDOUT)
-    time.sleep(2)
+    with open(alog, "w") as logfile:
+        ls = subprocess.Popen(["/usr/bin/log", "stream", "--info", "--predicate", 'process == "aned"'],
+                              stdout=logfile, stderr=subprocess.STDOUT)
     res = {"package": pkg.name, "entries": {}, "error": None}
     w0, t0 = wired_gb(), time.time()
     try:
+        time.sleep(2)
+        t0 = time.time()
         model = B.Model(pkg, compute="ane")
         res["load_s"] = round(time.time() - t0, 1)
         for name in model.function_names:
@@ -83,8 +85,14 @@ def probe(pkg: Path) -> dict:
         res["wired_gb"] = round(wired_gb() - w0, 2)
     except Exception as e:  # noqa: BLE001
         res["error"] = f"{type(e).__name__}: {str(e)[:300]}"
-    time.sleep(2)
-    ls.terminate()
+    finally:
+        # Also stop the logger on Ctrl-C or a failed load; do not leave it streaming.
+        ls.terminate()
+        try:
+            ls.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            ls.kill()
+            ls.wait()
     stats = sorted({(int(a), int(b)) for a, b in re.findall(r"ANE Model Stats\] : modelSize=(\d+) : wiredMemory=(\d+)",
                                                              alog.read_text(errors="replace"))})
     res["ane_programs"] = [{"modelSize": a, "wiredMemory": b} for a, b in stats]
@@ -96,11 +104,15 @@ def probe(pkg: Path) -> dict:
     for d in CACHE.glob(f"*/{proc}/{digest}/*/model.aimodelx"):
         for g in d.rglob("*.mpsgraph"):
             b = g.read_bytes()
-            gpu += len(set(re.findall(rb"_GPU_region_\d+", b)))
+            gpu += len(set(re.findall(rb"[A-Za-z0-9_-]+_GPU_region_[A-Za-z0-9_]+", b)))
             msgs.update(m.decode() for m in re.findall(rb"Unsupported [ -~]{5,120}", b))
         for mf in d.rglob("manifest.plist"):
             modes.update(int(m) for m in re.findall(rb"aneBondedCompileMode\W+(\d+)", mf.read_bytes()))
     res.update({"gpu_regions": gpu, "unsupported": sorted(msgs), "compile_modes": sorted(modes)})
+    from inspect_coreai_cache import inspect_package
+    build = subprocess.run(["sw_vers", "-buildVersion"], check=True, capture_output=True, text=True).stdout.strip()
+    audit = inspect_package(pkg, list(res["entries"]), CACHE, build, sys.executable)
+    res["placement"] = audit["status"]
     return res
 
 
@@ -253,8 +265,11 @@ class Run:
 
 def main():
     if len(sys.argv) > 2 and sys.argv[1] == "probe":
-        print(json.dumps(probe(Path(sys.argv[2]).resolve())), flush=True)
-        return
+        result = probe(Path(sys.argv[2]).resolve())
+        print(json.dumps(result), flush=True)
+        # Core AI may silently fall back to GPU while reporting a successful load.
+        # Fail closed so a shell `probe ... || exit $?` guard actually works.
+        return int(bool(result.get("error")) or result.get("placement") != "fully_ane")
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="~/Models/vq27b/coreai_mixr6")
     ap.add_argument("--export", default="~/Models/vq27b/export/mix25in_mixr_lr64mix")
@@ -278,4 +293,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
