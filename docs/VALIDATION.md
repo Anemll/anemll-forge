@@ -1,5 +1,7 @@
 # Initial port validation — 2026-09-29
 
+Latest downloaded-release check: [release 0.2 on the base M5, October 10](VALIDATION_M5_RELEASE_0_2.md), including cold compilation, 8K/16K server profiles, ANE placement and streaming API checks.
+
 Passed:
 
 - Parsed all 107 Python files with `ast.parse` (no model imports or execution).
