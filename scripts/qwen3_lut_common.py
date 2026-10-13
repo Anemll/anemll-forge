@@ -156,7 +156,7 @@ FORMATS = {  # name: (bits/weight of indices, spec)
     # unchanged (qwen38_mlp_ane_probe.py); the scale adds 16 bits per output channel.
     "LUT4 per-tensor + pcs": (4, ("group", 0, 4, "pcs")),
     "vector 2x16 + pcs": (2, ("vector", 2, 4, False, "pcs")),
-    "vector 2x64 + pcs": (3, ("vector", 2, 6, False, "pcs")),  # 6-bit indices (read like 8-bit on the ANE)
+    "vector 2x64 + pcs": (3, ("vector", 2, 6, False, "pcs")),  # one 6-bit index per pair; export uint8, compiler/package packing is separate
     "vector 4x64 + pcs": (1.5, ("vector", 4, 6, False, "pcs")),
     "vector 4x16 + pcs": (1, ("vector", 4, 4, False, "pcs")),
     "ternary + pcs": (2, ("tern",)),  # 1.58 bits of information, stored as 2-bit LUT indices on the ANE
@@ -196,37 +196,54 @@ def kmeans_grouped_codebook(w, group, nb, cw, iters=40, fit_cols=1 << 16, seed=0
     return c.half().float()  # (groups, entries), fp16-exact
 
 
+KMEANS_SAMPLE = int(os.environ.get("KMEANS_SAMPLE", "300000"))
+KMEANS_INIT = int(os.environ.get("KMEANS_INIT", "3"))
+# KMEANS_THREADS=1: fit the vector k-means single-threaded, so the same seed gives the same codebook every run (with
+# sklearn's default threading, two fits of one matrix with one seed can differ: rot1 M0, 2026-10-08). 0 = historical.
+KMEANS_THREADS = int(os.environ.get("KMEANS_THREADS", "0"))
+
+
 def kmeans_vector_codebook(w, cd, nb, cw, fp8=False, seed=0):
     """Per-tensor vector LUT: one index -> cd consecutive output channels at one input index."""
     cout, cin = w.shape
     v = w.reshape(cout // cd, cd, cin).permute(0, 2, 1).reshape(-1, cd).numpy()
     sw = None if cw is None else np.tile(cw.numpy(), cout // cd)
-    pick = np.random.default_rng(seed).choice(len(v), min(300_000, len(v)), replace=False)
+    # KMEANS_SAMPLE / KMEANS_INIT (defaults 300000 / 3, the release): the 2x16 codebook has competing optima; two GPTQ
+    # runs of one recipe landed in different ones for layer 0 down (95% of indices differ, LUT entries up to 3.0 apart)
+    pick = np.random.default_rng(seed).choice(len(v), min(KMEANS_SAMPLE, len(v)), replace=False)
     from sklearn.cluster import KMeans  # lazy: only quantization needs it (the serving venvs may lack sklearn)
-    km = KMeans(1 << nb, n_init=3, max_iter=200, random_state=seed)
-    c = km.fit(v[pick], sample_weight=None if sw is None else sw[pick]).cluster_centers_.astype(np.float32)
+    km = KMeans(1 << nb, n_init=KMEANS_INIT, max_iter=200, random_state=seed)
+    if KMEANS_THREADS:  # sklearn's multithreaded Lloyd is not run-to-run repeatable (OpenMP reductions; rot1 M0)
+        from threadpoolctl import threadpool_limits
+        with threadpool_limits(KMEANS_THREADS):
+            c = km.fit(v[pick], sample_weight=None if sw is None else sw[pick]).cluster_centers_.astype(np.float32)
+    else:
+        c = km.fit(v[pick], sample_weight=None if sw is None else sw[pick]).cluster_centers_.astype(np.float32)
     if fp8:  # FP8 E4M3 LUT values with one fp16 per-tensor scale
         s = np.float16(np.abs(c).max() / 240)
         c = (c / np.float32(s)).astype(ml_dtypes.float8_e4m3fn).astype(np.float32) * np.float32(s)
     return torch.from_numpy(c).half().float()  # (entries, cd), fp16-exact like the ANE's LUT
 
 
-def make_rounder(w, spec, cw=None, device=None):
-    """Rounder for format `spec` fitted on w (CPU); it runs on `device` (default: w's device)."""
+def make_rounder(w, spec, cw=None, device=None, seed=0):
+    """Rounder for format `spec` fitted on w (CPU); it runs on `device` (default: w's device). seed: the k-means
+    init / subsample seed (qwen38_gptq_27b.py KMEANS_SEED; 0 = the historical default)."""
     kind, device = spec[0], device or w.device
     if kind == "fp8":  # FP8 E4M3 per output channel; the ANE reads FP8 weight codes <= 240
         s = (w.abs().amax(1, keepdim=True) / 240).half().float()
         return lambda x: torch.from_numpy(  # CPU only (ml_dtypes)  # saturate: GPTQ updates can push codes past 240
             (x / s).clamp(-240, 240).numpy().astype(ml_dtypes.float8_e4m3fn).astype(np.float32)) * s  # noqa
     if kind == "int8":
-        s = (w.abs().amax(1, keepdim=True) / 127).clamp_min(1e-12).half().float().to(device)
+        # Clamp after the storage cast: 1e-12 rounds to zero in FP16, causing 0/0
+        # for zero rows. 2**-24 is the smallest positive FP16 value.
+        s = (w.abs().amax(1, keepdim=True) / 127).half().float().clamp_min(2.0 ** -24).to(device)
         out = lambda x: (x / s).round().clamp(-127, 127) * s  # noqa: E731
         out.codebook, out.cd, out.row_scale, out.int8 = None, 1, s, True
         return out
     if spec[-1] == "pcs":  # per-output-channel scale after the LUT (free on the ANE): fit on w / row RMS
         s = w.pow(2).mean(1, keepdim=True).sqrt().half().float()
         s[s == 0] = 1
-        rnd = make_rounder(w / s, spec[:-1], cw, device)
+        rnd = make_rounder(w / s, spec[:-1], cw, device, seed)
         s = s.to(device)
         out = lambda x: rnd(x / s) * s  # noqa: E731
         out.codebook, out.cd, out.row_scale = rnd.codebook, rnd.cd, s
@@ -240,7 +257,7 @@ def make_rounder(w, spec, cw=None, device=None):
         return lambda x: torch.sign(x) * (x.abs() > delta) * a
     if kind == "group":
         _, group, nb = spec
-        c = kmeans_grouped_codebook(w, group or w.shape[0], nb, cw).to(device)
+        c = kmeans_grouped_codebook(w, group or w.shape[0], nb, cw, seed=seed).to(device)
 
         def rnd(x):
             xx = x.reshape(c.shape[0], -1)
@@ -248,7 +265,7 @@ def make_rounder(w, spec, cw=None, device=None):
         rnd.codebook, rnd.cd, rnd.row_scale = c, 1, None
         return rnd
     _, cd, nb, fp8 = spec
-    c = kmeans_vector_codebook(w, cd, nb, cw, fp8).to(device)
+    c = kmeans_vector_codebook(w, cd, nb, cw, fp8, seed=seed).to(device)
 
     def rnd(x):
         cout, n = x.shape
@@ -307,14 +324,19 @@ def _inv_upper(u):
     return out
 
 
-def chol_inv_upper(h):
-    """Upper U with H^-1 = U^T U (GPTQ's Hinv): H = V V^T with V upper, then U = V^-1."""
-    return _inv_upper(_chol_lower(h.flip(0, 1)).flip(0, 1))
+def chol_inv_upper(h, device=None):
+    """Upper U with H^-1 = U^T U, returned on h.device. Factor in FP64 on the requested CUDA device, otherwise
+    CPU (the hand-written path exists for the macOS LAPACK problem above). Default to h.device, not GPU visibility."""
+    device = torch.device(device) if device is not None else h.device
+    if device.type == "cuda":
+        hinv = torch.cholesky_inverse(torch.linalg.cholesky(h.to(device=device, dtype=torch.float64)))
+        return torch.linalg.cholesky(hinv, upper=True).to(h.device)
+    return _inv_upper(_chol_lower(h.cpu().double().flip(0, 1)).flip(0, 1)).to(h.device)
 
 
 def gptq(w, h, rnd, block=128, damp=0.01):
     """GPTQ with activation order: minimize ||(W - Q) X||^2 given H = X^T X / N, column by column.
-    The Hessian factorization runs on the CPU in float64; the column loop runs on w's device."""
+    The Hessian factorization uses float64 (w's CUDA device, otherwise CPU); the column loop runs on w's device."""
     dev = w.device
     h = h.cpu().double().clone()
     dead = h.diag() == 0
@@ -322,7 +344,7 @@ def gptq(w, h, rnd, block=128, damp=0.01):
     perm = h.diag().argsort(descending=True)
     w, h = w[:, perm.to(dev)].clone(), h[perm][:, perm]
     h += damp * h.diag().mean() * torch.eye(len(h), dtype=h.dtype)
-    hinv = chol_inv_upper(h).float().to(dev)
+    hinv = chol_inv_upper(h, device=dev).float().to(dev)
     q = torch.zeros_like(w)
     for i1 in range(0, w.shape[1], block):
         i2 = min(i1 + block, w.shape[1])

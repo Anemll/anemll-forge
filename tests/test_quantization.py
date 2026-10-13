@@ -2,14 +2,41 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from qwen3_lut_common import FORMATS, encode, gptq, make_rounder
+from qwen3_lut_common import FORMATS, chol_inv_upper, encode, gptq, make_rounder
 
 
 class QuantizationRoundTrip(unittest.TestCase):
+    def test_cpu_factorization_ignores_visible_cuda(self):
+        torch.manual_seed(7)
+        a = torch.randn(8, 8, dtype=torch.float64)
+        h = a.T @ a + torch.eye(8, dtype=torch.float64)
+        with patch.object(torch.cuda, "is_available", return_value=True), \
+                patch.object(torch.Tensor, "cuda", side_effect=AssertionError("CPU requested")):
+            for device in (None, "cpu", "mps"):
+                u = chol_inv_upper(h, device=device)
+                self.assertEqual(u.device.type, "cpu")
+                torch.testing.assert_close(u.T @ u, torch.linalg.inv(h), rtol=1e-10, atol=1e-10)
+            w = torch.randn(4, 8)
+            rnd = make_rounder(w, FORMATS["INT8 per-channel"][1], device="cpu")
+            self.assertTrue(torch.isfinite(gptq(w, h, rnd)).all())
+
+    def test_int8_scales_remain_positive_after_fp16_storage(self):
+        w = torch.tensor([[0., 0., 0.], [1e-7, 0., -1e-7], [1., -.5, .25]])
+        rnd = make_rounder(w, FORMATS["INT8 per-channel"][1], device="cpu")
+        q = gptq(w, torch.eye(3), rnd, block=2)
+        _, codes, scales = encode(rnd, q)
+        self.assertTrue(torch.isfinite(q).all())
+        self.assertTrue((scales > 0).all())
+        torch.testing.assert_close(q[0], torch.zeros(3), rtol=0, atol=0)
+        torch.testing.assert_close(codes.float() * scales.float()[:, None], q, rtol=0, atol=0)
+        # Ordinary rows keep the original FP16-rounded scale.
+        self.assertEqual(scales[-1], (w[-1].abs().max() / 127).half())
+
     def test_gptq_export_reconstructs_quantized_weights(self):
         torch.manual_seed(7)
         w = torch.randn(32, 32)

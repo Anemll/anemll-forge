@@ -6,6 +6,8 @@ The first model is an independent ANEMLL adaptation of **[Qwen/Qwen3.8-27B](http
 
 **Release 0.2** replaces the quantized weights: every MLP matrix is a three-bit vector lookup table, the token mixers get online Hadamard rotations, and the weights are fitted by GPTQ and quantization-aware training (QAT) against the BF16 model. On the M6 ANE, KL-512 to BF16 falls from 0.184 to **0.052** and top-1 agreement rises from 86.0% to **91.9%**, at the previous packages' speed and with less compiled ANE memory. Details: [quantization](docs/QUANTIZATION.md#release-02-three-bit-mlp-and-token-mixer-rotations).
 
+The [quantization training guide](docs/QUANTIZATION_TRAINING.md) covers the included GPTQ, centroid fitting, QAT, corpus generation and export materialization code, with source provenance and reproduction limits.
+
 ## Hardware and software
 
 - **M6 is the main development and performance target.** M5, M5 Pro, and M5 Max are also supported; expect roughly half the M6 throughput (about 2× slower) for comparable ANE workloads. This is approximate guidance, not a matched benchmark across every chip and context size.

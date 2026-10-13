@@ -12,6 +12,19 @@ Size axis (as in the reference chart): quantized weight bytes excluding embeddin
     TRACE=/path/to/data/vq27b/kl python qwen38_kl.py generate
     python qwen38_kl.py reference
     EXPORT_DIR=/path/to/data/vq27b/runs/export/full_mix25_mixer4_head4 python qwen38_kl.py eval
+
+rot1 (next/rot1/RUNBOOK.md R0.2; off by default):
+ROT_DIR=<rot1/ckpt/<name>> (eval): the model is folded into that basis on load (scripts/rot1_fold.py: FP32 compute on
+  ROT_FOLD_DEVICE, default cpu, then the pipeline's BF16 cast; ROT_EMBED_FP16=1 (default) rounds the rotated
+  embedding through fp16 first, as the ANE's embed_tokens_fp16.npy). An export's basis.json must match ROT_DIR (refused
+  otherwise). Without EXPORT_DIR this is check (b): the rounding floor of the rotated BF16 model vs the BF16 reference.
+  Mixer files with header basis=online (MIX_ROT, R0.7) are rotated back (seed_in / seed_out) like the MLP's.
+precision (checks (a) and (c)): streamed layer by layer in FP32 on PREC_DEVICE (default cpu): one decoder layer at a
+  time from the original checkpoint, the original and the folded copy, on PREC_NSEQ (4) sequences of the trace cut to
+  PREC_SEQ (512) tokens. Per layer the residual (un-rotated) max |diff| relative to max |h|, the taps (layers
+  5, 19, 33, 47, 61), and at the end the logits: max |diff| and KL(orig || rotated) over the full vocabulary (fp64).
+  Writes TRACE/precision_<basis name>.json. PREC_NLAYERS=<n>: smoke test on the first n layers (then the head).
+    ROT_DIR=.../rot1/ckpt/u15r1h TRACE=.../kl python qwen38_kl.py precision
 """
 import json
 import os
@@ -35,6 +48,8 @@ PARTS = set(os.environ.get("PARTS", "mlp,attn,gdn,head").split(","))
 QLAYERS = tuple(int(x) for x in os.environ["QLAYERS"].split("-")) if os.environ.get("QLAYERS") else (0, 10 ** 9)
 # LR_RANK=r: add the rank-r SVD of the quantization error (W_bf16 - W_q) to every applied matrix (closed-form
 # low-rank / LoRA-style error compensation, fp16 A @ B next to the LUT weight on the ANE)
+# MATS: the MLP matrices quantized when "mlp" is in PARTS (per-matrix sensitivity), the rest stay bf16
+MATS = set(os.environ.get("MATS", "gate,up,down").split(","))
 LR_RANK = int(os.environ.get("LR_RANK", "0"))
 LR_PARTS = set(os.environ.get("LR_PARTS", "mlp,attn,gdn").split(","))  # parts that get the low-rank correction
 
@@ -57,7 +72,8 @@ def with_lowrank(orig, q, part="mlp"):
 TOPK = int(os.environ.get("TOPK", "256"))
 MAX_NEW = int(os.environ.get("MAX_NEW", "768"))
 BATCH = int(os.environ.get("GEN_BATCH", "16"))
-DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+DEVICE = torch.device(os.environ.get("DEVICE", "mps" if torch.backends.mps.is_available() else
+                                  "cuda" if torch.cuda.is_available() else "cpu"))
 torch.set_grad_enabled(False)
 
 PROMPTS = [
@@ -133,12 +149,31 @@ PROMPTS = [
     "A company's revenue grew 20% then fell 20%. Is it back where it started? Explain generally.",
     "Plan a test strategy for a payment service, covering unit, integration, and chaos testing.",
 ]
+# PROMPTS_FILE: a JSON list of prompts that replaces PROMPTS for `generate` (e.g. the held-out test trace
+# configs/kl/test_prompts.json; give it its own TRACE dir)
+if os.environ.get("PROMPTS_FILE"):
+    PROMPTS = json.loads(Path(os.environ["PROMPTS_FILE"]).read_text())
+
+
+ROT_BASIS = None  # rot1 basis dict of the folded model (ROT_DIR)
 
 
 def load_model():
+    global ROT_BASIS
     from transformers import AutoTokenizer, Qwen3_5ForConditionalGeneration
     tok = AutoTokenizer.from_pretrained(str(MODEL))
     model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL, dtype=torch.bfloat16, low_cpu_mem_usage=True)
+    if os.environ.get("ROT_DIR"):
+        import rot1_fold as rf
+        dev = os.environ.get("ROT_FOLD_DEVICE", "cpu")
+        r, ROT_BASIS = rf.from_env(MODEL, dev)
+        t0 = time.time()
+        rf.fold_model(model, r, ROT_BASIS["fold_norms"], dev)
+        if os.environ.get("ROT_EMBED_FP16", "1") == "1":  # the ANE reads the rotated table as fp16
+            text = model.model.language_model
+            text.embed_tokens.weight.data = (rf.fold_embed(rf.get_tensor(MODEL, rf.PREFIX + "embed_tokens.weight").to(dev), r)
+                                             .half().to(torch.bfloat16).cpu())
+        print(f"rot1: model folded into {ROT_BASIS['name']} ({time.time() - t0:.0f}s)", flush=True)
     return tok, model.eval().to(DEVICE)
 
 
@@ -199,6 +234,8 @@ def rotation(n, seed, block=1024):
 
 
 def dequant(t, key):
+    if f"{key}.tiers" in t:  # row tiers of different formats (qwen38_head_requant.py)
+        return torch.cat([dequant(t, f"{key}.t{k}") for k in range(len(t[f"{key}.tiers"]))])
     if f"{key}.weight" in t:
         return t[f"{key}.weight"].float()
     if f"{key}.int8" in t:
@@ -209,11 +246,30 @@ def dequant(t, key):
     return w * t[f"{key}.scale"].float()[:, None] if f"{key}.scale" in t else w
 
 
+LR_BYTES = 0.0  # fp16 low-rank factor bytes of the applied export (size_gib excludes them, as all history did)
+
+
 def apply_export(model):
     """Replace weights with the export's dequantized ones; returns quantized bytes (excl. embeddings, incl. head)."""
+    global LR_BYTES
+    LR_BYTES = 0.0
     text, nbytes = model.model.language_model, 0.0
+    # overlay.qat (qwen38_qat_kl.py): trained lut / scale / factor tensors "<file>::<tensor>" over the linked files
+    over = load_file(EXPORT_DIR / "overlay.qat") if (EXPORT_DIR / "overlay.qat").exists() else {}
+    # zero-byte bf16-model parameters trained by QAT (TRAIN_PARTS norm / qk / ab): "model::<parameter name>" in the
+    # overlay, or overlay_model.qat in a materialized export; applied regardless of PARTS (they are not quantized)
+    if (EXPORT_DIR / "overlay_model.qat").exists():
+        over.update(load_file(EXPORT_DIR / "overlay_model.qat"))
+    for k, v in over.items():
+        if k.startswith("model::"):
+            prm = model.get_parameter(k.split("::", 1)[1])
+            assert prm.shape == v.shape, (k, prm.shape, v.shape)
+            prm.data = v.to(prm.device, prm.dtype)
+    if any(k.startswith("model::") for k in over):
+        print(f"applied {sum(k.startswith('model::') for k in over)} trained bf16-model tensors (norms etc.)", flush=True)
     for f in sorted(EXPORT_DIR.glob("*.safetensors")):
         t = load_file(f)
+        t.update({k.split("::", 1)[1]: v for k, v in over.items() if k.startswith(f.name + "::")})
         for k, v in t.items():
             if k.endswith(".idx"):
                 nbytes += v.numel() * np.ceil(np.log2(t[k[:-4] + ".lut"].shape[0])) / 8
@@ -221,6 +277,8 @@ def apply_export(model):
                 nbytes += v.numel()
             elif k.endswith((".weight", ".scale", ".lut")):
                 nbytes += v.numel() * 2
+            elif k.endswith((".lr_a", ".lr_b")):  # fp16 low-rank factors: counted separately (size_gib_incl_lr)
+                LR_BYTES += v.numel() * 2
         if f.name == "lm_head.safetensors":
             if "head" in PARTS:
                 model.lm_head.weight.data = dequant(t, "lm_head").to(DEVICE, torch.bfloat16)
@@ -229,11 +287,18 @@ def apply_export(model):
         layer = text.layers[i]
         in_range = QLAYERS[0] <= i <= QLAYERS[1]
         if f.name.endswith("_mixer.safetensors"):
+            with safe_open(f, framework="pt") as fh:
+                mmeta = fh.metadata() or {}
             for key in {k.rsplit(".", 1)[0] for k in t}:
                 part = "attn" if key.startswith("self_attn") else "gdn"
                 if in_range and part in PARTS:
                     mod = layer.get_submodule(key)
-                    w = exported_lowrank(t, key, dequant(t, key))
+                    w = dequant(t, key)
+                    if mmeta.get("basis") == "online":  # MIX_ROT (rot1 R0.7): stored W M^T, fold M back
+                        writer = key.endswith(("out_proj", "o_proj"))
+                        if not writer or "seed_out" in mmeta:
+                            w = w @ rotation(w.shape[1], int(mmeta["seed_out" if writer else "seed_in"])).T
+                    w = exported_lowrank(t, key, w)
                     mod.weight.data = with_lowrank(mod.weight.data, w, part).to(DEVICE, torch.bfloat16)
             continue
         if not (in_range and "mlp" in PARTS):
@@ -241,6 +306,8 @@ def apply_export(model):
         with safe_open(f, framework="pt") as fh:
             meta = fh.metadata()
         for m in ("gate", "up", "down"):
+            if m not in MATS:
+                continue
             w = dequant(t, m)
             if meta.get("basis") == "online":
                 w = w @ rotation(w.shape[1], int(meta["seed_in"] if m != "down" else meta["seed_mid"])).T
@@ -267,6 +334,9 @@ def apply_export(model):
 
 def evaluate():
     tok, model = load_model()
+    if EXPORT_DIR or ROT_BASIS is not None:
+        import rot1_fold as rf
+        rf.require_same_basis(EXPORT_DIR, ROT_BASIS)
     nbytes = apply_export(model) if EXPORT_DIR else None
     ref = np.load(TRACE / "ref.npz")
     off, kls, agree, nll = 0, [], [], []
@@ -289,11 +359,97 @@ def evaluate():
     res = {"tag": tag, "tokens": int(len(kl)), "mean_kl": float(kl.mean()), "median_kl": float(np.median(kl)),
            "p99_kl": float(np.quantile(kl, 0.99)), "top1_agree": float(ag.mean()),
            "ppl": float(np.exp(nl.mean())), "ref_ppl": float(np.exp(ref["nll"].mean())),
-           "size_gib": None if nbytes is None else nbytes / 2 ** 30}
+           "size_gib": None if nbytes is None else nbytes / 2 ** 30,
+           # corrected size (QUANT_LOG §1.4 / §9.7): + the fp16 low-rank factors .lr_a / .lr_b that size_gib omits
+           "size_gib_incl_lr": None if nbytes is None else (nbytes + LR_BYTES) / 2 ** 30}
+    if ROT_BASIS is not None:
+        res.update({"basis_id": ROT_BASIS["basis_id"], "basis_name": ROT_BASIS["name"],
+                    "rot_embed_fp16": os.environ.get("ROT_EMBED_FP16", "1") == "1"})
     (TRACE / f"kl_{tag}.json").write_text(json.dumps(res, indent=1))
     np.save(TRACE / f"klpos_{tag}.npy", kl.astype(np.float32))  # per position, for tail analysis
     print(json.dumps(res), flush=True)
 
 
+def precision():
+    """rot1 G0 checks (a) and (c), streamed (see module doc)."""
+    import rot1_fold as rf
+    from safetensors import safe_open as so
+    from transformers import AutoConfig
+    from transformers.masking_utils import create_causal_mask, create_recurrent_attention_mask
+    from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DecoderLayer, Qwen3_5TextRotaryEmbedding
+    dev = torch.device(os.environ.get("PREC_DEVICE", "cpu"))
+    if dev.type == "cuda":
+        rf.strict_fp32()
+    nseq, seqlen = int(os.environ.get("PREC_NSEQ", "4")), int(os.environ.get("PREC_SEQ", "512"))
+    r, b = rf.from_env(MODEL, dev)
+    assert b is not None, "precision needs ROT_DIR"
+    cfg = AutoConfig.from_pretrained(str(MODEL)).text_config
+    cfg._attn_implementation = "eager"
+    seqs = [s[:seqlen] for s in trace() if len(s) >= seqlen][:nseq]
+    assert len(seqs) == nseq, f"need {nseq} trace sequences of >= {seqlen} tokens"
+    ids = torch.from_numpy(np.stack(seqs).astype(np.int64))
+    wmap = json.loads((MODEL / "model.safetensors.index.json").read_text())["weight_map"]
+
+    def get(k):
+        with so(MODEL / wmap[k], framework="pt") as fh:
+            return fh.get_tensor(k)
+    t0 = time.time()
+    emb = get(rf.PREFIX + "embed_tokens.weight")[ids].float().to(dev)  # (B, T, H)
+    h_o = emb
+    h_r = emb if r is None else emb @ r.to(dev).T
+    rot = Qwen3_5TextRotaryEmbedding(cfg).to(dev)
+    pos = torch.arange(seqlen, device=dev).view(1, 1, -1).expand(4, len(seqs), -1)
+    kw = dict(config=cfg, inputs_embeds=h_o, attention_mask=None, past_key_values=None, position_ids=pos[0])
+    masks = {"full_attention": create_causal_mask(**kw), "linear_attention": create_recurrent_attention_mask(**kw)}
+    pe = rot(h_o, pos[1:])
+    unrot = (lambda x: x) if r is None else (lambda x: x @ r.to(dev))  # h = h' R
+    res = {"basis_id": b["basis_id"], "basis_name": b["name"], "r_kind": b["r_kind"], "nseq": nseq, "seq": seqlen,
+           "device": str(dev), "layers": [], "taps": {}}
+    nl = int(os.environ.get("PREC_NLAYERS", "0")) or len(cfg.layer_types)  # smoke: first N layers, then the head
+    res["nlayers"] = nl
+    for i, kind in enumerate(cfg.layer_types[:nl]):
+        pre = f"{rf.PREFIX}layers.{i}."
+        sd = {k[len(pre):]: get(k).float() for k in wmap if k.startswith(pre)}
+        with torch.device("meta"):
+            layer = Qwen3_5DecoderLayer(cfg, i)
+        layer.load_state_dict(sd, strict=True, assign=True)
+        layer = layer.to(dev, torch.float32).eval()
+
+        def run(h):
+            return layer(h, position_embeddings=pe, attention_mask=masks[kind], position_ids=pos[0],
+                         past_key_values=None, use_cache=False)
+        h_o = run(h_o)
+        rf.fold_layer_module(layer, kind, r, b["fold_norms"])
+        h_r = run(h_r)
+        d = float((unrot(h_r) - h_o).abs().max() / h_o.abs().max())
+        res["layers"].append(d)
+        if i in rf.TAPS:
+            res["taps"][str(i)] = d
+        print(f"L{i:02d} {kind[:4]}: residual rel max |diff| {d:.2e} ({time.time() - t0:.0f}s)", flush=True)
+        del layer, sd
+    g = get(rf.PREFIX + "norm.weight").float().to(dev)
+    w = get("lm_head.weight").float().to(dev)
+    wr = rf.fold_reader(w, g if b["fold_norms"] else None, r)
+    eps = cfg.rms_norm_eps
+
+    def norm(x, gain):
+        y = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+        return y * (1.0 + gain) if gain is not None else y
+    dmax, kls, agree = 0.0, [], []
+    for s in range(len(seqs)):
+        lo = norm(h_o[s], g) @ w.T
+        lr_ = norm(h_r[s], None if b["fold_norms"] else g) @ wr.T
+        dmax = max(dmax, float((lo - lr_).abs().max()))
+        po, pr = F.log_softmax(lo.double(), -1), F.log_softmax(lr_.double(), -1)
+        kls.append((po.exp() * (po - pr)).sum(-1).cpu().numpy())
+        agree.append((lo.argmax(-1) == lr_.argmax(-1)).float().cpu().numpy())
+    kl = np.concatenate(kls)
+    res.update({"logit_max_abs_diff": dmax, "kl_mean": float(kl.mean()), "kl_max": float(kl.max()),
+                "top1_agree": float(np.concatenate(agree).mean()), "residual_max_rel": max(res["layers"]),
+                "seconds": time.time() - t0})
+    (Path(os.environ.get("PREC_OUT", str(TRACE))) / f"precision_{b['name']}{'_smoke' if nl < len(cfg.layer_types) else ''}.json").write_text(json.dumps(res, indent=1))
+    print(json.dumps({k: v for k, v in res.items() if k != "layers"}), flush=True)
+
+
 if __name__ == "__main__":
-    {"generate": generate, "reference": reference, "eval": evaluate}[sys.argv[1]]()
+    {"generate": generate, "reference": reference, "eval": evaluate, "precision": precision}[sys.argv[1]]()

@@ -29,3 +29,9 @@ No full model conversion was performed during this first port. Run `python forge
 ## DFlash2 release runtime
 
 The fast release loads a Core AI DFlash2 drafter through the same Swift bridge. It needs package metadata, checkpoint configuration and predecessor/successor selector codebooks, plus the target's matching embeddings. The host uses PyTorch for candidate selection and fixes its CPU thread count to one; NumPy and safetensors remain runtime dependencies. A target-only smoke environment does not validate the complete bundle. See [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) for scheduling settings and warm-up requirements.
+
+## Quantization training source — 2026-10-13
+
+[requirements-quantization.txt](../requirements-quantization.txt) lists dependencies for GPTQ, centroid fitting, QAT and reference evaluation separately from Core AI conversion. The recovered Colab setup pinned Transformers 5.17.0 but installed most other packages without version pins; a complete historical CUDA/flash-linear-attention lockfile was not recovered. The current M3U environment described above is not a substitute for that Colab record. Choose a PyTorch build compatible with the training machine before installing the remaining requirements. CUDA QAT uses flash-linear-attention for the DeltaNet backward path; teacher CPU offload additionally needs Accelerate.
+
+The [training guide](QUANTIZATION_TRAINING.md) distinguishes the recorded release settings from CPU fixture validation. No fresh CUDA environment, full 27B training job, Core AI conversion or new performance benchmark was run as part of recovering this source.
