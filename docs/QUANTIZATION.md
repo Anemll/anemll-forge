@@ -439,6 +439,8 @@ PyTorch on M3 Ultra, KL to BF16 with the shared system prompt excluded (developm
 
 Against `u48` release 0.2 is 26.6% better on the development trace and 27.5% held out; against `u15`, 2.8% and 2.7% worse, neither significant, and better on WikiText (-9.8%) and the 16K windows (-6.0%; -5.0% [-8.1, -1.7] against the two seeds of the rotation experiment's `u15` controls).
 
+**Comparison with IQ3 baselines:** both [Unsloth UD-IQ3_XXS](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) and [Draw Things IQ3_XXS](https://huggingface.co/drawthingsai/Qwen3.8-27B-GGUF) use fine-grained block quantization with local scales; see llama.cpp's [IQ3 block definitions](https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-common.h). This block scaling is not supported by the ANE execution path used here. ANEMLL instead uses one learned vector codebook per MLP matrix with per-output-channel scales. Comparisons therefore assess fidelity and storage under different hardware constraints; these GGUF formats are not directly executable ANE alternatives. Apple's [quantization guidance](https://apple.github.io/coremltools/docs-guides/source/opt-quantization-perf.html) distinguishes per-block GPU quantization from per-channel scaling on the ANE; the [vector LUT investigation](history/VECTOR_LUT_README.md) records the tested ANE constraints.
+
 Compiled Core AI packages on the ANE (dual M6 / M5 functions, the same harness as before):
 
 | | First release | **Release 0.2** |
