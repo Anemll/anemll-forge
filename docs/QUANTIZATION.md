@@ -186,7 +186,7 @@ Promising early-layer MLP down-input scaling was later rejected after static and
 
 The runtime graph adds acceleration beyond GPTQ weight fitting. The [builder](../coreai/qwen38_coreai_build.py), [compiled-program analysis](ANE_HWX_MLIR_ANALYSIS.md), and [dated measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md) distinguish the following stages of cached-history attention:
 
-**The default cache quantizes V only.** `--kv-cache-dtype v8` stores K in FP16 and V in INT8; `--kv-cache-dtype kv8` exports a separate graph with both K and V in INT8. Both quantized caches use FP16 scales per token and KV head. The option `--kv-cache-dtype both` instead packages selectable FP16 and V8 layouts; it does not mean INT8 K plus INT8 V. Runtime selection requires matching exported functions. These cache choices are independent of the projection weights: GPTQ's `KV_FMT="INT8 per-channel"` applies to **both** `k_proj` and `v_proj`. See [cache export choices](KV_CACHE_V8.md#cache-export-choices).
+**The default cache quantizes V only.** `--kv-cache-dtype v8` stores K in FP16 and V in INT8; `--kv-cache-dtype kv8` exports a separate graph with both K and V in INT8. Within each attention layer, each quantized cache stores one FP16 scale per cached token and KV head, shared across all components of that head’s key or value vector. K and V have separate scales when both are quantized. The option `--kv-cache-dtype both` instead packages selectable FP16 and V8 layouts; it does not mean INT8 K plus INT8 V. Runtime selection requires matching exported functions. These cache choices are independent of the projection weights: GPTQ's `KV_FMT="INT8 per-channel"` applies to **both** `k_proj` and `v_proj`. See [cache export choices](KV_CACHE_V8.md#cache-export-choices).
 
 ![M6 attention uses FP16 queries and keys, INT8 scores and cached values, and FP8 softmax intermediates. The denominator branches before value scales are folded. M5 keeps softmax intermediates in FP16.](images/attention-precision.svg)
 
@@ -397,6 +397,10 @@ Release 0.2 (`release_vq3pA_mixh_s600_k1`) changes two things against the format
 ### `vector 2x64 + pcs`
 
 The same layout as [`vector 2x16 + pcs`](#2-exactly-what-vector-2x16--pcs-means) with 64 centroids instead of 16: a six-bit index selects one of 64 learned two-component centroids, the components being two consecutive output channels at the same input column, so one index covers two weights at **three bits per weight**. Packed storage is `3 × Cout × Cin / 8` bytes plus a 256-byte codebook and `2 × Cout` bytes of scales. The exported `.safetensors` keep one `uint8` per pair (four bits per weight in the file), as for 2x16.
+
+![One six-bit index selects a two-component FP16 centroid. Separate output-row scales reconstruct two weights, giving three index bits per weight.](images/vector-3bpw.svg)
+
+The illustration uses example index 7 to select the centroid `(0.5, −1.0)`. Multiplying by the two output-row scales `(2.0, 0.25)` reconstructs weights `(1.0, −0.25)` in the same input column. Each scale is shared across its entire output row, and the 64-entry codebook is shared across the matrix. The **3 bpw** figure describes the packed index payload; it excludes the FP16 codebook and row scales and does not imply INT3 arithmetic.
 
 On the ANE the table holds 128 values (64 entries of 2), within the 256-value limit of [vector LUTs](history/VECTOR_LUT_README.md). The Core AI builder packs each exported LUT with its own index width (four bits for 16 entries, six for 64). Measured on the M6, a 2x64 MLP compiles to exactly three bits per weight: a four-layer chunk's compiled program grows by 133.8 MB against 2x16, one bit for its 1.07 B MLP weights. An earlier micro-benchmark had found six-bit indices padded to eight bits; with FP16 LUT values and the current compiler they are not.
 
