@@ -243,6 +243,47 @@ The [real-layer tests](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-atte
 
 The [recorded C2 HWX excerpt](ANE_HWX_MLIR_ANALYSIS.md#5-attention-what-the-program-looks-like) makes the distinction concrete: QK has `in=float16`, `kern=fp16`, `out=int8`; the cached-value product has `in=int8`, `kern=e4m3`, `out=float16`. An INT8 **score output** does not make QK an INT8 × INT8 operation. Likewise, exporting an INT8 key cache with `kv8` does not by itself quantize the queries. W8A8 projections and INT8-query research variants were tested separately from the selected release graph.
 
+## DFlash2 and verifier optimizations
+
+Release inference pairs the quantized target with a matching DFlash2 drafter. Several graph and runtime optimizations make this practical beyond the weight formats and accelerated attention above. The [speculative-decoding guide](SPECULATIVE_DECODING.md) describes acceptance and package pairing; the measurements below are historical M6 experiments, not a new benchmark of release 0.2.
+
+### Exact block solve for Gated DeltaNet
+
+An eight-row verifier processes an anchor plus seven draft tokens. Within each Gated DeltaNet block, later rows depend on earlier rows. The chunkwise formulation resolves this through a small triangular system `(I + N) X = rhs`. Because `N` is strictly lower triangular and has eight rows, `N^8 = 0`, giving the exact finite product:
+
+$$ (I + N)^{-1} = (I - N)(I + N^2)(I + N^4). $$
+
+The [`GDN_FAST=1` implementation](../coreai/qwen38_coreai_build.py) replaces seven serial row updates with this product and a multiplication by the right-hand side. This is an implementation of the established chunkwise delta-rule formulation and its finite path sum, explained by [Songlin Yang](https://sustcsonglin.github.io/blog/2024/deltanet-2/). The ANE-specific choice is to express the small products as **broadcast multiply plus reduction**: a direct chain of computed matrix multiplications failed ANE compilation in the recorded experiment. The same switch uses native depthwise convolution and combines two state products into one during each eight-row prefill sub-block. It is enabled by default in the current builder.
+
+The [three-core microbenchmark](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#gated-deltanet-core-measured), excluding input/output projections, recorded:
+
+| Gated DeltaNet implementation | Eight-row verification | 64-row prefill |
+| --- | ---: | ---: |
+| Earlier row-by-row solve | 1.18 ms | 6.82 ms |
+| Final `GDN_FAST` combination | 0.64–0.69 ms | 3.42–3.49 ms |
+
+The variants matched the FP32 host reference within a maximum relative difference of `3e-7`; recorded device output error was unchanged at the reported precision. Algebraic equivalence does not imply bit-identical floating-point execution. A one-token recurrent step has no block solve, so this particular benefit applies to blocked verification and prefill.
+
+### Eight-row verification with deferred state commit
+
+The target keeps the current block's recurrent updates pending until acceptance is known. [`commit_pending`](../coreai/qwen38_coreai_build.py) applies only the accepted prefix on the next target call, while the [runtime's `accept(k)`](../scripts/qwen38_coreai_model.py) appends only accepted K/V rows. Rejected proposals therefore do not advance the target's committed state. The runtime also reuses Swift binding plans and persistent buffers across calls at the same context entry.
+
+Full attention uses different history-tile widths for these workloads: `ATT_BLOCK=2048` for verification and `ATT_BLOCK_PREFILL=4096` for prefill by default. The [tile-size measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#attention-history-tiles-measured) motivated smaller tiles than the earlier 16K setting; more tiles also increase cold compilation work. These controls change the compiled graph, rather than the quantized weights.
+
+The [verifier-width experiment](verifier_len.md) explains the eight-row choice. At 64K, measured full-target calls took 131.5 ms for eight rows, 127.2 ms for four and 123.1 ms for three. Shortening the block saved little while reducing the number of drafts that could be accepted. Applying the recorded acceptance distribution to those timings predicted **21–36% lower throughput** for the shorter blocks on the coding-agent workload. These percentages are an acceptance-based model with fixed non-verifier overhead, **not end-to-end server measurements of shorter verifiers**. Package entry sets also differed. Eight evaluated rows still do not guarantee eight emitted tokens.
+
+### Fused drafting and selective prompt ingestion
+
+The [Core AI drafter](../coreai/dflash2_coreai_build.py) combines up to eight newly committed target-feature rows with the next eight-row draft block in one call. Its `draft` and 64-row context-update entries share weights. The host owns the 2,048-slot K/V ring and writes returned rows after the call; putting those state writes inside the graph caused GPU placement in the recorded conversion.
+
+During prompt prefill, [`DraftIngestWindows`](../scripts/qwen38_server.py) sends the drafter only the last `W + R = 2,056` feature rows before each cached-prefix snapshot boundary and the prompt end. Earlier drafter rows would be overwritten before a draft or snapshot could use them, since each context row's K/V depends only on that row's target features. This avoids unnecessary feature copies and context-update calls while preserving the ring and pending rows needed at those boundaries. **The target still processes the entire prompt.** `DRAFT_INGEST=all` retains the full-ingestion comparison path.
+
+### Quantized drafter and matching output head
+
+The drafter's LUT4 policy uses GPTQ-fitted scalar tables with per-output-channel scaling for its large projections, INT8 per-channel weights for the small convolution-kernel projections, and an FP16 selector projection; see the [format policy](../scripts/dflash2_ane_drafter.py). The [runtime](../scripts/dflash2_coreai_drafter.py) evaluates the full target vocabulary head, then uses the upstream rank-256 chain selector over the top 16 candidates per draft position. Candidate filtering reduces host selection work; it does not remove the full vocabulary head from the graph.
+
+After target QAT, rebuild the drafter with that target export's `lm_head.safetensors` through `HEAD_EXPORT`. A stale head can reduce acceptance and invalidate a pairing comparison. The current selector proposes a deterministic path; sampling proposals from a richer drafter distribution, multi-branch verification and relaxed acceptance remain [research proposals](research/DFLASH2_SAMPLING_PLAN.md), not release optimizations.
+
 ## GPTQ, then quantization-aware training (QAT)
 
 This is how release 0.2's weights are fitted. GPTQ is the post-training quantization step: it chooses every index, lookup table, scale and low-rank factor from calibration data in one pass. QAT then trains the continuous parameters with gradients, here by distillation: the loss is the KL divergence from the BF16 model's next-token distribution. The method was developed on the first release's formats (vector 2x16 and LUT4 codes, per-channel scales, online MLP rotations, INT8 K / V projections, rank-64 mixer factors, LUT4 head); the models in the table below (`q07`, `n1`, `u48`) keep those formats, and release 0.2 applies the same flow to its own formats ([next section](#release-02-three-bit-mlp-and-token-mixer-rotations)). What changes against the first release is how the numbers are fitted: GPTQ with the low-rank factors inside the sequential pass and more calibration data, then a distillation stage that trains every continuous parameter of the export against the BF16 model while the GPTQ indices stay frozen. The run's engineering log (`QUANT_LOG_2026-10-07.md`, kept with the research data) records every experiment with paired confidence intervals.
