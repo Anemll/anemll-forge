@@ -59,6 +59,8 @@ export EXPORT_DIR="$WORK/runs/export/release02_gptq"
 
 All 192 MLP matrices use `vector 2x64 + pcs`. Mixer LUTs use the plan's allocation, while full-attention K/V projection weights use their own INT8 per-channel scales. The head uses scalar LUT4 with per-channel scales. Low-rank factors remain FP16 and act in the original input basis. The shared codebook and row scales stay fixed within each GPTQ call; the outer low-rank iterations can refit them between calls.
 
+The default converter preserves the exported K/V INT8 codes as compile-time weights; `QCONV_INT8=0` is the older FP16-expansion path. Runtime INT8 scores, the V8 cache and M6 FP8 softmax are separate from weight fitting; see [accelerated attention](QUANTIZATION.md#accelerated-attention-on-the-ane).
+
 ### 2 Generate the QAT corpus
 
 ```sh

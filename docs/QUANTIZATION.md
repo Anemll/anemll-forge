@@ -24,7 +24,7 @@ Smaller weights can make a large model more practical to run, but compression is
 
 **Activations** are the temporary values produced while processing tokens. The **KV cache** stores earlier attention keys and values, so later tokens can attend to them. **DeltaNet state** is a separate recurrent state used by the model's linear-attention layers. These are runtime data, not the saved learned weights.
 
-Our target is primarily a weight-compression recipe with floating-point execution and state. In particular, `KV_FMT="INT8 per-channel"` in the quantizer names the **attention K/V projection weights**. It does **not** mean an INT8 KV cache. The current Core AI runtime's host-owned K/V history buffers are **FP16**, as are its graph inputs for those buffers. It copies accepted rows into them without an INT8 cache-quantization step.
+The weight recipe and runtime attention precision are separate. `KV_FMT="INT8 per-channel"` names the **attention K/V projection weights**, with one FP16 scale per output channel. The release 0.2 runtime also uses a [V8 cache](KV_CACHE_V8.md): transposed FP16 keys and signed INT8 values, with one FP16 scale per token and KV head. Accepted value rows are quantized when written to the cache. INT8 scores and M6 FP8 softmax intermediates are a third, independent runtime choice; see [Accelerated attention on the ANE](#accelerated-attention-on-the-ane). DeltaNet state remains floating point.
 
 Consequently, “two-bit model” is an incomplete description. It neither describes every weight nor establishes two-bit activations, an integer multiply-accumulate path, or the model's total RAM requirement.
 
@@ -106,7 +106,7 @@ $$\min_Q\frac{1}{N}\left\|X(W-Q)^T\right\|_F^2,\qquad H=\frac{X^TX}{N}.$$
 
 Here `Q` must be representable by the chosen LUT/scale or INT8 format. The objective weights errors by the actual input distribution, rather than treating every weight difference as equally harmful.
 
-The implementation orders input columns by descending `diag(H)`, adds diagonal damping equal to 1% of the mean Hessian diagonal, and processes columns in blocks of 128. It uses FP64 Hessian factorization (cuSOLVER when CUDA is available, the existing CPU helper otherwise) and propagates each column's rounding error into columns not yet quantized. Its vector groups stay within one input column, so the column-wise feedback can use the same structure as a scalar rounder. See [`gptq`](../scripts/qwen3_lut_common.py).
+The implementation orders input columns by descending `diag(H)`, adds diagonal damping equal to 1% of the mean Hessian diagonal, and processes columns in blocks of 128. It uses FP64 Hessian factorization (cuSOLVER on the selected CUDA device, the CPU helper for CPU/MPS runs) and propagates each column's rounding error into columns not yet quantized. Its vector groups stay within one input column, so the column-wise feedback can use the same structure as a scalar rounder. See [`gptq`](../scripts/qwen3_lut_common.py).
 
 Calibration is **true sequential**. MLP gate/up are quantized first; down's Hessian is formed from the resulting gated activation after gate/up quantization. Mixer input projections are quantized before recapturing the output projection's input. Later layers receive outputs propagated through already-quantized earlier layers. This helps calibration reflect the model it is actually building. It does not eliminate quantization error or guarantee generalization to different prompts.
 
@@ -154,19 +154,19 @@ The historical experiments found stronger benefit from these factors on DeltaNet
 
 Block reconstruction keeps indices fixed while adjusting LUT entries/scales, optionally factors, against a reference activation stream. It needs its own held-out selection. Neither it nor the activation-weighted/dynamic factor scripts should silently replace the deployed plain rank-64 recipe when explaining this artifact.
 
-### 9. INT8 projection weights and floating-point state
+### 9. INT8 projection weights and runtime state
 
 The full-attention K/V weight rounder uses symmetric per-output-channel scaling, approximately `s = max(abs(W)) / 127`, and codes obtained by rounding/clipping `W / s` to `[-127, 127]`. The export stores signed eight-bit codes and FP16 row scales. The residual factors above can correct these projections too.
 
-**This format describes the quantizer export.** In the current Core AI builder, [`QConv`](../coreai/qwen38_coreai_build.py) expands INT8 weights and their scales to FP16 before Torch export. Later compression/lowering is a separate stage. An `INT8` metadata field is therefore not sufficient evidence of final package storage or native INT8 arithmetic.
+The default Core AI builder preserves these codes as **compile-time INT8 weights**, together with their FP16 channel scales. [`QConv`](../coreai/qwen38_coreai_build.py) passes them through `constexpr_blockwise_shift_scale`; only the compatibility option `QCONV_INT8=0` expands them to FP16. The [M6 compiled-program inspection](research/M6_COMPUTE_ACCELERATION_2026-10-03.md) reports INT8 projection kernels without an FP16 weight copy: 40 MB instead of 50 MB per attention layer, and 152 instead of 272 static cycles for a 64-row projection task. Those are local program measurements, not a whole-model speedup. GPTQ fits the approximation in this format; the compiler provides the accelerated inference path.
 
-The Core AI [runtime](../scripts/qwen38_coreai_model.py) allocates FP16 host-owned attention history, copies newly accepted K/V rows, and maintains floating-point DeltaNet state separately. Cache memory grows with context even though the model weights stay fixed. This distinction matters when measuring context scaling and RAM.
+The Core AI [runtime](../scripts/qwen38_coreai_model.py) supports cache formats declared by the selected package. Release 0.2 uses FP16 keys and INT8 historical values; [cache management](../scripts/qwen38_kv_cache.py) quantizes accepted values with per-token/head scales. FP16-only packages retain FP16 history. DeltaNet state is separate and floating point. Cache memory grows with context even though the model weights stay fixed.
 
 ### 10. From quantizer export to Core AI execution
 
 The offline export contains LUTs, byte-sized index tensors, scales, rotation metadata and optional factors. A reference path reconstructs effective weights to evaluate quantization separately from compiler effects.
 
-The Core AI [builder](../coreai/qwen38_coreai_build.py) mirrors the graph in FP16, registers exact exported LUTs/indices, and injects them into palettization rather than independently fitting a new codebook. For LUT branches, per-channel scale is applied after the convolution. Palettization runs before `optimize()` because folding that multiply into weights would destroy the intended shared codebook structure. The local compression hook uses the known codebook/vector axis; the compiler produces the runtime representation.
+The Core AI [builder](../coreai/qwen38_coreai_build.py) uses floating-point reference operations with explicit quantization boundaries, preserves INT8 projection constants by default, and registers exact exported LUTs/indices for palettization rather than fitting replacement codebooks. For LUT branches, per-channel scale is applied after the convolution. Palettization runs before `optimize()` because folding that multiply into weights would destroy the intended shared codebook structure. The local compression hook uses the known codebook/vector axis; the compiler produces the runtime representation.
 
 This means the host inference loop does not unpack every LUT weight on every token. The compressed representation is part of the model package consumed by the compiler/runtime. It still does not establish the physical lookup circuitry, dequantization placement, accumulator precision, or a universal native two-bit compute path. Placement reports and same-weight tensor comparisons are needed for the graph actually deployed.
 
@@ -181,6 +181,28 @@ A quantized PyTorch model can approximate the source well while the compiled gra
 The retained build uses **tanh-form SiLU** in DeltaNet and MLP, mathematically `0.5 × x × (1 + tanh(x / 2))`, and overflow-safe softplus, `relu(x) + log(1 + exp(−abs(x)))`. It scales DeltaNet q by 16 and v by 64, with the corresponding squared scale in normalization epsilon. These choices address numerical problems measured on the tested FP16 path; they are not a different low-bit weight format.
 
 Promising early-layer MLP down-input scaling was later rejected after static and dynamic variants corrupted late-layer outputs. The final manifest records `MLP_DS=1` and no scale table. An algebraically equivalent expression may also be fused into a problematic native operation, so source math alone is insufficient. See [numerical experiments and superseded variants](../ANE_DELTANET_NUMERICS.md) and [session lessons](SESSION_LESSONS.md).
+
+## Accelerated attention on the ANE
+
+The runtime graph adds acceleration beyond GPTQ weight fitting. The [builder](../coreai/qwen38_coreai_build.py), [compiled-program analysis](ANE_HWX_MLIR_ANALYSIS.md), and [dated measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md) distinguish the following stages of cached-history attention:
+
+| Stage | M6 | M5 |
+| --- | --- | --- |
+| Query/key operands | FP16 | FP16 |
+| Scores after quantization and masking | INT8, step 1/4 | INT8, step 1/4 |
+| Exponentials read by the softmax sum | FP8 E4M3 | FP16 |
+| Maximum and sum reduction outputs | FP16 | FP16 |
+| Probability-side operand of history PV | FP8 E4M3 | FP16 |
+| Stored keys / values | FP16 / INT8 | FP16 / INT8 |
+| Attention output | FP16 | FP16 |
+
+On M6, `ATT_INT8MM=s8,s8b,sm8,pvf8` places quantize/dequantize boundaries on scores, tile exponentials and the probability-side PV operand. They fuse into producer and consumer tasks, so large intermediate tensors cross memory in one-byte formats. The denominator is summed from the FP8 exponentials before the value-cache scales are folded into the PV operand. The current query block retains its floating-point path. This is an FP8 **intermediate dataflow**: the compiled program has no dedicated hardware softmax instruction, and the observed reduction outputs are FP16. Internal accumulator precision is not established by the output format.
+
+The measured INT8-by-FP8 PV task has the same multiply-add cycle count as its FP16-operand control; reduced traffic supplies the benefit there. Uniform UINT8 probabilities can multiply faster, but the tested value-scale fold lost about 7% of softmax mass to zero rounding, versus 0.02% for FP8 in the real-text sample. This is why the selected M6 path keeps the probability-side operand in FP8 rather than choosing the fastest integer arithmetic alone.
+
+The M6 FP8 scale is `ATT_PF8_UNIT=1/64`: normalized operands in [0, 1] reach at most 64. An earlier scale of 1/256 produced incorrect device results for one captured head with values near 200 despite E4M3's larger representable range. The corrected range matched the host simulation in that investigation. The tested M5 ANE compiler rejects FP8, so its functions use `ATT_INT8MM_M5=s8,s8b`: INT8 scores with FP16 softmax/PV intermediates. Both variants retain transposed FP16 keys (`KV_KEYS_T=1`). [Release 0.2 M5 validation](VALIDATION_M5_RELEASE_0_2.md) confirms the selected function set and ANE placement.
+
+Historical release 0.1 same-weight tests of the combined INT8-score and range-corrected FP8 graph, before transposed keys, increased target-only prefill from 292.5 to 310.8 tokens/s at 8K and 199.6 to 223.9 at 64K. The 64K direct KL to the preceding V8 graph was 0.00048. These results measure the combined attention changes, not FP8 alone, and are not new release 0.2 measurements. See the dated report for the controls and subsequent transposed-key tests.
 
 ## GPTQ, then quantization-aware training (QAT)
 
