@@ -324,18 +324,19 @@ def _inv_upper(u):
     return out
 
 
-def chol_inv_upper(h):
-    """Upper U with H^-1 = U^T U (GPTQ's Hinv): H = V V^T with V upper, then U = V^-1. On a CUDA machine the same
-    unique factor comes from cuSOLVER in float64 (the hand-written path exists for the macOS LAPACK problem above)."""
-    if torch.cuda.is_available():
-        hinv = torch.cholesky_inverse(torch.linalg.cholesky(h.double().cuda()))
+def chol_inv_upper(h, device=None):
+    """Upper U with H^-1 = U^T U, returned on h.device. Factor in FP64 on the requested CUDA device, otherwise
+    CPU (the hand-written path exists for the macOS LAPACK problem above). Default to h.device, not GPU visibility."""
+    device = torch.device(device) if device is not None else h.device
+    if device.type == "cuda":
+        hinv = torch.cholesky_inverse(torch.linalg.cholesky(h.to(device=device, dtype=torch.float64)))
         return torch.linalg.cholesky(hinv, upper=True).to(h.device)
-    return _inv_upper(_chol_lower(h.flip(0, 1)).flip(0, 1))
+    return _inv_upper(_chol_lower(h.cpu().double().flip(0, 1)).flip(0, 1)).to(h.device)
 
 
 def gptq(w, h, rnd, block=128, damp=0.01):
     """GPTQ with activation order: minimize ||(W - Q) X||^2 given H = X^T X / N, column by column.
-    The Hessian factorization uses float64 (CUDA when available, otherwise CPU); the column loop runs on w's device."""
+    The Hessian factorization uses float64 (w's CUDA device, otherwise CPU); the column loop runs on w's device."""
     dev = w.device
     h = h.cpu().double().clone()
     dead = h.diag() == 0
@@ -343,7 +344,7 @@ def gptq(w, h, rnd, block=128, damp=0.01):
     perm = h.diag().argsort(descending=True)
     w, h = w[:, perm.to(dev)].clone(), h[perm][:, perm]
     h += damp * h.diag().mean() * torch.eye(len(h), dtype=h.dtype)
-    hinv = chol_inv_upper(h).float().to(dev)
+    hinv = chol_inv_upper(h, device=dev).float().to(dev)
     q = torch.zeros_like(w)
     for i1 in range(0, w.shape[1], block):
         i2 = min(i1 + block, w.shape[1])

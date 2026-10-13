@@ -24,6 +24,7 @@ weight on each batch's worst positions, ranked by the detached per-position KL c
     LOSS_TAIL=cvar:0.01,lambda:1        mean KL + lambda * mean KL of the top 1% positions (CVaR-style)
 (optional ",cap:<nats>"). The hold-out log reports mean, p99 and the top-1% share of the KL either way. Row sets are calibration-style token rows (SEQ long),
 never the KL traces (kl/, kl_dev192/, kl_test/), which stay for selection / reporting.
+LOSS_TAIL and LONG_EVERY cannot be combined: long-row training implements a token-weighted mean KL only.
 
 rot1 (next/rot1/RUNBOOK.md R0.5 / R0.7; off by default): ROT_DIR=<rot1/ckpt/<name>> folds the student's bf16 parts
 (embedding, norms, in_proj_a / b, unquantized matrices) into that basis (scripts/rot1_fold.py) before the QLinear swap;
@@ -563,11 +564,20 @@ def check():
     print("parity gate passed", flush=True)
 
 
+def memory_log_suffix():
+    """CUDA peak memory only; do not query an unrelated GPU for CPU/MPS runs."""
+    if DEVICE.type == "cuda":
+        return f" max CUDA mem {torch.cuda.max_memory_allocated(DEVICE) / 2**30:.1f} GiB"
+    return ""
+
+
 def train():
     assert OUT_DIR and EXPORT_DIR
     # A training run writes a new export; never replace the source or a previous result.
     if OUT_DIR.exists() or OUT_DIR.is_symlink():
         raise FileExistsError(f"OUT_DIR must be a new directory: {OUT_DIR}")
+    if TAIL and LONG_EVERY:
+        raise ValueError("LOSS_TAIL and LONG_EVERY cannot be combined; long-row training supports mean KL only")
     model, files = build()
     groups = params(files)
     n_train = sum(p.numel() for g in groups for p in g["params"])
@@ -584,7 +594,7 @@ def train():
         print(f"selection on {SEL_TRACE.name}[:{SEL_SEQ}]: step 0 KL {s0:.5f}", flush=True)
     print(f"{len(tr['rows'])} train / {len(hold['rows'])} held-out rows; {n_train / 1e6:.2f}M trainable "
           f"({', '.join(g['name'] for g in groups)}); loss {'tail ' + str(TAIL) if TAIL else 'mean KL'}; "
-          f"step 0 hold-out KL {best[0]:.5f} p99 {st0['hold_p99']:.3f} "
+          f"step 0 hold-out KL {k0:.5f} p99 {st0['hold_p99']:.3f} "
           f"top-1% share {st0['hold_top1pct_share']:.1%}", flush=True)
     rng, t0 = np.random.default_rng(0), time.time()
     if LONG_EVERY:
@@ -619,13 +629,11 @@ def train():
             loss = (kl.sum().detach() + lsum.detach()) / n_tot
             if LONG_SMOKE or step <= 3 * LONG_EVERY or step % EVAL_EVERY == 0:
                 print(f"step {step}: long row {j} len {len(lrs[j])} long KL {float(lsum) / n:.5f} short KL "
-                      f"{float(mean_kl):.5f} step {time.time() - ts:.1f}s max mem "
-                      f"{torch.cuda.max_memory_allocated() / 2**30:.1f} GiB", flush=True)
+                      f"{float(mean_kl):.5f} step {time.time() - ts:.1f}s{memory_log_suffix()}", flush=True)
         else:
             loss.backward()
             if LONG_SMOKE or step <= 2:
-                print(f"step {step}: short only, step {time.time() - ts:.1f}s max mem "
-                      f"{torch.cuda.max_memory_allocated() / 2**30:.1f} GiB", flush=True)
+                print(f"step {step}: short only, step {time.time() - ts:.1f}s{memory_log_suffix()}", flush=True)
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         opt.step()
         sched.step()

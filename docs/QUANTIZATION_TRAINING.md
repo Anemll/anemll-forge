@@ -14,7 +14,7 @@ This checkout includes the GPTQ and frozen-index QAT implementation used by the 
 | Materialization | [qwen38_overlay_materialize.py](../scripts/qwen38_overlay_materialize.py) | Replaces tensors from an overlay while preserving codes and metadata in a self-contained export |
 | Reference evaluation | [qwen38_kl.py](../scripts/qwen38_kl.py) | Applies QAT overlays and mixer rotations; reports storage both excluding and including correction factors |
 
-The scripts were recovered from the committed `quant-kl-research` snapshot `86096c053e4960c4fc37efa4913c793cc32492cd`. [Source provenance](quantization-source-provenance.json) records the original file digests. Uncommitted changes from the research checkout were not imported. This is a source recovery, not proof that the historical Colab job ran exactly that complete checkout. The public commit containing this port should be cited by publications; the research branch name alone is not a stable source citation.
+The scripts were recovered from the committed `quant-kl-research` snapshot `86096c053e4960c4fc37efa4913c793cc32492cd`. [Source provenance](quantization-source-provenance.json) records the original file digests. The research commit is not included in this public checkout, so those original digests require the archived source to verify; they are not hashes of the modified public files. Uncommitted changes from the research checkout were not imported. This is a source recovery, not proof that the historical Colab job ran exactly that complete checkout. The public commit containing this port should be cited by publications; the research branch name alone is not a stable source citation.
 
 The port makes output paths portable, refuses existing QAT/materialization output directories, resumes corpus generation after the last completed sequence, and resets evaluator factor-byte accounting for each evaluation. The prompt builder writes a new candidate file rather than overwriting the checked release list. The list is preserved as recovered, including repeated entries (527 entries, 515 distinct prompt strings). Rebuilding candidates does not reproduce the historical filtering step.
 
@@ -23,6 +23,8 @@ Other research switches remain available but are off in the release recipe: resi
 ## Environment and data
 
 Use the separate [quantization dependencies](../requirements-quantization.txt) and read [environment provenance](ENVIRONMENT.md#quantization-training-source--2026-10-13). The recorded fitting run used a Colab G4 with an RTX PRO 6000 Blackwell and 96 GB GPU memory. The dependency list is not a validated fresh CUDA lockfile. CPU fixtures below do not require Transformers, model weights, Core AI or the ANE.
+
+GPTQ and reference evaluation select MPS when available, otherwise CUDA, otherwise CPU; `DEVICE` overrides that selection. Initial centroid fitting and low-rank SVD fitting run on CPU. GPTQ calibration and error compensation run on `DEVICE`; FP64 Hessian factorization uses that CUDA device or CPU for CPU/MPS runs. `DEVICE=cpu` keeps factorization on CPU even when CUDA is visible. QAT defaults to CUDA when available, otherwise CPU; the full DeltaNet training path was exercised on CUDA, not validated end to end on MPS. CUDA memory logging is emitted only for CUDA runs.
 
 Run commands from the repository root in a compatible training environment. Set paths to existing inputs and keep generated artifacts outside the source checkout:
 
@@ -36,7 +38,7 @@ mkdir -p "$DATA" "$WORK/runs"
 
 `MODEL` must contain the BF16 checkpoint, configuration and tokenizer. The recorded checkpoint revision is identified in [QUANTIZATION.md](QUANTIZATION.md). `WIKI` contains `wiki2_train.txt` and `wiki2_test.txt`; GPTQ prepares its `qwen38_train_ids.npy` and test token cache when needed. The recipe also needs `calib_chat_ids.npy` and `calib_pi_ids.npy`, each an array of 1,024-token rows. [Chat calibration generation](../scripts/qwen38_calib_gen.py) and [session rendering](../scripts/qwen38_calib_pi.py) document their inputs.
 
-The original session-derived calibration rows and cached development/selection/held-out traces are not distributed. Token arrays retain the original text and are not anonymized. Use independently prepared data you can share, and record that this defines a new training experiment. Prepare disjoint reference traces with `qwen38_kl.py generate` and `reference` (`PROMPTS_FILE` selects a JSON prompt list); keep the checkpoint-selection trace separate from final evaluation. A new run also needs recorded package versions, seeds, commands and input/trace identities.
+The original session-derived calibration rows and cached development/selection/held-out traces are not distributed. Token arrays retain the original text and are not anonymized. Use independently prepared data you can share, and record that this defines a new training experiment. Prepare disjoint reference traces with `qwen38_kl.py generate` and `reference` (`PROMPTS_FILE` selects a JSON list of strings). This differs from `CORPUS_PROMPTS`, which reads objects with `p`, `tools` and `cat` fields; do not pass the QAT corpus file as `PROMPTS_FILE`. Keep the checkpoint-selection trace separate from final evaluation. A new run also needs recorded package versions, seeds, commands and input/trace identities.
 
 ## Run the release 0.2 method
 
@@ -75,6 +77,8 @@ python configs/kl/qat_corpus_build_prompts.py --output "$DATA/new_candidates.jso
 
 Perform overlap and duplicate checks against your own evaluation sets before using new candidates. This command does not filter them. The checked release list is used directly by the release recipe.
 
+The checked list has 141 code, 130 tool-use, 126 multilingual, 50 math/reasoning and 80 rare-token entries. The builder's percentage targets do not describe this actual mix; the 33 removed candidates comprise 30 math and three code entries. Duplicates exist before filtering too (560 candidates, 548 distinct strings).
+
 ### 3 Cache the teacher and check initial parity
 
 ```sh
@@ -90,7 +94,7 @@ TRACE="$DEV_TRACE" TAG=release02_gptq python scripts/qwen38_kl.py eval
 CHECK_BASE=release02_gptq CHECK_SEQ=32 python scripts/qwen38_qat_kl.py check
 ```
 
-The check compares reconstructed weights and projections, including mixer rotation metadata and factors, then compares initial trace KL with the GPTQ evaluator. It loads the full model; the CPU fixture tests below are a separate, smaller check.
+The teacher command holds out four rows from each of four sources (corpus, Pi, chat and WikiText), for 16 monitor rows when all are available. `:meta` sets the corpus training boundary; `HOLD` limits how many rows after that boundary enter the monitor. The check compares reconstructed weights and projections, including mixer rotation metadata and factors, then compares initial trace KL with the GPTQ evaluator. It loads the full model; the CPU fixture tests below are a separate, smaller check.
 
 The historical cache rounds teacher log-probabilities to FP16, then computes loss in FP32. That rounding introduces a small numerical bias and can give slightly nonzero KL even for an identical underlying distribution. The compiled KL-512 protocol is also different from this top-256 training target. For a new precision experiment, set `TEACHER_DTYPE=fp32` and use a new `TEACHER` directory when generating the cache. This avoids the FP16 cache-rounding step and doubles the log-probability array storage; it does not change existing caches. Both short- and long-row teacher modes support it. `teacher.json` records the chosen precision, and the training log records the actual loaded cache dtypes. FP16 remains the historical default. Report the chosen cache and evaluation precision with new results.
 
@@ -118,6 +122,10 @@ Convert the full export with [the release conversion workflow](WORKFLOW.md), the
 The source recovery is recorded separately from the following numerical changes in Git history. The INT8 rounder now clamps its scale after FP16 rounding to at least the smallest positive FP16 value. Previously, the `1e-12` floor rounded back to zero, so an all-zero row could produce NaNs. Ordinary positive representable scales are unchanged. This is a new edge-case fix; the released weights were not scanned or retrained to measure its impact.
 
 The optional FP32 teacher-cache mode above is a new precision control. It preserves the historical FP16 default and does not silently change the targets of an existing run.
+
+Review fixes also correct the step-0 hold-out log when a selection trace is set and restrict CUDA memory reporting to CUDA runs. Hessian factorization now follows the requested compute device instead of CUDA visibility; CPU runs on CUDA-capable hosts can therefore differ numerically from earlier runs that silently used cuSOLVER.
+
+Two optional research controls have explicit contracts: `PRE_GAIN_HESSIAN=1` captures one extra forward before the current layer is quantized, using inputs propagated through earlier quantized layers, and removes its hooks before other forwards. Saved metadata labels that stream and records one calibration pass's token count. `LOSS_TAIL` with `LONG_EVERY` is rejected before model loading because the long-row implementation supports only token-weighted mean KL, not a combined tail objective. Both controls remain off in the release recipe.
 
 ## Validation and remaining limits
 

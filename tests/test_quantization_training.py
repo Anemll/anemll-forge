@@ -1,7 +1,9 @@
 """CPU fixtures for the recovered GPTQ/QAT/export path; no checkpoint or GPU needed."""
 import json
 import importlib.util
+import io
 import os
+from contextlib import redirect_stdout
 from pathlib import Path
 import subprocess
 import sys
@@ -144,6 +146,121 @@ class TrainingNumerics(unittest.TestCase):
                     Q.train()
                 build.assert_not_called()
 
+    def test_qat_rejects_tail_and_long_rows_before_model_load(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.multiple(
+                Q, OUT_DIR=Path(tmp) / "out", EXPORT_DIR=Path(tmp), LONG_EVERY=2,
+                TAIL=Q.parse_tail("topfrac:0.05,w:4")), patch.object(Q, "build") as build:
+            with self.assertRaisesRegex(ValueError, "LOSS_TAIL and LONG_EVERY"):
+                Q.train()
+            build.assert_not_called()
+
+    def test_memory_logging_uses_only_selected_cuda_device(self):
+        with patch.object(torch.cuda, "max_memory_allocated", return_value=2**30) as peak:
+            for device in ("cpu", "mps"):
+                with patch.object(Q, "DEVICE", torch.device(device)):
+                    self.assertEqual(Q.memory_log_suffix(), "")
+            peak.assert_not_called()
+            with patch.object(Q, "DEVICE", torch.device("cuda:1")):
+                self.assertIn("1.0 GiB", Q.memory_log_suffix())
+            peak.assert_called_once_with(torch.device("cuda:1"))
+
+    def test_cpu_training_steps_export_and_log_distinct_selection_metric(self):
+        class TinyStudent(torch.nn.Module):
+            def __init__(self, tensors):
+                super().__init__()
+                self.q = Q.QLinear(tensors, "gate")
+
+            def forward(self, input_ids, **kwargs):
+                x = torch.nn.functional.one_hot(input_ids, num_classes=4).float()
+                return SimpleNamespace(logits=self.q(x))
+
+        # Exercise both training branches, real KL/backward/Adam and final overlay export.
+        for long_every in (0, 1):
+            with self.subTest(long_every=long_every), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source, teacher, output = root / "source", root / "teacher", root / "output"
+                source.mkdir(); teacher.mkdir()
+                tensors = lut_tensors("gate", cin=4)
+                name = "layer_00.safetensors"
+                save_file(tensors, source / name)
+                model = TinyStudent(tensors)
+                initial = model.q.lut.detach().clone()
+                rows = np.array([[0, 1, 2, 3], [3, 2, 1, 0]])
+                lp, ids = torch.tensor([2., 1., 0., -1.]).log_softmax(-1).topk(2)
+                cache = {"rows": rows, "ids": ids.repeat(2, 3, 1).numpy(),
+                         "lp": lp.repeat(2, 3, 1).numpy()}
+                for split in ("train", "hold"):
+                    np.savez(teacher / f"{split}.npz", **cache)
+                long_path = root / "long_teacher.npz"
+                np.savez(long_path, ids=ids.repeat(5, 1).numpy(), lp=lp.repeat(5, 1).numpy())
+
+                def long_sum(student, tokens, head, teacher_ids, teacher_lp):
+                    logits = student(torch.from_numpy(tokens)[None]).logits[0, :-1]
+                    losses = Q.kl_topk(logits, teacher_ids, teacher_lp)
+                    return losses[head - 1:].sum(), len(tokens) - head
+
+                console = io.StringIO()
+                with patch.multiple(Q, DEVICE=torch.device("cpu"), OUT_DIR=output, EXPORT_DIR=source,
+                                    TEACHER=teacher, BS=2, STEPS=2, EVAL_EVERY=2, WARMUP=1,
+                                    PARTS={"lut", "scale"}, MODEL_MASTERS={}, TAIL={}, DEV_TRACE=None,
+                                    SEL_TRACE=root / "selection", LONG_EVERY=long_every, LONG_SMOKE=False,
+                                    LONG=root / "long.npz", LONG_TEACHER=long_path), \
+                        patch.object(Q, "build", return_value=(model, {name: [model.q]})), \
+                        patch.object(Q, "trace_kl", side_effect=[np.array([8.]), np.array([7.])]), \
+                        patch.object(Q, "long_rows", return_value=([np.array([0, 1, 2, 3, 0, 1])], [1])), \
+                        patch.object(Q, "long_kl_sum", side_effect=long_sum), \
+                        patch.object(torch.cuda, "max_memory_allocated", side_effect=AssertionError("CPU run")), \
+                        patch.dict(os.environ, {"MATERIALIZE": "0"}), redirect_stdout(console), torch.enable_grad():
+                    expected_hold = Q.evaluate(model, cache)
+                    Q.train()
+                record = json.loads((output / "qat_kl.json").read_text())
+                self.assertEqual(record["best_step"], 2)
+                self.assertEqual(record["best_crit"], 7.)
+                self.assertEqual(record["log"][0]["hold_kl"], expected_hold)
+                self.assertIn(f"step 0 hold-out KL {expected_hold:.5f}", console.getvalue())
+                self.assertIn("step 0 KL 8.00000", console.getvalue())
+                self.assertNotIn("CUDA mem", console.getvalue())
+                self.assertEqual(record["long_tokens_seen"], 10 if long_every else 0)
+                self.assertFalse(torch.equal(initial, model.q.lut))
+                self.assertIn(f"{name}::gate.lut", load_file(output / "overlay.qat"))
+
+    def test_pre_gain_capture_records_only_one_forward_and_removes_hooks(self):
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.input_layernorm = torch.nn.LayerNorm(4)
+                self.post_attention_layernorm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                self.input_layernorm(x)
+                return self.post_attention_layernorm(x * torch.tensor([1., 2., 3., 4.]))
+
+        layer = Layer()
+        hs = [torch.randn(2, 3, 4), torch.randn(1, 3, 4)]
+        forward = lambda text, i, layer, batches: [layer(x) for x in batches]
+        with patch.object(G, "run_layer", side_effect=forward):
+            acc = G.capture_pre_gain_hessian(None, 0, layer, hs)
+        for name, mult in ((G.rf.NORM_IN, 1.), (G.rf.NORM_POST, torch.tensor([1., 2., 3., 4.]))):
+            x = torch.cat([b.reshape(-1, 4) for b in hs]) * mult
+            u = x * torch.rsqrt(x.square().mean(-1, keepdim=True) + layer.get_submodule(name).eps)
+            self.assertEqual(acc[f"{name}_n"], 9)
+            torch.testing.assert_close(acc[name] / 9, u.T @ u / 9)
+            self.assertFalse(layer.get_submodule(name)._forward_pre_hooks)
+        before = {key: value.clone() if isinstance(value, torch.Tensor) else value for key, value in acc.items()}
+        forward(None, 0, layer, [h * 3 for h in hs])
+        for key in acc:
+            torch.testing.assert_close(acc[key], before[key])
+        with tempfile.TemporaryDirectory() as tmp, patch.multiple(G, OUT=Path(tmp), TAG="fixture", BASIS_ID=None):
+            G.save_hu(0, acc)
+            with safe_open(Path(tmp) / "hu/fixture/layer_00.safetensors", framework="pt") as f:
+                self.assertEqual(f.metadata()["tokens"], "9")
+                self.assertEqual(f.metadata()["stream"], "before_layer_quantization")
+        with patch.object(G, "run_layer", side_effect=RuntimeError("fixture")):
+            with self.assertRaisesRegex(RuntimeError, "fixture"):
+                G.capture_pre_gain_hessian(None, 0, layer, hs)
+        self.assertFalse(layer.input_layernorm._forward_pre_hooks)
+        self.assertFalse(layer.post_attention_layernorm._forward_pre_hooks)
+
 
 class ExportAndCorpus(unittest.TestCase):
     def test_evaluator_overlay_matches_materialized_weights_and_resets_factor_bytes(self):
@@ -255,6 +372,27 @@ class ExportAndCorpus(unittest.TestCase):
                 train, hold = Q.rows()
             np.testing.assert_array_equal(train, rows[:5])
             np.testing.assert_array_equal(hold, rows[5:7])
+
+    def test_teacher_recipe_holds_out_four_rows_from_each_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            counts = {"corpus": 637, "pi": 44, "chat": 32}
+            specs, expected_hold = [], []
+            for offset, (name, count) in enumerate(counts.items()):
+                p = root / f"{name}.npy"
+                data = np.arange((count + 4) * 4).reshape(-1, 4) + offset * 10000
+                np.save(p, data)
+                p.with_suffix(".json").write_text(json.dumps({"n_train": count}))
+                specs.append(f"{p}:" + ("meta" if name == "corpus" else str(count)))
+                expected_hold.append(data[count:])
+            wiki = np.arange(48 * 4).reshape(-1, 4) + 30000
+            np.save(root / "qwen38_train_ids.npy", wiki.reshape(-1))
+            expected_hold.append(wiki[44:])
+            with patch.multiple(Q, TRAIN=",".join(specs), WIKI=root, WIKI_ROWS=44, HOLD=4, SEQ=4):
+                train, hold = Q.rows()
+            self.assertEqual(train.shape, (757, 4))
+            self.assertEqual(hold.shape, (16, 4))
+            np.testing.assert_array_equal(hold, np.concatenate(expected_hold))
 
 
 if __name__ == "__main__":

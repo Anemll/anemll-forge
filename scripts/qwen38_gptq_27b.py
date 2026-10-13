@@ -40,7 +40,8 @@ KMEANS_SEED=<int> (default 0 = historical): seed of every 2x16 / LUT4 / scalar k
   matrix in the log JSON "kmeans_seed").
 PRE_GAIN_HESSIAN=1: per layer in HU_LAYERS (default the proxy layers 1,3,10,21,31,40,57,63) save the pre-gain Hessians
   H_u = E[u u^T] of the normalized input u = h / rms(h) (before the (1 + w) gain) of input_layernorm and
-  post_attention_layernorm, on this run's own (quantized-so-far) stream, to OUT/hu/<TAG>/layer_NN.safetensors.
+  post_attention_layernorm in one extra calibration pass before quantizing this layer. Earlier layers are already
+  quantized. Save to OUT/hu/<TAG>/layer_NN.safetensors.
 MIX_ROT=readers | readers+writers (C2, online mixer basis): GPTQ of the quantized mixer readers (GDN in_proj_qkv /
   in_proj_z, attention q / k / v) in the block-Hadamard basis seed_in = 3000 + layer (k-v too), and with readers+writers
   also out_proj / o_proj in seed_out = 4000 + layer; stored rotated (W M^T), low-rank factors in the original basis;
@@ -142,7 +143,7 @@ def asym_target(w, h, dc, damp=0.01):
     dead = hd.diag() == 0
     hd[dead, dead] = 1
     hd += damp * hd.diag().mean() * torch.eye(len(hd), dtype=hd.dtype)
-    u = chol_inv_upper(hd)  # (H + damp I)^-1 = U^T U
+    u = chol_inv_upper(hd, device=w.device)  # (H + damp I)^-1 = U^T U
     m = dc.cpu().double().T @ u.T @ u  # (Cin, Cin) in fp64; applied in fp32 on w's device (the head is 248K rows)
     return w + w @ m.float().to(w.device)
 
@@ -464,13 +465,26 @@ def pre_gain_hooks(layer, acc):
             for n in (rf.NORM_IN, rf.NORM_POST)]
 
 
+def capture_pre_gain_hessian(text, i, layer, hs):
+    """Record one forward with this layer's unquantized weights and the incoming calibration stream."""
+    acc = {}
+    handles = pre_gain_hooks(layer, acc)
+    try:
+        run_layer(text, i, layer, hs)
+    finally:
+        for handle in handles:
+            handle.remove()
+    return acc
+
+
 def save_hu(i, acc):
     from safetensors.torch import save_file
     d = OUT / "hu" / TAG
     d.mkdir(parents=True, exist_ok=True)
     t = {n: (acc[n] / acc[f"{n}_n"]).float().cpu().contiguous() for n in (rf.NORM_IN, rf.NORM_POST)}
     save_file(t, str(d / f"layer_{i:02d}.safetensors"),
-              metadata={"tokens": str(acc[f"{rf.NORM_IN}_n"]), **rf.basis_meta(BASIS_ID)})
+              metadata={"tokens": str(acc[f"{rf.NORM_IN}_n"]), "stream": "before_layer_quantization",
+                        **rf.basis_meta(BASIS_ID)})
 
 
 def main():
@@ -531,8 +545,8 @@ def main():
                 layer.to(DEVICE)
             else:
                 rf.fold_layer_module(layer, text.config.layer_types[i], ROT, BASIS_ID["fold_norms"])
-        hu = {} if PRE_GAIN_HESSIAN and i in HU_LAYERS else None
-        hu_handles = pre_gain_hooks(layer, hu) if hu is not None else []
+        if PRE_GAIN_HESSIAN and i in HU_LAYERS:
+            save_hu(i, capture_pre_gain_hessian(text, i, layer, hs))
         fp, hs_fp_next = capture_fp(text, i, layer, hs_fp) if ASYM else (None, None)
         mixer = quantize_mixer(text, i, layer, hs, fp) if MIXER else {}
         xs = []
@@ -541,11 +555,6 @@ def main():
         del xs, fp
         hs_fp = hs_fp_next
         hs = run_layer(text, i, layer, hs)  # next-layer inputs through the quantized MLP
-        for hd in hu_handles:
-            hd.remove()
-        if hu is not None:
-            save_hu(i, hu)
-            del hu
         if LOAD_DTYPE != torch.bfloat16:
             layer.to("cpu", torch.bfloat16)  # done: stored in bf16 (the final perplexity runs in bf16)
         else:
