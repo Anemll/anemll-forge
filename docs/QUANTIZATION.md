@@ -6,6 +6,8 @@ The source checkpoint is pinned to [`1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`](
 
 Start with [the basic overview](#basic-overview). Continue to [the detailed implementation](#detailed-implementation) for formats, math and source links, or [reproduction and validation](#reproduction-and-validation) for the workflow. The [historical notebook](../QUANTIZATION_NOTES.md) retains earlier experiments; later findings can supersede earlier recommendations.
 
+**Training source:** the release 0.2 GPTQ, QAT, corpus generator and materializer are now included in this checkout. See the [complete training recipe and source provenance](QUANTIZATION_TRAINING.md). Private calibration sessions and cached evaluation traces are not bundled.
+
 **Evaluation status:** the release model card currently describes **KL divergence evaluation only**. Historical research results below explain design decisions; they are not a new benchmark of the uploaded artifacts. ANE benchmarks will be added when measured with identified artifact revisions, hardware and workloads. The [quality benchmark plan](BENCHMARK_PLAN.md) adds instruction, coding and reasoning tests to complement KL.
 
 ## Basic overview
@@ -86,9 +88,11 @@ $$s_o=\sqrt{\operatorname{mean}_j W_{o,j}^2}.$$
 
 The implementation rounds this scale through FP16, replaces zero RMS scales with one, and fits/rounds the normalized matrix `W / s`. Reconstruction multiplies each output row by its scale. This allows rows with different magnitudes to share a useful codebook.
 
-Vector centroids are fitted with k-means, using at most 300,000 sampled vectors per matrix, fixed sampling/k-means seeds, three initializations and a maximum of 200 iterations. Scalar centroids use weighted one-dimensional Lloyd updates with a sampling limit. Centroids are rounded to values exactly representable in FP16 before rounding the weights.
+Vector centroids are fitted with k-means, using at most 300,000 sampled vectors per matrix, three initializations and a maximum of 200 iterations by default. `KMEANS_SEED` selects the sampling and initialization seed; `KMEANS_THREADS=1` limits parallel reductions. `KMEANS_SAMPLE` and `KMEANS_INIT` expose the sample/restart controls. Scalar centroids use 40 weighted one-dimensional Lloyd updates on at most 65,536 sampled values per table. Centroids are rounded to values exactly representable in FP16 before rounding the weights.
 
 `AW=1` supplies **activation-energy weights** from the diagonal of the calibration Hessian to codebook fitting. It makes errors in frequently active input directions count more during centroid fitting. This switch is distinct from both GPTQ error feedback and activation-weighted residual-factor fitting. It is not a claim that the export implements every algorithm commonly called AWQ.
+
+Per-channel scaling is retained in all 192 release 0.2 MLP matrices, the selected DeltaNet and attention LUT projections, the INT8 attention K/V projection weights, and the LUT4 LM head. During QAT, indices and INT8 codes remain fixed. LUT values and output-row scales train; scales are represented as their GPTQ value times `exp(log_s)`. The head has its own table/scale optimizer group. Mixer correction factors train separately and remain floating point, as do embeddings, norms, the small DeltaNet projections and convolution weights. These weight scales are distinct from the separate input-channel rescaling experiments and from KV-cache scales.
 
 The historical probes found little benefit from adding many scalar codebooks to these tested normalized matrices. Additional grouping also changed observed timing, and per-group vector LUTs lost ANE placement in the tested paths. Those findings motivated the shared codebook plus row scales; they are observations for the recorded shapes/toolchains, not universal hardware restrictions. See [techniques and limitations](TECHNIQUES.md) and the [original vector-LUT investigation](history/VECTOR_LUT_README.md).
 
@@ -102,7 +106,7 @@ $$\min_Q\frac{1}{N}\left\|X(W-Q)^T\right\|_F^2,\qquad H=\frac{X^TX}{N}.$$
 
 Here `Q` must be representable by the chosen LUT/scale or INT8 format. The objective weights errors by the actual input distribution, rather than treating every weight difference as equally harmful.
 
-The implementation orders input columns by descending `diag(H)`, adds diagonal damping equal to 1% of the mean Hessian diagonal, and processes columns in blocks of 128. It uses a CPU FP64 Hessian factorization and propagates each column's rounding error into columns not yet quantized. Its vector groups stay within one input column, so the column-wise feedback can use the same structure as a scalar rounder. See [`gptq`](../scripts/qwen3_lut_common.py).
+The implementation orders input columns by descending `diag(H)`, adds diagonal damping equal to 1% of the mean Hessian diagonal, and processes columns in blocks of 128. It uses FP64 Hessian factorization (cuSOLVER when CUDA is available, the existing CPU helper otherwise) and propagates each column's rounding error into columns not yet quantized. Its vector groups stay within one input column, so the column-wise feedback can use the same structure as a scalar rounder. See [`gptq`](../scripts/qwen3_lut_common.py).
 
 Calibration is **true sequential**. MLP gate/up are quantized first; down's Hessian is formed from the resulting gated activation after gate/up quantization. Mixer input projections are quantized before recapturing the output projection's input. Later layers receive outputs propagated through already-quantized earlier layers. This helps calibration reflect the model it is actually building. It does not eliminate quantization error or guarantee generalization to different prompts.
 
@@ -182,7 +186,7 @@ Promising early-layer MLP down-input scaling was later rejected after static and
 
 This is how release 0.2's weights are fitted. GPTQ is the post-training quantization step: it chooses every index, lookup table, scale and low-rank factor from calibration data in one pass. QAT then trains the continuous parameters with gradients, here by distillation: the loss is the KL divergence from the BF16 model's next-token distribution. The method was developed on the first release's formats (vector 2x16 and LUT4 codes, per-channel scales, online MLP rotations, INT8 K / V projections, rank-64 mixer factors, LUT4 head); the models in the table below (`q07`, `n1`, `u48`) keep those formats, and release 0.2 applies the same flow to its own formats ([next section](#release-02-three-bit-mlp-and-token-mixer-rotations)). What changes against the first release is how the numbers are fitted: GPTQ with the low-rank factors inside the sequential pass and more calibration data, then a distillation stage that trains every continuous parameter of the export against the BF16 model while the GPTQ indices stay frozen. The run's engineering log (`QUANT_LOG_2026-10-07.md`, kept with the research data) records every experiment with paired confidence intervals.
 
-The scripts below live on the research branch `quant-kl-research` and are being merged into `main`; settings are the ones the v2 runs used.
+The scripts below are included in this repository. They were recovered from a committed `quant-kl-research` snapshot together with the matching evaluator changes. The [training guide](QUANTIZATION_TRAINING.md) records provenance, dependencies, a complete command sequence, and the remaining reproduction limits. The settings below describe the historical runs; source recovery does not prove an exact replay of those runs.
 
 ### The flow
 
@@ -220,14 +224,16 @@ CAL_MIX="<data>/calib_chat_ids.npy:36,<data>/calib_pi_ids.npy:48" \
 ### 3. The QAT corpus
 
 ```sh
-python configs/kl/qat_corpus_build_prompts.py        # -> configs/kl/qat_corpus_prompts.json (deterministic, seed 7)
+# Use the checked 527-prompt release list committed below.
+# Optional: regenerate the 560 unfiltered candidates in a separate file.
+# python configs/kl/qat_corpus_build_prompts.py --output /path/to/new/candidates.json
 MODEL=<Qwen3.8-27B> CORPUS_PROMPTS=configs/kl/qat_corpus_prompts.json CAL_OUT=<data>/corpus_ids.npy \
   python scripts/qwen38_corpus_gen.py
 ```
 
-- **Prompts:** the build script's mix, 30% code (data structures in 30 languages, bug reviews, systems concepts), 20% agentic tool use (tool schemas and the agent system prompt in the template), 20% multilingual, 15% math and reasoning, 15% rare-token text (identifiers, URLs, JSON / YAML, LaTeX, hex). They target what the first-stage model handled worst: rare tokens, non-ASCII text and long thinking.
+- **Prompts:** the checked release list contains 527 entries selected from 560 seed-7 candidates. The builder generates candidates only; it does not repeat the historical overlap filtering. The candidate categories target a mix of 30% code (data structures in 30 languages, bug reviews, systems concepts), 20% agentic tool use (tool schemas and the agent system prompt in the template), 20% multilingual, 15% math and reasoning, 15% rare-token text (identifiers, URLs, JSON / YAML, LaTeX, hex). They target what the first-stage model handled worst: rare tokens, non-ASCII text and long thinking.
 - **Generation:** BF16, thinking on, T 0.6 / top-p 0.95 / top-k 20, up to 1,792 new tokens; sequences packed into 1,024-token rows; 5% of the *sequences* held out as validation rows, so no validation row shares a sequence with a training row.
-- **Contamination checks:** prompts are dropped on word 8-gram overlap with any evaluation prompt or near-duplicates (33 removed, 527 kept; 673 rows, 637 for training). After training, token 13-grams of the packed rows cover 0.04 to 0.12% of evaluation windows (template tokens excluded), all generic phrasing, against a baseline from the original rows; per-sequence gains do not track overlap (Pearson about 0.1), and the gain on the held-out trace matches the development trace.
+- **Contamination checks:** historical filtering reports removing 33 candidate entries for word 8-gram overlap with evaluation prompts or near-duplicates (527 kept; 673 rows, 637 for training). The recovered list contains 515 distinct prompt strings, so this was not exhaustive deduplication; sequence-level splitting does not guarantee prompt-level uniqueness across splits. After training, token 13-grams of the packed rows cover 0.04 to 0.12% of evaluation windows (template tokens excluded), all generic phrasing, against a baseline from the original rows; per-sequence gains do not track overlap (Pearson about 0.1), and the gain on the held-out trace matches the development trace.
 - A second batch (`corpus2`, 643 more prompts, generated with the FP8-weight model on an A100) gave only 2 to 3% more, so data volume shows diminishing returns past the first batch.
 
 ### 4 and 5. Teacher cache and QAT
@@ -241,9 +247,9 @@ TRAIN=<as above> WIKI_ROWS=44 HOLD=4 SEL_TRACE=<data>/kl_dev2 DEV_TRACE=<data>/k
 TRAIN_PARTS=lut,scale,head,lr STEPS=600 BS=2 EVAL_EVERY=50 python scripts/qwen38_qat_kl.py train
 ```
 
-- **Model:** every quantized linear layer becomes a `QLinear` that rebuilds its weight on each forward pass from the frozen `uint8` indices, the trainable lookup table and the trainable per-channel scale (a log-multiplier on the GPTQ scale), applies the online Hadamard rotation for MLP matrices, and adds `a (b x)` for the trainable factors. BF16 weights never reach the GPU. Decoder layers use gradient checkpointing; flash-linear-attention provides the Gated DeltaNet backward pass (CUDA).
+- **Model:** every quantized linear layer becomes a `QLinear` that rebuilds its weight on each forward pass from the frozen `uint8` indices, the trainable lookup table and the trainable per-channel scale (a log-multiplier on the GPTQ scale), applies the online Hadamard rotation for MLP matrices, and adds `a (b x)` for the trainable factors. The original dense weights of the replaced projections are discarded before moving the student to the GPU; unquantized model components remain floating point. Decoder layers use gradient checkpointing; flash-linear-attention provides the Gated DeltaNet backward pass (CUDA).
 - **Trained parameters** (`TRAIN_PARTS=lut,scale,head,lr`, about 162M): lookup-table values (learning rate 2e-4), per-channel scales (2e-4), the rank-64 mixer factors (2e-5) and the LM head's table and scales (1e-4). Indices never change, so size and format stay identical.
-- **Loss:** KL(BF16 || quantized) per position over the teacher's top-256 tokens plus one tail bucket, the evaluation metric itself, in FP32 on BF16-autocast logits; mean over positions.
+- **Loss:** KL(BF16 || quantized) per position over the teacher's top-256 tokens plus one tail bucket, computed in FP32 from BF16-autocast logits; mean over positions. The historical teacher cache stores log-probabilities in FP16, so this is an approximate cached target. This is the training/KL-256 protocol; compiled KL-512 uses a different top-K value.
 - **Optimizer:** Adam, 20-step linear warm-up, cosine to zero, gradient-norm clip 1.0, 2 rows of 1,024 tokens per step, 600 steps (about 2 hours on one RTX PRO 6000 G4).
 - **Selection:** every 50 steps the KL on `kl_dev2`, 128 held-out prompts whose BF16 reference is cached once (`SEL_TRACE`), picks the best step. The 12-row hold-out is logged as a monitor only: it mis-ranked runs, and the development trace (`DEV_TRACE`) must not choose its own winner.
 - **Check:** `qwen38_qat_kl.py check` compares `QLinear` weights with the evaluator's dequantization and the step-0 KL with the GPTQ export (within about 0.2% on both training machines).
@@ -349,7 +355,7 @@ The ANE reproduces the PyTorch KL of the same weights (0.0515) within 0.0003 on 
 
 ### Reproduce
 
-GPTQ with the previous section's command, plus the plan, the mixer rotations and a fixed k-means seed (the `MIX_ROT`, `KMEANS_SEED` and `KMEANS_THREADS` switches are on the research branch with the other scripts):
+GPTQ uses the included `MIX_ROT`, `KMEANS_SEED` and `KMEANS_THREADS` switches. The [complete release 0.2 recipe](QUANTIZATION_TRAINING.md#run-the-release-02-method) also sets output directories, validates the initial QAT reconstruction, and evaluates the materialized export:
 
 ```sh
 MODEL=<Qwen3.8-27B> WIKI=<wikitext> PLAN=configs/quantization/mix25in_vq3pA.json \

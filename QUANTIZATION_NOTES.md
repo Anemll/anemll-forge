@@ -4,7 +4,9 @@
 
 # Qwen3.8-27B on the ANE: quantization approach, layout, experiments, findings, dead ends
 
-Living document. Every experiment lists the command that reproduces it. Core AI / memory topics live in
+Historical notebook. Commands describe the original experiments and may require external artifacts.
+
+The current release 0.2 method, with three-bit MLP weights and end-to-end frozen-index QAT, is documented in [the quantization guide](docs/QUANTIZATION.md) and [the complete training recipe](docs/QUANTIZATION_TRAINING.md). GPTQ, QAT, corpus generation and overlay materialization now live in this repository. The older per-layer MSE block reconstruction below is a different experiment. Source recovery and small CPU checks do not rerun the historical measurements. Core AI / memory topics live in
 `COREAI_PORT_NOTES.md` and `FEEDBACK_ANE_MULTIFUNCTION_MEMORY.md`.
 
 Machines: **M6** (32 GB, macOS 27, ANE target, historical research environment), **M3U** (M3 Ultra, 96 GB, `ssh user@quantization-host`,
@@ -30,8 +32,9 @@ bf16 checkpoint + calibration + KL reference on `/path/to/data`). Scripts now li
 
 - LUT at most **256 values** (entries x vector size); vectors along Cout only; per-tensor vector LUTs only.
 - Per-group **scalar** LUTs run on the ANE; per-group **vector** LUTs and any grouping along Cin fall to the CPU.
-- Speed is weight-bandwidth bound down to ~2 bits/w (~125-165 GB/s). 3-bit and 6-bit indices are read like 4- and
-  8-bit. MIL `constexpr_lut_to_dense` allows 1/2/3/4/6/8-bit indices (no 7-bit).
+- Historical timing was weight-bandwidth bound down to ~2 bits/w (~125-165 GB/s), with similar timings for some
+  neighboring index widths. Timing alone does not establish index packing; release 0.2 packs six-bit vector indices
+  at three index bits per weight. See the current guide for storage and compiled-memory accounting. MIL `constexpr_lut_to_dense` allows 1/2/3/4/6/8-bit indices (no 7-bit).
 - 27B-shape MLP block, 1 token (qwen38_mlp_ane_probe.py): INT8 1.63 ms, LUT4 per-group-8 1.19, LUT4 per-tensor +
   pcs 0.83-0.85, 2-bit vector 2x16 / ternary + pcs 0.43. Each MLP layer 2-bit -> 4-bit costs ~+0.4 ms per call.
 - Grouped scalar LUT4 at the 27B MLP shape (2026-09-27, same run, per-block slope S=8 vs S=16,
