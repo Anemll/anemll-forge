@@ -225,6 +225,10 @@ The full-target experiment reused the earlier weights while changing the runtime
 
 ### Measured INT8 compute and its limits
 
+Quantizing **both weights and activations** (W8A8) can engage the ANE's faster INT8 × INT8 compute path. [Apple documents this for M4-class hardware](https://apple.github.io/coremltools/docs-guides/source/opt-quantization-perf.html); the measurements below directly confirm it on M6. The recorded results do not constitute a matched M4/M5/M6 comparison or establish an exact twofold speedup for every shape and scale layout.
+
+The graph can still contain `quantize → dequantize` pairs around apparently floating-point operations. With supported constant scales and zero-point-zero forms, the compiler folds those boundaries into producer and consumer tasks: the producer writes INT8 and the multiply-add reads INT8 directly. The [HWX signatures](ANE_HWX_MLIR_ANALYSIS.md#4-8-bit-rules-int8-uint8-fp8-and-their-hwx-signatures) establish execution formats; a `dequantize` in source code alone does not imply a separate FP16 conversion at runtime. Offset and runtime-scale variants can prevent this fusion.
+
 The [INT8 compute probe](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#int8-compute-on-the-ane) confirms that the M6 ANE executes **INT8 × INT8** for both constant weights and runtime operands. With dense 4,096 × 4,096 convolutions and 1,024 rows per call, it recorded:
 
 | Operand format | Measured throughput | Relative to FP16 |
@@ -236,6 +240,8 @@ The [INT8 compute probe](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#int8-com
 These are isolated arithmetic-throughput measurements, not LLM tokens/s. A runtime INT8 × INT8 matmul reached 53.2 TOPS in the same investigation. GPTQ's exported INT8 K/V weights alone do **not** make the projection W8A8: the default `QConv` preserves INT8 weights but does not insert INT8 activation quantization. The separate projection evidence above (272 → 152 static cycles and 50 → 40 MB) concerns that weight-format change, not a measured 2.84× layer speedup.
 
 The [real-layer tests](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) show why scope matters. Adding W8A8 K/V projections changed layer-3 prefill from 2.510 to 2.448 ms at 8K, but only 15.075 to 15.061 ms at 64K. Multiplying INT8 cached values by UINT8 softmax weights cut layer prefill by 6.3% at 8K and 9.4% at 64K, but its rounding error motivated the selected FP8 path. INT8 QK with per-row rescaling made prefill slower. The deployed M6 path therefore combines INT8 projection weights, FP16 query/key operands, INT8 scores, and FP8 softmax weights used with INT8 cached values; it does not use INT8 × INT8 throughout attention.
+
+The [recorded C2 HWX excerpt](ANE_HWX_MLIR_ANALYSIS.md#5-attention-what-the-program-looks-like) makes the distinction concrete: QK has `in=float16`, `kern=fp16`, `out=int8`; the cached-value product has `in=int8`, `kern=e4m3`, `out=float16`. An INT8 **score output** does not make QK an INT8 × INT8 operation. Likewise, exporting an INT8 key cache with `kv8` does not by itself quantize the queries. W8A8 projections and INT8-query research variants were tested separately from the selected release graph.
 
 ## GPTQ, then quantization-aware training (QAT)
 

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1080" viewBox="0 0 1300 1080" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="980" viewBox="0 0 1300 980" role="img" aria-labelledby="title desc">
 <title id="title">Attention with INT8 scores and FP8 softmax intermediates</title>
-<desc id="desc">Default M6 history attention uses FP16 queries and keys, INT8 scores, FP8 softmax exponentials and scaled weights, INT8 cached values, and FP16 reduction and attention outputs. The softmax sum branches before value scales are folded. Tiled results and the current floating-point block are combined and normalized. M5 substitutes FP16 for FP8. Cache export can quantize values only or both keys and values; both K and V projection weights are separately INT8.</desc>
+<desc id="desc">Default M6 history attention uses FP16 times FP16 for QK, INT8 scores, FP8 softmax exponentials and scaled weights, INT8 cached values, and FP16 reduction and attention outputs. The softmax sum branches before value scales are folded. Tiled results and the current floating-point block are combined and normalized. M5 substitutes FP16 for FP8. Cache export can quantize values only or both keys and values. Both K and V projections use FP16 activations and INT8 weights; W8A8 activation quantization was a separate experiment.</desc>
 <defs>
 <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
 <path d="M0,0 L8,4 L0,8 Z" fill="#202b35"/>
@@ -15,51 +15,51 @@
 <rect x="905" y="132" width="370" height="90" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
 <text x="1090.0" y="162.05" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Value-cache scales</text>
 <text x="1090.0" y="191.95" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">FP16 per token and KV head</text>
-<rect x="25" y="300" width="370" height="116" rx="7" fill="#edf5ef" stroke="#566d83" stroke-width="1.6"/>
-<text x="210.0" y="328.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">QK dot product and mask</text>
-<text x="210.0" y="358.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Store scores in INT8</text>
-<text x="210.0" y="387.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Step 1/4</text>
-<rect x="465" y="300" width="370" height="116" rx="7" fill="#eaf1f8" stroke="#566d83" stroke-width="1.6"/>
-<text x="650.0" y="328.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Subtract tile maximum</text>
-<text x="650.0" y="358.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Exponentials: FP8</text>
-<text x="650.0" y="387.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">sm8</text>
-<rect x="905" y="300" width="370" height="116" rx="7" fill="#eaf1f8" stroke="#566d83" stroke-width="1.6"/>
-<text x="1090.0" y="328.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Fold value-cache scales</text>
-<text x="1090.0" y="358.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Softmax weights: FP8</text>
-<text x="1090.0" y="387.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">pvf8</text>
-<path d="M210,222 L210,300" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M395,358 L465,358" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M835,358 L905,358" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M1090,222 L1090,300" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="465" y="511" width="370" height="108" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
-<text x="650.0" y="550.05" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Sum exponentials</text>
-<text x="650.0" y="579.95" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Tile sum: FP16</text>
-<rect x="905" y="511" width="370" height="108" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
-<text x="1090.0" y="536.4" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Weight cached values</text>
-<text x="1090.0" y="565.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">FP8 weights × INT8 V</text>
-<text x="1090.0" y="593.6" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Tile result: FP16</text>
-<path d="M650,416 L650,511" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M1090,416 L1090,511" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<text x="210" y="536.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">One softmax path</text>
-<text x="210" y="566.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Weights remain unnormalized</text>
-<text x="210" y="595.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">until the final division.</text>
-<rect x="905" y="710" width="370" height="86" rx="7" fill="#edf5ef" stroke="#566d83" stroke-width="1.6"/>
-<text x="1090.0" y="738.05" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Cached V</text>
-<text x="1090.0" y="767.95" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">INT8 codes</text>
-<path d="M1090,710 L1090,619" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="25" y="755" width="370" height="119" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
-<text x="210.0" y="785.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Current query block</text>
-<text x="210.0" y="814.5" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Floating-point attention</text>
-<text x="210.0" y="843.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Adds its sum and result</text>
-<rect x="465" y="755" width="370" height="119" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
-<text x="650.0" y="785.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Rescale and combine tiles</text>
-<text x="650.0" y="814.5" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Add current block, then divide</text>
-<text x="650.0" y="843.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Attention result: FP16</text>
-<path d="M650,619 L650,755" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M905,565 L865,565 L865,814.5 L835,814.5" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M395,814.5 L465,814.5" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="25" y="921" width="1250" height="57" rx="7" fill="#f5f6f7" stroke="#566d83" stroke-width="1.6"/>
-<text x="650.0" y="949.5" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">M5 keeps softmax intermediates in FP16; scores and cached V remain INT8.</text>
-<text x="25" y="1014.0" dominant-baseline="central" text-anchor="start" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Cache export: v8 = FP16 K / INT8 V (default); kv8 = INT8 K / INT8 V.</text>
-<text x="25" y="1052.0" dominant-baseline="central" text-anchor="start" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Projection weights are separate: both K and V use INT8 with per-output-channel scales.</text>
+<rect x="25" y="270" width="370" height="116" rx="7" fill="#edf5ef" stroke="#566d83" stroke-width="1.6"/>
+<text x="210.0" y="298.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">QK: FP16 × FP16</text>
+<text x="210.0" y="328.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Scores and mask: INT8</text>
+<text x="210.0" y="357.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Step 1/4</text>
+<rect x="465" y="270" width="370" height="116" rx="7" fill="#eaf1f8" stroke="#566d83" stroke-width="1.6"/>
+<text x="650.0" y="298.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Subtract tile maximum</text>
+<text x="650.0" y="328.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Exponentials: FP8</text>
+<text x="650.0" y="357.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">sm8</text>
+<rect x="905" y="270" width="370" height="116" rx="7" fill="#eaf1f8" stroke="#566d83" stroke-width="1.6"/>
+<text x="1090.0" y="298.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Fold value-cache scales</text>
+<text x="1090.0" y="328.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Softmax weights: FP8</text>
+<text x="1090.0" y="357.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">pvf8</text>
+<path d="M210,222 L210,270" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M395,328 L465,328" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M835,328 L905,328" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1090,222 L1090,270" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="465" y="451" width="370" height="108" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
+<text x="650.0" y="490.05" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Sum exponentials</text>
+<text x="650.0" y="519.95" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Tile sum: FP16</text>
+<rect x="905" y="451" width="370" height="108" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
+<text x="1090.0" y="476.4" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Weight cached values</text>
+<text x="1090.0" y="505.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">FP8 weights × INT8 V</text>
+<text x="1090.0" y="533.6" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Tile result: FP16</text>
+<path d="M650,386 L650,451" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1090,386 L1090,451" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="210" y="476.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">One softmax path</text>
+<text x="210" y="506.0" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Weights remain unnormalized</text>
+<text x="210" y="535.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">until the final division.</text>
+<rect x="905" y="610" width="370" height="86" rx="7" fill="#edf5ef" stroke="#566d83" stroke-width="1.6"/>
+<text x="1090.0" y="638.05" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">Cached V</text>
+<text x="1090.0" y="667.95" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">INT8 codes</text>
+<path d="M1090,610 L1090,559" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="25" y="655" width="370" height="119" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
+<text x="210.0" y="685.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Current query block</text>
+<text x="210.0" y="714.5" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Floating-point attention</text>
+<text x="210.0" y="743.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Adds its sum and result</text>
+<rect x="465" y="655" width="370" height="119" rx="7" fill="white" stroke="#566d83" stroke-width="1.6"/>
+<text x="650.0" y="685.9" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Rescale and combine tiles</text>
+<text x="650.0" y="714.5" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Add current block, then divide</text>
+<text x="650.0" y="743.1" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Attention result: FP16</text>
+<path d="M650,559 L650,655" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M905,505 L865,505 L865,714.5 L835,714.5" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M395,714.5 L465,714.5" fill="none" stroke="#202b35" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="25" y="821" width="1250" height="57" rx="7" fill="#f5f6f7" stroke="#566d83" stroke-width="1.6"/>
+<text x="650.0" y="849.5" dominant-baseline="central" text-anchor="middle" font-family="Arial" font-size="23" font-weight="normal" fill="#202b35">M5 keeps softmax intermediates in FP16; scores and cached V remain INT8.</text>
+<text x="25" y="914.0" dominant-baseline="central" text-anchor="start" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">Cache export: v8 = FP16 K / INT8 V (default); kv8 = INT8 K / INT8 V.</text>
+<text x="25" y="952.0" dominant-baseline="central" text-anchor="start" font-family="Arial" font-size="22" font-weight="normal" fill="#202b35">K/V projections: FP16 activations × INT8 weights; W8A8 was tested separately.</text>
 </svg>
