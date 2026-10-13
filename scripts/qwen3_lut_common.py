@@ -234,7 +234,9 @@ def make_rounder(w, spec, cw=None, device=None, seed=0):
         return lambda x: torch.from_numpy(  # CPU only (ml_dtypes)  # saturate: GPTQ updates can push codes past 240
             (x / s).clamp(-240, 240).numpy().astype(ml_dtypes.float8_e4m3fn).astype(np.float32)) * s  # noqa
     if kind == "int8":
-        s = (w.abs().amax(1, keepdim=True) / 127).clamp_min(1e-12).half().float().to(device)
+        # Clamp after the storage cast: 1e-12 rounds to zero in FP16, causing 0/0
+        # for zero rows. 2**-24 is the smallest positive FP16 value.
+        s = (w.abs().amax(1, keepdim=True) / 127).half().float().clamp_min(2.0 ** -24).to(device)
         out = lambda x: (x / s).round().clamp(-127, 127) * s  # noqa: E731
         out.codebook, out.cd, out.row_scale, out.int8 = None, 1, s, True
         return out
@@ -333,7 +335,7 @@ def chol_inv_upper(h):
 
 def gptq(w, h, rnd, block=128, damp=0.01):
     """GPTQ with activation order: minimize ||(W - Q) X||^2 given H = X^T X / N, column by column.
-    The Hessian factorization runs on the CPU in float64; the column loop runs on w's device."""
+    The Hessian factorization uses float64 (CUDA when available, otherwise CPU); the column loop runs on w's device."""
     dev = w.device
     h = h.cpu().double().clone()
     dead = h.diag() == 0

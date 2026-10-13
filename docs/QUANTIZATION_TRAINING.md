@@ -80,7 +80,7 @@ Perform overlap and duplicate checks against your own evaluation sets before usi
 ```sh
 export TEACHER="$DATA/qat_teacher"
 export TRAIN="$DATA/corpus_ids.npy:meta,$DATA/calib_pi_ids.npy:44,$DATA/calib_chat_ids.npy:32"
-export WIKI_ROWS=44 HOLD=4 SEQ=1024 TOPK=256 BS=2
+export WIKI_ROWS=44 HOLD=4 SEQ=1024 TOPK=256 BS=2 TEACHER_DTYPE=fp16
 python scripts/qwen38_qat_kl.py teacher
 
 # Supply your independently prepared development and selection traces.
@@ -92,7 +92,7 @@ CHECK_BASE=release02_gptq CHECK_SEQ=32 python scripts/qwen38_qat_kl.py check
 
 The check compares reconstructed weights and projections, including mixer rotation metadata and factors, then compares initial trace KL with the GPTQ evaluator. It loads the full model; the CPU fixture tests below are a separate, smaller check.
 
-The historical cache rounds teacher log-probabilities to FP16, then computes loss in FP32. That rounding introduces a small numerical bias and can give slightly nonzero KL even for an identical underlying distribution. The compiled KL-512 protocol is also different from this top-256 training target. Report the chosen cache and evaluation precision with new results.
+The historical cache rounds teacher log-probabilities to FP16, then computes loss in FP32. That rounding introduces a small numerical bias and can give slightly nonzero KL even for an identical underlying distribution. The compiled KL-512 protocol is also different from this top-256 training target. For a new precision experiment, set `TEACHER_DTYPE=fp32` and use a new `TEACHER` directory when generating the cache. This avoids the FP16 cache-rounding step and doubles the log-probability array storage; it does not change existing caches. Both short- and long-row teacher modes support it. `teacher.json` records the chosen precision, and the training log records the actual loaded cache dtypes. FP16 remains the historical default. Report the chosen cache and evaluation precision with new results.
 
 ### 4 Train continuous parameters and materialize
 
@@ -112,6 +112,12 @@ EXPORT_DIR="$WORK/runs/export/release02_full" TRACE="$DEV_TRACE" TAG=release02_f
 QAT keeps indices and INT8 codes fixed while training LUT values, scales (including INT8 K/V scales), mixer factors, and the head's table/scales. Scales use `s = s0 * exp(log_s)`; values, scales and factors are rounded to FP16 on export. `SEL_TRACE` chooses the best checkpoint; `DEV_TRACE` is a monitor. QAT and materialization require new output directories. An overlay links back to its source export; keep that source until materialization is complete.
 
 Convert the full export with [the release conversion workflow](WORKFLOW.md), then validate the compiled model. Rebuild the drafter with the same target LM head. The materialized 129 weight files are conversion inputs, not a directly loadable Transformers checkpoint. This source update does not replace released model packages.
+
+## Numerical fixes after source recovery
+
+The source recovery is recorded separately from the following numerical changes in Git history. The INT8 rounder now clamps its scale after FP16 rounding to at least the smallest positive FP16 value. Previously, the `1e-12` floor rounded back to zero, so an all-zero row could produce NaNs. Ordinary positive representable scales are unchanged. This is a new edge-case fix; the released weights were not scanned or retrained to measure its impact.
+
+The optional FP32 teacher-cache mode above is a new precision control. It preserves the historical FP16 default and does not silently change the targets of an existing run.
 
 ## Validation and remaining limits
 

@@ -45,6 +45,35 @@ class TrainingNumerics(unittest.TestCase):
             (lut[idx.long()] * grad).sum().backward()
             torch.testing.assert_close(actual, lut.grad)
 
+    def test_fp32_teacher_cache_preserves_identical_distribution_kl(self):
+        logits = torch.randn(32, 1024) * 4
+        lp, ids = logits.log_softmax(-1).topk(256, -1)
+        with patch.object(Q, "TEACHER_DTYPE", "fp32"):
+            cached = Q.cache_log_probs(lp)
+        self.assertEqual(cached.dtype, np.float32)
+        torch.testing.assert_close(torch.from_numpy(cached), lp, rtol=0, atol=0)
+        loss = Q.kl_topk(logits, ids, torch.from_numpy(cached))
+        torch.testing.assert_close(loss, torch.zeros_like(loss), rtol=0, atol=1e-7)
+        with patch.object(Q, "TEACHER_DTYPE", "fp16"):
+            historical = Q.cache_log_probs(lp)
+        np.testing.assert_array_equal(historical, lp.half().numpy())
+
+    def test_teacher_writes_precision_metadata_and_matching_arrays(self):
+        rows = np.arange(8).reshape(2, 4)
+        model = lambda input_ids, **kw: SimpleNamespace(logits=torch.arange(12).float().repeat(len(input_ids), 4, 1))
+        for precision, dtype in (("fp16", np.float16), ("fp32", np.float32)):
+            with self.subTest(precision=precision), tempfile.TemporaryDirectory() as tmp:
+                with patch.multiple(Q, TEACHER=Path(tmp), TEACHER_DTYPE=precision, TOPK=3, BS=1,
+                                    DEVICE=torch.device("cpu")), patch.object(Q, "rows", return_value=(rows, rows)), \
+                        patch.object(Q, "load_teacher_model", return_value=model):
+                    Q.teacher()
+                metadata = json.loads((Path(tmp) / "teacher.json").read_text())
+                self.assertEqual(metadata["log_probs_dtype"], precision)
+                for name in ("train", "hold"):
+                    with np.load(Path(tmp) / f"{name}.npz") as cache:
+                        self.assertEqual(cache["lp"].dtype, dtype)
+                        self.assertEqual(cache["lp"].shape, (2, 3, 3))
+
     def test_optimizer_updates_all_scale_groups_without_changing_codes(self):
         keys = ["gate", "linear_attn.in_proj_qkv", "self_attn.k_proj", "lm_head"]
         files = {}

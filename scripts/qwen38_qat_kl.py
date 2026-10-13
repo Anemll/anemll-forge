@@ -55,6 +55,9 @@ WIKI_ROWS = int(os.environ.get("WIKI_ROWS", "0"))
 HOLD = int(os.environ.get("HOLD", "4"))            # held-out rows per source (validation KL, best-step selection)
 SEQ = int(os.environ.get("SEQ", "1024"))
 TOPK = int(os.environ.get("TOPK", "256"))
+TEACHER_DTYPE = os.environ.get("TEACHER_DTYPE", "fp16")  # historical default; fp32 avoids cache-rounding bias
+if TEACHER_DTYPE not in ("fp16", "fp32"):
+    raise ValueError("TEACHER_DTYPE must be fp16 or fp32")
 BS = int(os.environ.get("BS", "2"))
 STEPS = int(os.environ.get("STEPS", "400"))
 EVAL_EVERY = int(os.environ.get("EVAL_EVERY", "50"))
@@ -378,8 +381,14 @@ def tail_loss(kl, cfg):
 
 
 # ---- modes ----------------------------------------------------------------------------------------------------------
+def cache_log_probs(values):
+    """Store teacher values without changing the historical FP16 default."""
+    dtype = torch.float16 if TEACHER_DTYPE == "fp16" else torch.float32
+    return values.detach().to(dtype).cpu().numpy()
+
+
 def teacher():
-    """bf16 top-K log-probs of every train / held-out row: TEACHER/{train,hold}.npz (ids int32, lp fp16) + rows."""
+    """BF16 teacher top-K log-probs: TEACHER/{train,hold}.npz; lp dtype chosen by TEACHER_DTYPE."""
     tr, ho = rows()
     model = load_teacher_model()
     TEACHER.mkdir(parents=True, exist_ok=True)
@@ -391,11 +400,12 @@ def teacher():
                 lq = F.log_softmax(model(input_ids=torch.from_numpy(r[b:b + BS]).to(DEVICE), use_cache=False)
                                    .logits[:, :-1].float(), -1)
                 v, i = lq.topk(TOPK, -1)
-                ids.append(i.int().cpu().numpy()), lps.append(v.half().cpu().numpy())
+                ids.append(i.int().cpu().numpy()), lps.append(cache_log_probs(v))
             np.savez(TEACHER / f"{name}.npz", rows=r, ids=np.concatenate(ids), lp=np.concatenate(lps))
             print(f"teacher {name}: {len(r)} rows ({time.time() - t0:.0f}s)", flush=True)
     (TEACHER / "teacher.json").write_text(json.dumps({"train": TRAIN, "wiki_rows": WIKI_ROWS, "hold": HOLD,
-                                                      "seq": SEQ, "topk": TOPK, "model": str(MODEL)}, indent=1))
+                                                      "seq": SEQ, "topk": TOPK, "model": str(MODEL),
+                                                      "log_probs_dtype": TEACHER_DTYPE}, indent=1))
 
 
 def long_rows():
@@ -434,9 +444,9 @@ def teacher_long():
             for s in range(0, len(h), LONG_CHUNK):
                 lq = F.log_softmax(F.linear(h[s:s + LONG_CHUNK], w).float(), -1)
                 v, i = lq.topk(TOPK, -1)
-                ids_out.append(i.int().cpu().numpy()), lp_out.append(v.half().cpu().numpy())
+                ids_out.append(i.int().cpu().numpy()), lp_out.append(cache_log_probs(v))
     LONG_TEACHER.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(LONG_TEACHER, ids=np.concatenate(ids_out), lp=np.concatenate(lp_out))
+    np.savez(LONG_TEACHER, ids=np.concatenate(ids_out), lp=np.concatenate(lp_out), log_probs_dtype=TEACHER_DTYPE)
     print(f"teacher_long: {len(rs)} rows, {sum(len(r) for r in rs)} tokens ({time.time() - t0:.0f}s)", flush=True)
 
 
@@ -670,6 +680,7 @@ def train():
         save_file(over, str(OUT_DIR / OVERLAY))
     (OUT_DIR / "qat_kl.json").write_text(json.dumps({
         "source": str(EXPORT_DIR), "teacher": str(TEACHER), "parts": sorted(PARTS), "lrs": LRS, "steps": STEPS,
+        "teacher_log_probs_dtype": str(tr["lp"].dtype), "hold_log_probs_dtype": str(hold["lp"].dtype),
         "loss_tail": TAIL or None,
         "bs": BS, "long": str(LONG) if LONG_EVERY else None, "long_every": LONG_EVERY,
         "long_tokens_seen": int(ltok) if LONG_EVERY else 0, "best_step": best[1], "best_crit": best[0], "selection": str(SEL_TRACE) if SEL_TRACE else "hold",

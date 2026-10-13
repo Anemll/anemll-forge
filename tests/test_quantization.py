@@ -10,6 +10,18 @@ from qwen3_lut_common import FORMATS, encode, gptq, make_rounder
 
 
 class QuantizationRoundTrip(unittest.TestCase):
+    def test_int8_scales_remain_positive_after_fp16_storage(self):
+        w = torch.tensor([[0., 0., 0.], [1e-7, 0., -1e-7], [1., -.5, .25]])
+        rnd = make_rounder(w, FORMATS["INT8 per-channel"][1], device="cpu")
+        q = gptq(w, torch.eye(3), rnd, block=2)
+        _, codes, scales = encode(rnd, q)
+        self.assertTrue(torch.isfinite(q).all())
+        self.assertTrue((scales > 0).all())
+        torch.testing.assert_close(q[0], torch.zeros(3), rtol=0, atol=0)
+        torch.testing.assert_close(codes.float() * scales.float()[:, None], q, rtol=0, atol=0)
+        # Ordinary rows keep the original FP16-rounded scale.
+        self.assertEqual(scales[-1], (w[-1].abs().max() / 127).half())
+
     def test_gptq_export_reconstructs_quantized_weights(self):
         torch.manual_seed(7)
         w = torch.randn(32, 32)
