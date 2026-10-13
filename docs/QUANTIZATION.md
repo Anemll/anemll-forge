@@ -204,18 +204,18 @@ The M6 FP8 scale is `ATT_PF8_UNIT=1/64`: normalized operands in [0, 1] reach at 
 
 ### Measured FP8 benefits
 
-The [5 October measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) distinguish the FP8 probability operand, the FP8 softmax sum, and the combined model graph. **Latency reductions and throughput increases are different quantities**; the table labels each explicitly.
+**Release 0.1 did not use FP8 attention.** The [5 October measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) below concern later experimental graphs, preceding the release 0.2 M6 path described above. They distinguish the FP8 probability operand, the FP8 softmax sum, and the combined model graph. **Latency reductions and throughput increases are different quantities**; the table labels each explicitly.
 
 | Change and measured scope | Control | Recorded result on M6 |
 | --- | --- | --- |
 | FP8 probability-side PV operand alone (`pvf8`), one historical `kv8` attention core | INT8 values × FP16 probabilities | Prefill latency: 7.55 → 6.69–6.74 ms at 32K, **10.7–11.4% lower**; 14.83 → 13.04 ms at 64K, **12.1% lower**. Verify was essentially unchanged. |
 | Add FP8 exponentials and sum (`sm8`) to the fixed INT8-score / UINT8-PV core (`s8b,pvtu`) | Same core without `sm8` | Prefill latency reduction against the shared FP16 baseline grows from 20.7% to 27.5% at 32K and 21.5% to 28.2% at 64K. This is an **additional 8.6% and 8.5% latency reduction**, respectively, relative to the already optimized control. |
 | INT8 scores plus FP8 exponentials and sum, isolated softmax tile | FP16 tile | **22–25% lower prefill latency**, about **15% lower verify latency**. This probe also quantizes centered scores (`s − max`) to INT8; it is not the selected release graph. |
-| Combined INT8-score and range-corrected FP8 graph (`s8,s8b,sm8,pvf8`, form C2), full target without drafter | Same-weight V8 graph, before transposed keys | Prefill throughput: **292.5 → 310.8 tokens/s at 8K (+6.3%)** and **199.6 → 223.9 at 64K (+12.2%)**. |
+| Later experimental INT8-score and range-corrected FP8 graph (`s8,s8b,sm8,pvf8`, form C2), full target without drafter | Same-weight, non-FP8 V8 graph, before transposed keys | Prefill throughput: **292.5 → 310.8 tokens/s at 8K (+6.3%)** and **199.6 → 223.9 at 64K (+12.2%)**. |
 
 The first three rows are historical research probes, not interchangeable full-model benchmarks. The `kv8` cores stored both keys and values in INT8; release 0.2 uses FP16 keys and INT8 values. The incremental `sm8` result isolates the benefit of FP8 exponentials and summation **within the UINT8-PV research variant**, whose probability rounding was subsequently rejected for the selected M6 path. The increment is calculated from the reported common-baseline timings, for example `1 − (1 − 0.275) / (1 − 0.207) = 8.6%`; it is not a 27.5% FP8-only speedup. See [8-bit softmax](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-softmax) for the tile and core controls.
 
-The full-target row uses historical release 0.1 weights. Its 64K direct KL to the preceding V8 graph was 0.00048. It measures the combined attention changes, not FP8 alone, and is not a new release 0.2 measurement. The earlier DeltaNet/tile-size gains and the later transposed-key gains are separate experiments and must not be attributed to FP8. See [range-corrected C2](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#form-c-at-long-context-the-fp8-range-fault-and-c2) and [transposed keys](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#transposed-key-cache-c2t).
+The full-target experiment reused the earlier weights while changing the runtime graph; its FP8 candidate was **not the released 0.1 runtime**. Its 64K direct KL to the non-FP8 V8 control was 0.00048. It measures the combined attention changes, not FP8 alone, and is neither a release-to-release comparison nor a new release 0.2 measurement. The earlier DeltaNet/tile-size gains and the later transposed-key gains are separate experiments and must not be attributed to FP8. See [range-corrected C2](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#form-c-at-long-context-the-fp8-range-fault-and-c2) and [transposed keys](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#transposed-key-cache-c2t).
 
 ### Measured INT8 compute and its limits
 
