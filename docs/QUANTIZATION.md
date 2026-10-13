@@ -202,7 +202,34 @@ The measured INT8-by-FP8 PV task has the same multiply-add cycle count as its FP
 
 The M6 FP8 scale is `ATT_PF8_UNIT=1/64`: normalized operands in [0, 1] reach at most 64. An earlier scale of 1/256 produced incorrect device results for one captured head with values near 200 despite E4M3's larger representable range. The corrected range matched the host simulation in that investigation. The tested M5 ANE compiler rejects FP8, so its functions use `ATT_INT8MM_M5=s8,s8b`: INT8 scores with FP16 softmax/PV intermediates. Both variants retain transposed FP16 keys (`KV_KEYS_T=1`). [Release 0.2 M5 validation](VALIDATION_M5_RELEASE_0_2.md) confirms the selected function set and ANE placement.
 
-Historical release 0.1 same-weight tests of the combined INT8-score and range-corrected FP8 graph, before transposed keys, increased target-only prefill from 292.5 to 310.8 tokens/s at 8K and 199.6 to 223.9 at 64K. The 64K direct KL to the preceding V8 graph was 0.00048. These results measure the combined attention changes, not FP8 alone, and are not new release 0.2 measurements. See the dated report for the controls and subsequent transposed-key tests.
+### Measured FP8 benefits
+
+The [5 October measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) distinguish the FP8 probability operand, the FP8 softmax sum, and the combined model graph. **Latency reductions and throughput increases are different quantities**; the table labels each explicitly.
+
+| Change and measured scope | Control | Recorded result on M6 |
+| --- | --- | --- |
+| FP8 probability-side PV operand alone (`pvf8`), one historical `kv8` attention core | INT8 values × FP16 probabilities | Prefill latency: 7.55 → 6.69–6.74 ms at 32K, **10.7–11.4% lower**; 14.83 → 13.04 ms at 64K, **12.1% lower**. Verify was essentially unchanged. |
+| Add FP8 exponentials and sum (`sm8`) to the fixed INT8-score / UINT8-PV core (`s8b,pvtu`) | Same core without `sm8` | Prefill latency reduction against the shared FP16 baseline grows from 20.7% to 27.5% at 32K and 21.5% to 28.2% at 64K. This is an **additional 8.6% and 8.5% latency reduction**, respectively, relative to the already optimized control. |
+| INT8 scores plus FP8 exponentials and sum, isolated softmax tile | FP16 tile | **22–25% lower prefill latency**, about **15% lower verify latency**. This probe also quantizes centered scores (`s − max`) to INT8; it is not the selected release graph. |
+| Combined INT8-score and range-corrected FP8 graph (`s8,s8b,sm8,pvf8`, form C2), full target without drafter | Same-weight V8 graph, before transposed keys | Prefill throughput: **292.5 → 310.8 tokens/s at 8K (+6.3%)** and **199.6 → 223.9 at 64K (+12.2%)**. |
+
+The first three rows are historical research probes, not interchangeable full-model benchmarks. The `kv8` cores stored both keys and values in INT8; release 0.2 uses FP16 keys and INT8 values. The incremental `sm8` result isolates the benefit of FP8 exponentials and summation **within the UINT8-PV research variant**, whose probability rounding was subsequently rejected for the selected M6 path. The increment is calculated from the reported common-baseline timings, for example `1 − (1 − 0.275) / (1 − 0.207) = 8.6%`; it is not a 27.5% FP8-only speedup. See [8-bit softmax](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-softmax) for the tile and core controls.
+
+The full-target row uses historical release 0.1 weights. Its 64K direct KL to the preceding V8 graph was 0.00048. It measures the combined attention changes, not FP8 alone, and is not a new release 0.2 measurement. The earlier DeltaNet/tile-size gains and the later transposed-key gains are separate experiments and must not be attributed to FP8. See [range-corrected C2](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#form-c-at-long-context-the-fp8-range-fault-and-c2) and [transposed keys](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#transposed-key-cache-c2t).
+
+### Measured INT8 compute and its limits
+
+The [INT8 compute probe](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#int8-compute-on-the-ane) confirms that the M6 ANE executes **INT8 × INT8** for both constant weights and runtime operands. With dense 4,096 × 4,096 convolutions and 1,024 rows per call, it recorded:
+
+| Operand format | Measured throughput | Relative to FP16 |
+| --- | ---: | ---: |
+| FP16 weights and activations | 18.6 TOPS | 1.00× |
+| INT8 weights and activations (W8A8), per-channel weight scales | 38.4 TOPS | **2.06×** |
+| W8A8, shared weight scale | 52.8 TOPS | **2.84×** |
+
+These are isolated arithmetic-throughput measurements, not LLM tokens/s. A runtime INT8 × INT8 matmul reached 53.2 TOPS in the same investigation. GPTQ's exported INT8 K/V weights alone do **not** make the projection W8A8: the default `QConv` preserves INT8 weights but does not insert INT8 activation quantization. The separate projection evidence above (272 → 152 static cycles and 50 → 40 MB) concerns that weight-format change, not a measured 2.84× layer speedup.
+
+The [real-layer tests](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) show why scope matters. Adding W8A8 K/V projections changed layer-3 prefill from 2.510 to 2.448 ms at 8K, but only 15.075 to 15.061 ms at 64K. INT8 × UINT8 history PV cut layer prefill by 6.3% at 8K and 9.4% at 64K, but its probability-rounding error motivated the selected FP8 path. INT8 QK with per-row rescaling made prefill slower. The deployed M6 path therefore combines INT8 projection weights, FP16 query/key operands, INT8 scores, and INT8-value × FP8-probability PV; it does not use INT8 × INT8 throughout attention.
 
 ## GPTQ, then quantization-aware training (QAT)
 
