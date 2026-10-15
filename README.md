@@ -8,6 +8,8 @@ The first model is an independent ANEMLL adaptation of **[Qwen/Qwen3.8-27B](http
 
 The [quantization training guide](docs/QUANTIZATION_TRAINING.md) covers the included GPTQ, centroid fitting, QAT, corpus generation and export materialization code, with source provenance and reproduction limits.
 
+**Paper:** [Three Bit MLP Vector Quantization in Apple Neural Engine (PDF)](docs/papers/anemll-forge-v02.pdf) — release 0.2 methods, diagrams, evaluations and references.
+
 ## Hardware and software
 
 - **M6 is the main development and performance target.** M5, M5 Pro, and M5 Max are also supported; expect roughly half the M6 throughput (about 2× slower) for comparable ANE workloads. This is approximate guidance, not a matched benchmark across every chip and context size.
