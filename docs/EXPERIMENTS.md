@@ -25,6 +25,7 @@ Original module names are retained to keep the research trail navigable. Histori
 - On-device tools: `scripts/m6_entry_sweep.py` (per-entry and full-chain timing, context fits), `m6_layer_ablation.py` (per-part cost of a real chunk), `m6_gdn_bench.py` and `m6_attn_bench.py` (GDN core and attention core variants with FP32 checks and placement), `m6_chunk_ab.py` (two builds of one chunk), `m6_kl512_eval.py` (compiled KL-512 gate), `m6_long_ctx_eval.py` (64K prefill plus teacher forcing, build-to-build KL), `m6_server_bench.py` (owned full-server prefill/decode case). Host test: `tests/test_gdn_fast.py`.
 - [DFlash2 sampling plan](research/DFLASH2_SAMPLING_PLAN.md): temperature sampling with the drafter's own distribution (exact speculative sampling), baseline measurement matrix, exactness tests and presence-penalty notes. Plan only.
 - [Verifier block length](verifier_len.md): 8-, 4- and 3-row verifiers measured on the optimized target (`scripts/m6_verify_len.py`, `m6_verify_len_report.py`); 8 rows stays fastest end to end.
+- [Jeff / Unsloth decision models on the ANE](research/JEFF_DECISION_ANE.md): Path B convert/smoke for Jeff (Qwen3.5-0.8B readout) on Core AI. `forge.py jeff-convert` / `jeff-smoke`; prefill-only FP16 or light INT8; no 27B VQ/DFlash2. Host tests in `tests/test_jeff_coreai.py`. Measured on M5 Max: fully on the ANE, 64 ms per 256-token prefill call (508 ms for 2,018 tokens, chained), option probabilities within FP16 noise of Jeff's FP32 forward (`scripts/jeff_reference.py`).
 
 ## Inference and numerics
 
