@@ -1,6 +1,6 @@
 # Verifier block length: 8, 4 and 3 tokens on the M6 ANE
 
-**Result: keep the 8-row verifier.** On the complete Qwen3.8-27B Core AI target with the faster graph, a 4-row or 3-row verifier is no faster than the 8-row one up to 32K context and only 3 to 6% faster at 64K. With measured draft acceptance, shorter verifiers lose 21 to 36% of decode throughput on real coding-agent traffic and 45 to 60% on the high-acceptance coding fixture.
+**Result: keep the 8-row verifier for the tested workloads.** On the complete Qwen3.8-27B Core AI target with the faster graph, 4-row and 3-row calls differ from the 8-row call by -2.1% to +4.1% through 32K context and are only 3.3% to 6.4% faster at 64K. Combining these measured call times with recorded draft acceptance predicts 21 to 36% lower decode throughput on real coding-agent traffic and 45 to 60% lower throughput on the high-acceptance coding fixture. These throughput comparisons are modeled, not server runs with shorter verifiers; the package entry sets also differ.
 
 The speculative verifier evaluates `T` rows per target call: the committed anchor token plus `T - 1` DFlash2 drafts. The release uses `T = 8`. All numbers here are from the Apple M6 (`Mac18,5`, macOS 27.0.1 26A434) on 3 October 2026, with the faster graph from [M6_COMPUTE_ACCELERATION_2026-10-03.md](research/M6_COMPUTE_ACCELERATION_2026-10-03.md) (`GDN_FAST=1`, 2048-wide verify attention tiles, V8 KV cache).
 

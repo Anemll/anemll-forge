@@ -1,6 +1,6 @@
 # DFlash2: the fast Core AI release path
 
-The intended M6 release pairs the **Qwen3.8-27B Core AI target, Swift bridge and matching Core AI DFlash2 drafter**. Release downloads, serving and performance benchmarks use this pair. Plain target-only inference is available with `--plain` for numerical debugging and matched comparisons; it is not the release speed path. Historical measurements remain observations from their recorded setup, not new measurements of the assembled bundle.
+Release 0.2 pairs the **Qwen3.8-27B Core AI target, Swift bridge and matching Core AI DFlash2 drafter**, with target functions selected for M5 or M6. Release downloads, serving and performance benchmarks use this pair. Plain target-only inference is available with `--plain` for numerical debugging and matched comparisons; it is not the release speed path. Historical measurements remain observations from their recorded setup, not new measurements of the assembled bundle.
 
 ## What the verifier does
 
@@ -10,13 +10,15 @@ Eight evaluated rows therefore do not guarantee eight emitted tokens. Useful tok
 
 For greedy decoding the acceptance rule checks each proposal against the target argmax. Equivalence to plain greedy decoding depends on the same target weights, numerical behavior, state and generation policy: a batched graph can differ numerically from a single-token path. For sampling the implementation treats the proposed path as deterministic, accepts a proposal with its target probability and samples the target distribution excluding it on rejection. This preserves the specified target distribution in the algorithmic construction; it does not promise identical random draws or token sequences from the same seed across implementations. Validate the actual runtime, including penalties, stops and context transitions. A fluent response or high acceptance alone does not establish quality.
 
-Drafts are proposed deterministically, so a sampled draft is accepted with the target probability of that token; at temperature 0.7 to 1.0 this accepts fewer drafts than greedy decoding. The [DFlash2 sampling plan](research/DFLASH2_SAMPLING_PLAN.md) describes exact speculative sampling with the drafter's own distribution and the tests needed before changing this rule. Verifier cost does not depend on temperature, and an 8-row verifier stays the fastest end to end ([verifier block length](verifier_len.md)).
+Drafts are proposed deterministically, so when sampling is enabled a draft is accepted with the target probability of that token; the recorded temperature 0.7 to 1.0 workloads accepted fewer drafts than greedy decoding. The [DFlash2 sampling plan](research/DFLASH2_SAMPLING_PLAN.md) describes exact speculative sampling with the drafter's own distribution and the tests needed before changing this rule. Measured verifier costs and an acceptance-based throughput model favor eight rows over three or four on the tested M6 workloads; the shorter-verifier throughput figures are modeled, not end-to-end server measurements ([verifier block length](verifier_len.md)).
 
 The source is [qwen38_server.py](../scripts/qwen38_server.py), particularly `draft_cycle`; [qwen38_spec_unit_test.py](../scripts/qwen38_spec_unit_test.py) is the historical CPU sampling experiment. It is not a hardware validation or a routine fast test.
 
 ## Exact release pairing
 
-The prepared target is `mix25in_mixr_lr64mix`. The locally identified deployed drafter is `dflash2_lut4_gptq.aimodel`, with sidecar metadata referencing that target export and its `lm_head.safetensors`. It retains the earlier `drafter_lut4_gptq_q7_cal` calibration and uses mask scale `0.7`. A later recalibration experiment is not evidence that its output was deployed.
+The release 0.2 target is `release_vq3pA_mixh_s600_k1` (the self-contained materialized export adds `_mat`). Its `dflash2_lut4_gptq.aimodel` must be built with that target export's `lm_head.safetensors`; see the [release quantization recipe](QUANTIZATION.md#release-02-three-bit-mlp-and-token-mixer-rotations). A matching head is required even when the drafter body keeps its earlier GPTQ weights.
+
+The historical first-release pairing used `mix25in_mixr_lr64mix`. Its locally inspected drafter sidecar referenced that target head, the earlier `drafter_lut4_gptq_q7_cal` calibration and mask scale `0.7`. Those findings describe that artifact, rather than establishing the settings of every later drafter build. A later recalibration experiment is not evidence that its output was deployed.
 
 The matching contract is:
 
@@ -28,6 +30,8 @@ The matching contract is:
 Match identities and shapes, not filenames alone. A stale head previously reduced acceptance while appearing to agree with a reference using the same stale head. Current metadata/source checks help detect mismatches; they do not independently prove every compiled weight's lineage. Rebuild or revalidate the pair if the target head, quantization, taps or tokenizer changes.
 
 ## Self-contained assets
+
+The [quantization guide's verifier and drafter section](QUANTIZATION.md#dflash2-and-verifier-optimizations) explains the exact Gated DeltaNet block solve, deferred accepted-prefix state commit, fused context/draft call, windowed prompt-feature ingestion and quantized drafter. It separates implemented techniques from future sampling proposals and scopes the historical timing evidence.
 
 The [bundle workflow](HUGGING_FACE.md) places these beside `model/` and `coreai/`:
 
@@ -58,7 +62,7 @@ python forge.py serve --runtime coreai \
 
 The launcher resolves the sibling `drafter/` package and configuration by default and fails if required assets are absent. [SERVER.md](SERVER.md) lists every startup option, wrapper variable and request default. For independently organized assets, set `--draft /path/to/dflash2_lut4_gptq.aimodel` and `--drafter /path/to/config-and-selector-directory`. `--plain` explicitly disables speculation for a diagnostic run. Keep diagnostic reports separate from release performance results.
 
-The Core AI path uses the Swift bridge, bonded compile mode `2`, and a default `DRAFT_GAP_MS=3` minimum interval after verification before the next draft submission. The drafter fixes PyTorch's host thread count to one to avoid contention observed on the research machine. These are measured mitigations for that stack, not permanent hardware requirements or universal speed guarantees.
+The Core AI path uses the Swift bridge and a chip-dependent compile policy: mode `2` on M6 and mode `1` on M5, unless explicitly overridden ([policy source](../scripts/ane_compile_mode.py)). A default `DRAFT_GAP_MS=3` sets a minimum interval after verification before the next draft submission. The drafter fixes PyTorch's host thread count to one to avoid contention observed on the research machine. These are measured mitigations for that stack, not permanent hardware requirements or universal speed guarantees.
 
 ## How ANE context expansion is implemented
 
@@ -68,7 +72,7 @@ The server restricts the growth ladder to advertised entries at or below `--ctx`
 
 On each prefill or verifier call, `fit(pos + n)` checks whether the committed position plus the incoming rows fit the active entry. If they do not, it selects the smallest allowed entry whose usable capacity fits. `resize` then:
 
-1. Allocates new K/V IOSurface buffers for the full-attention layers and a mask with the new history length. The default export uses FP16 K/V; the experimental V8 export uses FP16 K, INT8 V and FP16 token/head scales.
+1. Allocates new K/V IOSurface buffers for the full-attention layers and a mask with the new history length. Release 0.2's default V8 export uses FP16 K, INT8 V and FP16 token/head scales; other cache formats require matching exported functions.
 2. Copies the cached prefix into the new buffers, including V codes and their scales for V8. It retains rows up to `min(hi, new_capacity)`, where `hi` tracks cached rows needed by snapshots as well as the current committed position.
 3. Preserves the current position, pending commit count and DeltaNet recurrent/convolution state; resizing does not replay the prompt or reset these states.
 4. Clears cached Swift binding plans because they reference the old KV buffers. The next call binds the chosen `v8_*` or `p64_*` functions to the new buffers and runs the chunks/head through the bridge.
@@ -77,7 +81,7 @@ Visibility is controlled by the current position and mask; retained rows beyond 
 
 Ignoring padding and runtime scratch space, full-attention KV storage scales as `2 × attention_layers × KV_heads × history_rows × head_dim × 2 bytes` for FP16 K/V. Weight storage and DeltaNet state do not scale by that same context factor. Total loaded memory also includes programs, per-entry buffers, the drafter and host assets; KV arithmetic alone is not a full-memory estimate.
 
-The [experimental V8 option](KV_CACHE_V8.md) lowers the logical K/V/scale payload from 64 KiB to 48.125 KiB per history position for this target. It requires a matching Core AI export and preserves the same DFlash2, valid-row prefill writes and speculative accepted-prefix commits. The stock download remains FP16; changing a runtime flag does not convert its model inputs.
+The [default V8 cache](KV_CACHE_V8.md) lowers the logical K/V/scale payload from 64 KiB for FP16 K/V to 48.125 KiB per history position for this target. It preserves the same DFlash2, valid-row prefill writes and speculative accepted-prefix commits. FP16-only and optional KV8 packages have different input contracts; changing a runtime flag does not convert an existing package's model inputs.
 
 The largest prepared entry is labeled 64K but has **65,472 usable history rows**. The builder reserves the largest block width (64) so `[history | block]` stays within its observed 65,536-element compilation boundary. This is a constraint of the recorded graph/compiler path, not proof of a permanent universal ANE architecture limit. Speculative HTTP requests additionally reserve eight verifier-write positions before granting an output budget. If no allowed entry fits, direct runtime calls fail and the server rejects an oversized prompt or limits generation; it does not silently expand beyond the configured ladder.
 

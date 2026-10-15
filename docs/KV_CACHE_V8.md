@@ -2,6 +2,21 @@
 
 This option keeps full-attention **keys in FP16** and stores historical **values in signed INT8**, with one FP16 absolute-maximum scale per token and KV head. It affects the 16 full-attention layers. GDN state, projection weights, the local causal block and newly emitted K/V rows retain their existing precision.
 
+## Cache export choices
+
+The current [converter](../coreai/qwen38_coreai_build.py) and [runtime cache code](../scripts/qwen38_kv_cache.py) distinguish the following options:
+
+| Converter option | Stored K | Stored V | Meaning |
+| --- | --- | --- | --- |
+| `--kv-cache-dtype v8` | FP16 | INT8 | Converter default and release 0.2 cache |
+| `--kv-cache-dtype kv8` | INT8 | INT8 | Optional export quantizing both K and V |
+| `--kv-cache-dtype fp16` | FP16 | FP16 | Unquantized cache |
+| `--kv-cache-dtype both` | FP16 in either mode | FP16 or INT8 | One package with selectable `fp16` and `v8` functions; not the `kv8` layout |
+
+Each INT8 cache tensor has its own FP16 scale per token and KV head. The runtime can select only formats present in the exported bundle; requesting `kv8` from a V8-only bundle does not convert it. The converter's `both` option is also separate from chip variants: it cannot be combined with `ATT_INT8MM_M5` in the current builder. K/V **projection weights** are another setting: GPTQ's `KV_FMT="INT8 per-channel"` quantizes both `k_proj` and `v_proj`, regardless of the cache choice. See the [attention implementation diagram](QUANTIZATION.md#accelerated-attention-on-the-ane) for the release 0.2 precision path.
+
+## Historical V8 measurements
+
 The [dated KV-cache quantization research trace](research/KV_CACHE_QUANTIZATION_2026-10-02.md) preserves the complete aggregate prefill, decode and KL results with their measurement boundaries and limitations. Raw prompts and traces are excluded.
 
 A separate [M6 NIAH retrieval pilot](research/NIAH_PILOT_2026-10-03.md) reports four paired FP16/V8 placements through 64K context. All eight runs passed exact match. It is one trial per case, and the source artifacts remain on M6.
