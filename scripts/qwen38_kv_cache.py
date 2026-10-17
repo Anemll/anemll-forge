@@ -50,7 +50,7 @@ def cache_entries(manifest, chunk, mode):
         raise ValueError(f"Missing {mode} KV entry map for {chunk.get('file', 'chunk')}")
     required = {f"v8_{c // 1024}k" for c in manifest.get("ctxs", [])}
     if manifest.get("TP", 0):
-        required.update(f"p64_{c // 1024}k" for c in manifest.get("pctxs", []))
+        required.update(f"p{manifest['TP']}_{c // 1024}k" for c in manifest.get("pctxs", []))
     if not required.issubset(aliases):
         raise ValueError(f"Incomplete {mode} KV entry map for {chunk.get('file', 'chunk')}")
     if any(not isinstance(k, str) or not isinstance(v, str) or v not in chunk["entries"]

@@ -1,7 +1,8 @@
 """Runtime for the Core AI build of Qwen3.8-27B (coreai/qwen38_coreai_build.py): the AneQwen3 API
 (call / accept / features / features_prefill / prefill_block / feed / step / snapshot / restore / reset / fit / resize)
 over Core AI programs whose entry points share one weight copy on the ANE:
-    v8_<ctx>k  (8 rows: decode / DFlash2 verify, lazy-commit DeltaNet), p64_<ctx>k (64-row prefill), head h8.
+    v8_<ctx>k  (8 rows: decode / DFlash2 verify, lazy-commit DeltaNet), p<TP>_<ctx>k (TP-row prefill, manifest TP,
+    64 or 32), head h8.
 - Every entry point of every size is loaded up front: a context switch (resize) moves KV rows into buffers of the new
   length and switches entry points, no model reload.
 - DeltaNet buffers: each call's output NDArrays are the next call's inputs (no host copies).
@@ -264,7 +265,7 @@ def graph_line(man: dict, root: Path) -> str:
 
 
 class CoreAIQwen:
-    """Qwen3.8-27B on the ANE through Core AI; the AneQwen3 interface (T = 8 rows per call, TP = 64-row prefill)."""
+    """Qwen3.8-27B on the ANE through Core AI; the AneQwen3 interface (T = 8 rows per call, TP-row prefill)."""
     keys_t = False  # dim_token key cache (KV head, head dim, token); set from the manifest's key_layout
 
     def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto",
@@ -498,17 +499,17 @@ class CoreAIQwen:
         return logits
 
     def has_prefill(self) -> bool:
-        """A 64-row entry for the current length whose KV history matches the verify entries' buffers."""
-        return bool(self.TP) and f"p64_{self.ctx // 1024}k" in self.chunks[0]["fns"] and \
+        """A TP-row entry for the current length whose KV history matches the verify entries' buffers."""
+        return bool(self.TP) and f"p{self.TP}_{self.ctx // 1024}k" in self.chunks[0]["fns"] and \
             self.pkvlen.get(self.ctx, self.ctx) == self.cap(self.ctx)
 
     def prefill_block(self, ids):
-        """Up to TP tokens through the p64 entry points, all committed. Returns the last token's logits."""
+        """Up to TP tokens through the p<TP> entry points, all committed. Returns the last token's logits."""
         TP, n, p0 = self.TP, len(ids), self.pos
         assert 0 < n <= TP
         if not self.fit(p0 + n):
             raise ValueError(f"{p0 + n} positions exceed the largest context {self.ladder[-1]}")
-        entry = f"p64_{self.ctx // 1024}k"
+        entry = f"p{TP}_{self.ctx // 1024}k"
         if not any(entry in ch["fns"] for ch in self.chunks[:1]):
             raise ValueError(f"no prefill entry {entry}")
         d = self.pin
@@ -556,7 +557,7 @@ class CoreAIQwen:
         return self._features(n)
 
     def feed(self, ids, on_features=None):
-        """Prompt tokens from any position: 64-token prefill calls while more than T remain, then T-token calls."""
+        """Prompt tokens from any position: TP-token prefill calls while more than T remain, then T-token calls."""
         logits, i = None, 0
         while i < len(ids):
             r = len(ids) - i
@@ -649,8 +650,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         buf = lambda f, n: (lambda b: (b, b.np))(f.buffer("input", n))  # noqa: E731
         self.inp = {n: buf(v8, n) for n in ("cos", "sin", "conv_sel", "commit", "commit_last", "x")}
         self.inp["hx"] = buf(self.head, "x")
-        p64 = next((f for e, f in fns0.items() if e.startswith("p64_")), None)
-        self.pin = {} if p64 is None else {n: buf(p64, n) for n in (
+        pf = next((f for e, f in fns0.items() if e.startswith(f"p{self.TP}_")), None)
+        self.pin = {} if pf is None else {n: buf(pf, n) for n in (
             "cos", "sin", "conv_sel", "commit", "commit_last", "conv_sel_out", "valid", "x")}
         hl = self.head.outputs["logits"]
         assert hl["shape"][0] == self.T, f"head logits shape {hl['shape']}"
@@ -742,7 +743,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         """(chunks plan, head plan, chunks + head plan) for the current parity."""
         key = (entry, self.par)
         if key not in self._plans:
-            B, prefill = self.B, entry.startswith("p64_")
+            B, prefill = self.B, entry.startswith(f"p{self.TP}_")
             d = self.pin if prefill else self.inp
             shared = {n: v[0] for n, v in d.items() if n not in ("x", "hx")}
             shared["mask"] = self.mask[0]
@@ -804,7 +805,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         assert 0 < n <= TP
         if not self.fit(p0 + n):
             raise ValueError(f"{p0 + n} positions exceed the largest context {self.ladder[-1]}")
-        entry = f"p64_{self.ctx // 1024}k"
+        entry = f"p{TP}_{self.ctx // 1024}k"
         if entry not in self.chunks[0]["fns"]:
             raise ValueError(f"no prefill entry {entry}")
         d = self.pin

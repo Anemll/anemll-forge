@@ -1128,9 +1128,10 @@ def main():
         wanted_format = "selectable" if KV_CACHE_DTYPE == "both" else KV_CACHE_DTYPE
         if man_path.exists() and prior_format != wanted_format:
             raise ValueError("Existing build has a different KV format; choose a new OUT directory")
-        man.update({"version": "coreai1", "T": 8, "TP": 64 if pctxs else 0, "pend": P, "taps": TAPS, "ctxs": ctxs,
+        tp = max(TPS)  # the runtime prefills through the largest p<TP>_ entry (TPS=32: half the 64-row scratch)
+        man.update({"version": "coreai1", "T": 8, "TP": tp if pctxs else 0, "pend": P, "taps": TAPS, "ctxs": ctxs,
                     "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
-                    "pkv_len": {str(c): kv_len(c, 64) for c in pctxs}, "export": str(M.EXPORT_DIR)})
+                    "pkv_len": {str(c): kv_len(c, tp) for c in pctxs}, "export": str(M.EXPORT_DIR)})
         if basis is not None:  # rot1: the build carries its basis (the runtime checks the embedding table and
             # gives the drafter R for fix B); R.npy and basis.json are copied next to the manifest
             man["rot1_basis"] = {k: basis[k] for k in ("basis_id", "name", "r_kind", "r_seed", "fold_norms")}
