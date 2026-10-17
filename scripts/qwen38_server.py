@@ -76,14 +76,20 @@ def parse(argv=None):
     p.add_argument("--think-budget", default="low=2048,medium=6144,xhigh=12288",
                    help="reasoning tokens per reasoning_effort before the server closes the thinking (no effort: "
                         "medium); at most max(max_tokens - 4096, max_tokens / 2); 0 = no limit")
-    p.add_argument("--presence", type=float, default=0.0, help="default presence_penalty (requests can override)")
+    p.add_argument("--presence", type=float, default=0.0,
+                   help="default presence_penalty with thinking (requests can override; Bonsai-2 card: 0)")
+    p.add_argument("--presence-nothink", type=float, default=1.5,
+                   help="default presence_penalty without thinking, Pi's compaction summaries included (requests can "
+                        "override; Bonsai-2 card: 1.5; at 0 a Bonsai summary repeated itself up to its 8192-token cap)")
     p.add_argument("--dry", type=float, default=0.0, help="DRY repetition penalty multiplier (0 = off; requests: "
                    "dry_multiplier); penalty = mult * base^(match - allowed) for tokens extending a repeated run. "
                    "Off by default: code repeats legitimately (0.8 turned 'for (let x = 0; x' into 'for (let x = 0; <')")
     p.add_argument("--dry-base", type=float, default=1.75)
     p.add_argument("--dry-allowed", type=int, default=8, help="repeated run length (tokens) tolerated before DRY acts")
-    p.add_argument("--loop-guard", type=int, default=6, help="stop when the output tail repeats this many times with "
-                   "the same period (0 = off)")
+    p.add_argument("--loop-guard", type=int, default=3, help="stop when an exact repetition of at least this many "
+                   "periods (4 to 1024 tokens) covers the last --loop-span tokens of the output or more (0 = off)")
+    p.add_argument("--loop-span", type=int, default=1536, help="shortest repeated tail the loop guard stops, so short "
+                   "repeats in code pass (6 repeats of a 32-token row cut a 20-row board literal at row 7)")
     modes = p.add_mutually_exclusive_group()
     modes.add_argument("--draft", help="Core AI DFlash2 package (default: bundle/drafter/dflash2_lut4_gptq.aimodel)")
     modes.add_argument("--plain", action="store_true", help="diagnostic target-only generation")
@@ -100,6 +106,29 @@ def parse(argv=None):
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+class SurvivingStream:
+    """stdout / stderr that drop writes once the log's descriptor is revoked (its volume unmounted): without this,
+    every request dies at its first log line and clients see a dropped connection."""
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def write(self, text):
+        try:
+            return self.stream.write(text)
+        except OSError:
+            return len(text)
+
+    def flush(self):
+        try:
+            self.stream.flush()
+        except OSError:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
 
 
 def dry_matches(seq, breakers=frozenset(), cap=32, window=4096):
@@ -132,13 +161,20 @@ def dry_matches(seq, breakers=frozenset(), cap=32, window=4096):
     return best
 
 
-def loop_period(out, reps, min_period=4, max_period=256):
-    """Period of an exact repetition covering the last reps periods of the output, else 0."""
-    if reps <= 0 or len(out) < min_period * reps:
+def loop_period(out, reps, span=1536, min_period=4, max_period=1024):
+    """Period P of an exact repetition covering the last max(reps * P, span) tokens of the output, else 0."""
+    reps = max(reps, 2) if reps > 0 else 0
+    if not reps or len(out) < max(min_period * reps, span):
         return 0
-    a = np.asarray(out[-max_period * reps:], np.int64)
-    for P in range(min_period, min(max_period, len(a) // reps) + 1):
-        t = a[-P * reps:]
+    a = np.asarray(out[-max(max_period * reps, span):], np.int64)
+    n = len(a)
+    periods = np.arange(min_period, min(max_period, n // reps) + 1)
+    periods = periods[a[n - 1 - periods] == a[-1]]  # candidates: the last token recurs one period earlier
+    for P in periods.tolist():
+        m = max(P * reps, span)
+        if m > n:
+            break
+        t = a[-m:]
         if np.array_equal(t[P:], t[:-P]):
             return P
     return 0
@@ -553,7 +589,7 @@ class Engine:
                                 "tokens_per_second": len(out) / max(el, 1e-9)}
             if not done and len(out) >= next_check:  # loop guard: the tail repeats with a fixed period
                 next_check = len(out) + 32
-                per = loop_period(out, self.a.loop_guard)
+                per = loop_period(out, self.a.loop_guard, self.a.loop_span)
                 if per:
                     self.loop, finish, done = per, "stop", True
             if done:
@@ -835,6 +871,8 @@ def make_handler(engine):
             top_p = (0.95 if thinking else 0.8) if top_p is None else float(top_p)
             top_k = int(req.get("top_k") or 20)
             presence = req.get("presence_penalty")
+            presence = (engine.a.presence if thinking else engine.a.presence_nothink) if presence is None \
+                else float(presence)
             dry = req.get("dry_multiplier")
             stream = bool(req.get("stream"))
             include_usage = bool((req.get("stream_options") or {}).get("include_usage"))
@@ -854,8 +892,8 @@ def make_handler(engine):
                     engine.think_budget(thinking, kw.get("reasoning_effort"), max_tokens)
                 print(f"[{time.strftime('%H:%M:%S')}] thinking "
                       + (f"on (effort {kw.get('reasoning_effort') or 'none'}, budget {budget or 'none'}, "
-                         f"max_tokens {max_tokens})" if thinking else f"off{why}")
-                      + f" | temperature {temp}, top_p {top_p}", flush=True)
+                         f"max_tokens {max_tokens})" if thinking else f"off{why} (max_tokens {max_tokens})")
+                      + f" | temperature {temp}, top_p {top_p}, presence {presence}", flush=True)
                 t0 = time.time()
                 if stream:
                     self.send_response(200)
@@ -960,14 +998,16 @@ def startup_banner(a):
         f"then closed with Qwen's budget phrase)",
         f"sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20; "
         f"max_tokens {a.max_tokens}",
-        f"repetition    presence_penalty {a.presence}; DRY multiplier {a.dry} base {a.dry_base} allowed "
-        f"{a.dry_allowed} tokens; loop guard {'off' if not a.loop_guard else f'{a.loop_guard} repeats'}",
+        f"repetition    presence_penalty {a.presence} thinking / {a.presence_nothink} non-thinking; DRY multiplier "
+        f"{a.dry} base {a.dry_base} allowed {a.dry_allowed} tokens; loop guard "
+        f"{'off' if not a.loop_guard else f'{a.loop_guard}+ periods over {a.loop_span}+ tokens'}",
         f"python        {sys.executable}",
     ]
     print("\n".join(f"[{MODEL_ID}] {l}" for l in lines), flush=True)
 
 
 def main():
+    sys.stdout, sys.stderr = SurvivingStream(sys.stdout), SurvivingStream(sys.stderr)
     a = parse()
     startup_banner(a)
     engine = Engine(a)
