@@ -7,9 +7,12 @@ manifest.plist names the compiled ANE program in aned's cache (ANERegionsHash {s
     purged or replaced). They only take disk space: 273 programs, 176 GB on the M6 on 17 Oct 2026.
   - dangling entries: Core AI entries whose aned program is gone (aned's cache was cleaned). Loading one fails with
     nilError instead of recompiling; removing the entry makes the next load compile again.
+  - stale compile dirs: MPSGraph's working dir of each compile ($TMPDIR/com.apple.MetalPerformanceShadersGraph/
+    mpsgraph-<pid>-<time>-*), left behind when the compiling process died (0.4 to 0.8 GB each for a 27B chunk).
 
     python scripts/ane_cache_cleanup.py                    report only (sizes, counts, other macOS builds)
     python scripts/ane_cache_cleanup.py --delete-dangling  also remove dangling Core AI entries (yours, no sudo)
+    python scripts/ane_cache_cleanup.py --delete-temp      also remove compile dirs whose process is gone (no sudo)
     python scripts/ane_cache_cleanup.py --delete-orphans   orphaned aned programs: aned's cache is root-owned, so
                                                            without root this writes the list and prints the sudo
                                                            command; as root (sudo) it deletes them itself
@@ -50,6 +53,21 @@ def du(p: Path) -> int:
     return int(out[0]) * 1024 if out else 0
 
 
+def stale_compile_dirs() -> list[Path]:
+    """MPSGraph compile dirs (mpsgraph-<pid>-...) in this user's temp dir whose process is no longer running."""
+    tmp = Path(os.environ.get("TMPDIR") or subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], capture_output=True,
+                                                          text=True).stdout.strip())
+    out = []
+    for d in sorted((tmp / "com.apple.MetalPerformanceShadersGraph").glob("mpsgraph-*")):
+        try:
+            os.kill(int(d.name.split("-")[1]), 0)
+        except ProcessLookupError:
+            out.append(d)
+        except (ValueError, IndexError, PermissionError):
+            pass   # not a pid-named dir, or a live process of another user
+    return out
+
+
 def program_refs(entry: Path) -> set[str]:
     """The '<a>_<b>' aned program hashes a Core AI cache entry's manifests name."""
     refs: set[str] = set()
@@ -78,6 +96,7 @@ def main():
     ap.add_argument("--build", default=os_build(), help="macOS build whose caches to check (default: this one)")
     ap.add_argument("--delete-dangling", action="store_true", help="remove Core AI entries whose aned program is gone")
     ap.add_argument("--delete-orphans", action="store_true", help="delete aned programs no Core AI entry names")
+    ap.add_argument("--delete-temp", action="store_true", help="remove MPSGraph compile dirs whose process is gone")
     ap.add_argument("--list", type=Path, default=Path("/tmp/ane_orphans.txt"), help="orphan list for the sudo step")
     ap.add_argument("--client", default="-_unsigned", help="aned client directory to check (default: -_unsigned)")
     ap.add_argument("--recent", type=float, default=15, help="keep programs modified in the last N minutes")
@@ -105,6 +124,8 @@ def main():
           + (f" (and {len(recent)} written in the last {a.recent:.0f} min, kept: a compile may be running)" if recent else ""))
     print(f"  dangling Core AI entries (their program is gone, they would fail with nilError): {len(dangling)}, "
           f"{sum(du(e) for e in dangling) / 1e9:.1f} GB")
+    stale = [] if os.environ.get("SUDO_USER") else stale_compile_dirs()   # root's TMPDIR is not the user's
+    print(f"  stale MPSGraph compile dirs (their process is gone): {len(stale)}, {sum(du(d) for d in stale) / 1e9:.1f} GB")
     others = [d.name for d in ANED.iterdir() if d.is_dir() and d.name != a.build and (d / "ModelAssetsCache").is_dir()]
     if others:
         print(f"  aned caches of other macOS builds (unused by this one): {', '.join(others)}")
@@ -113,6 +134,10 @@ def main():
         for e in dangling:
             shutil.rmtree(e)
         print(f"removed {len(dangling)} dangling Core AI entries")
+    if a.delete_temp:
+        for d in stale:
+            shutil.rmtree(d)
+        print(f"removed {len(stale)} stale compile dirs")
     if a.delete_orphans and orphans:
         if os.geteuid() == 0:
             for p in orphans.values():
