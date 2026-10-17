@@ -50,8 +50,13 @@ class CoreAIDrafter:
         self.has_head = "logits" in self.dout
         self.cfg, self.emb = cfg, emb
         self.unrot = unrot  # rot1 fix B (rot1_runtime.Unrotate): target taps / anchor row back to the unrotated basis
-        self.pc = w_sel["candidate_selector.predecessor_codebook"].float()
-        self.sc = w_sel["candidate_selector.successor_codebook"].float()
+        # selector tables as stored (BF16 / FP16, mapped from the file by safetensors): propose converts only the rows it
+        # reads, instead of two FP32 copies of [248320, 256] in RAM (0.51 GB); exact for BF16. Reading every row once
+        # here puts the file in the page cache (outside the process footprint), so drafts do not wait on the disk.
+        self.pc = w_sel["candidate_selector.predecessor_codebook"]
+        self.sc = w_sel["candidate_selector.successor_codebook"]
+        for t in (self.pc, self.sc):
+            t[:, 0].float().sum()
         self.theta = cfg["rope_parameters"]["rope_theta"]
         self.window = cfg["sliding_window"]
         self.reset()
@@ -125,7 +130,7 @@ class CoreAIDrafter:
         unary, cand = torch.topk(logits, top_k, dim=-1)
         pred, path = int(anchor), []
         for i in range(T - 1):
-            s = unary[i] + self.sc[cand[i]] @ (self.pc[pred] * hp[i])
+            s = unary[i] + self.sc[cand[i]].float() @ (self.pc[pred].float() * hp[i])
             pred = int(cand[i, int(torch.argmax(s))])
             path.append(pred)
         return path, dict(logits=logits, hp=hp, cand=cand, hidden=hidden)
