@@ -78,6 +78,9 @@ def parse(argv=None):
                         "medium); at most max(max_tokens - 4096, max_tokens / 2); 0 = no limit")
     p.add_argument("--presence", type=float, default=0.0,
                    help="default presence_penalty with thinking (requests can override; Bonsai-2 card: 0)")
+    p.add_argument("--min-p", type=float, default=0.0,
+                   help="default min_p with thinking: drop tokens below min_p times the top probability (requests can "
+                        "override; Bonsai-2 card: 0.05 with thinking, 0 without); 0 without thinking")
     p.add_argument("--presence-nothink", type=float, default=1.5,
                    help="default presence_penalty without thinking, Pi's compaction summaries included (requests can "
                         "override; Bonsai-2 card: 1.5; at 0 a Bonsai summary repeated itself up to its 8192-token cap)")
@@ -282,6 +285,7 @@ class Engine:
         self.think_stop = self.tok.encode(THINK_STOP, add_special_tokens=False)
         self.think_close = self.tok.convert_tokens_to_ids("</think>")
         self.think_forced, self.think_n = 0, None
+        self.min_p = 0.0   # the current request's (generate sets it; dist reads it)
         # DRY sequence breakers: byte-level BPE tokens containing a newline (\u010a), ':', '"' or '*'
         self.breakers = frozenset(i for i, t in enumerate(self.tok.convert_ids_to_tokens(list(range(len(self.tok)))))
                                   if t and any(c in t for c in "\u010a:\"*"))
@@ -431,8 +435,8 @@ class Engine:
     # ---- sampling / generation ----
     def dist(self, logits, temp, top_p, top_k, seen=None, presence=0.0, hist=None, dry=None):
         """Sampling distribution of one row: top-k, presence penalty, DRY repetition penalty (hist = the output so
-        far, dry = (multiplier, base, allowed)), temperature, top-p -> (ids, probs); None for greedy. Plain and
-        speculative decoding sample from exactly this."""
+        far, dry = (multiplier, base, allowed)), temperature, min-p (the request's self.min_p), top-p -> (ids, probs);
+        None for greedy. Plain and speculative decoding sample from exactly this."""
         if temp <= 0:
             return None
         logits = logits.astype(np.float32)
@@ -451,6 +455,9 @@ class Engine:
         z = z / temp
         p = np.exp(z - z.max())
         p /= p.sum()
+        if self.min_p > 0:   # min-p: drop candidates below min_p times the most likely one's probability
+            p = np.where(p >= self.min_p * p.max(), p, 0.0)
+            p /= p.sum()
         order = np.argsort(-p)
         keep = order[: int(np.searchsorted(np.cumsum(p[order]), top_p)) + 1]
         return idx[keep], p[keep] / p[keep].sum()
@@ -542,13 +549,14 @@ class Engine:
             self.decode_live = None  # /health reports idle after every turn, including a failed one
 
     def _generate(self, ids, max_tokens, temp, top_p, top_k, stop, seed, on_text, presence=None, dry=None,
-                 think_budget=0):
+                 think_budget=0, min_p=0.0):
         logits, reused = self.prefill(ids)
         self.think_forced, self.think_n = 0, None
         decode_started = time.perf_counter()
         t_gen, out, text, finish = time.time(), [], "", "length"
         rng = np.random.default_rng(seed)
         presence = self.a.presence if presence is None else float(presence)
+        self.min_p = float(min_p or 0.0)
         samp = (temp, top_p, top_k, presence)
         dry = (self.a.dry if dry is None else float(dry), self.a.dry_base, self.a.dry_allowed)
         seen = np.zeros(len(logits), np.float64)
@@ -870,6 +878,8 @@ def make_handler(engine):
             top_p = req.get("top_p")
             top_p = (0.95 if thinking else 0.8) if top_p is None else float(top_p)
             top_k = int(req.get("top_k") or 20)
+            min_p = req.get("min_p")
+            min_p = (engine.a.min_p if thinking else 0.0) if min_p is None else float(min_p)
             presence = req.get("presence_penalty")
             presence = (engine.a.presence if thinking else engine.a.presence_nothink) if presence is None \
                 else float(presence)
@@ -893,7 +903,7 @@ def make_handler(engine):
                 print(f"[{time.strftime('%H:%M:%S')}] thinking "
                       + (f"on (effort {kw.get('reasoning_effort') or 'none'}, budget {budget or 'none'}, "
                          f"max_tokens {max_tokens})" if thinking else f"off{why} (max_tokens {max_tokens})")
-                      + f" | temperature {temp}, top_p {top_p}, presence {presence}", flush=True)
+                      + f" | temperature {temp}, top_p {top_p}, min_p {min_p}, presence {presence}", flush=True)
                 t0 = time.time()
                 if stream:
                     self.send_response(200)
@@ -922,7 +932,8 @@ def make_handler(engine):
                             except (BrokenPipeError, ConnectionResetError):
                                 return False
                         text, finish, n, reused, dt = engine.generate(ids, max_tokens, temp, top_p, top_k, stop,
-                                                                      req.get("seed"), on_text, presence, dry, budget)
+                                                                      req.get("seed"), on_text, presence, dry, budget,
+                                                                      min_p)
                         tail = splitter.feed("", final=True)
                         if tail:
                             emit(tail)
@@ -946,7 +957,8 @@ def make_handler(engine):
                         return
                 else:
                     text, finish, n, reused, dt = engine.generate(ids, max_tokens, temp, top_p, top_k, stop,
-                                                                  req.get("seed"), lambda d: None, presence, dry, budget)
+                                                                  req.get("seed"), lambda d: None, presence, dry, budget,
+                                                                  min_p)
                     reasoning, content, calls = split_output(text, thinking)
                     msg = {"role": "assistant", "content": content or (None if calls else "")}
                     if reasoning:
@@ -996,7 +1008,8 @@ def startup_banner(a):
            else "; context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)"),
         f"think budget  {a.think_budget} tokens per reasoning_effort (request field thinking_budget overrides; "
         f"then closed with Qwen's budget phrase)",
-        f"sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20; "
+        f"sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, "
+        f"min_p {a.min_p} / 0; "
         f"max_tokens {a.max_tokens}",
         f"repetition    presence_penalty {a.presence} thinking / {a.presence_nothink} non-thinking; DRY multiplier "
         f"{a.dry} base {a.dry_base} allowed {a.dry_allowed} tokens; loop guard "
