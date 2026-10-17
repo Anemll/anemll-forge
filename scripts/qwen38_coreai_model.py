@@ -301,8 +301,8 @@ class CoreAIQwen:
         for ch in man["chunks"]:
             t0 = time.time()
             model, fns = run(self._load(ch["file"], ch["entries"], ch.get("compiled")))
-            self.chunks.append({"model": model, "fns": fns, "layers": ch["layers"], "gdn_j": ch["gdn_j"],
-                                "att_j": ch["att_j"], "taps": ch["taps"], "last": ch["layers"][1]})
+            self.chunks.append({"model": model, "fns": fns, "names": dict(aliases), "layers": ch["layers"],
+                                "gdn_j": ch["gdn_j"], "att_j": ch["att_j"], "taps": ch["taps"], "last": ch["layers"][1]})
             self.log(f"loaded {ch['file']} ({len(fns)} entries, {time.time() - t0:.0f}s)")
         self.head_model, hf = run(self._load(man["head"]["file"], ["h8"], man["head"].get("compiled")))
         self.head = hf["h8"]
@@ -630,8 +630,8 @@ class CoreAIQwenBridge(CoreAIQwen):
             model, physical = self.compile_guide.load(
                 ch["file"], lambda ch=ch, aliases=aliases: self._load(ch["file"], list(aliases.values()), ch.get("compiled")))
             fns = {canonical: physical[name] for canonical, name in aliases.items()}
-            self.chunks.append({"model": model, "fns": fns, "layers": ch["layers"], "gdn_j": ch["gdn_j"],
-                                "att_j": ch["att_j"], "taps": ch["taps"], "last": ch["layers"][1]})
+            self.chunks.append({"model": model, "fns": fns, "names": dict(aliases), "layers": ch["layers"],
+                                "gdn_j": ch["gdn_j"], "att_j": ch["att_j"], "taps": ch["taps"], "last": ch["layers"][1]})
             self.log(f"loaded {ch['file']} ({len(fns)} entries, {time.time() - t0:.0f}s, bridge)")
         self.head_model, hf = self.compile_guide.load(
             man["head"]["file"], lambda: self._load(man["head"]["file"], ["h8"], man["head"].get("compiled")))
@@ -691,6 +691,7 @@ class CoreAIQwenBridge(CoreAIQwen):
 
     def _alloc_kv(self, ctx: int, keep: int):
         old = getattr(self, "kv", None)
+        old_ctx = self.ctx if old is not None else None
         L = self.cap(ctx)
         entry = f"v8_{ctx // 1024}k"
         self.kv = []
@@ -718,6 +719,24 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.mask = (mb, mb.np)
         self.ctx = ctx
         self._plans = {}
+        if old_ctx is not None and old_ctx != ctx:
+            self._release_entry(old_ctx)
+
+    def _release_entry(self, ctx: int):
+        """Reload the functions of a context entry the runtime has left. A loaded Core AI function keeps the buffers of
+        its last call alive until it is released, so the replaced KV caches of every entry visited stayed in memory
+        (2x16 Bonsai ladder: footprint 1.06 -> 1.87 -> 3.49 GB from 8K to 32K instead of 1.06 -> 1.46 -> 2.68; for the
+        release target at 64K, 8K + 16K + 32K + 48K of stale caches, about 4.9 GB). A reload takes about 1 ms; the
+        weights stay loaded, shared by the package's functions. Coming back to this entry costs one slower first call."""
+        tag = f"_{ctx // 1024}k"
+        # all released before any is reloaded: a function loaded again while its old object is alive comes back as the
+        # same Core AI function, buffers of its last call included (measured: 1.87 GB kept instead of 1.46)
+        left = [(ch, e) for ch in self.chunks if "names" in ch for e in ch["fns"] if e.endswith(tag)]
+        for ch, e in left:
+            del ch["fns"][e]
+        gc.collect()
+        for ch, e in left:
+            ch["fns"][e] = ch["model"].function(ch["names"][e])
 
     def _plan(self, entry: str):
         """(chunks plan, head plan, chunks + head plan) for the current parity."""
