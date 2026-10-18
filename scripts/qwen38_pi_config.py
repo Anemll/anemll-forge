@@ -28,7 +28,7 @@ from pathlib import Path
 
 PROVIDER, MODEL = "ane-qwen38", "qwen38-27b-ane"
 PI_SAFETY = 4096  # pi-ai CONTEXT_SAFETY_TOKENS reserved below the window for the response
-CONTEXTS = (8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072)
+CONTEXTS = (8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608)
 
 
 def budget(ctx: int) -> tuple[int, int, int]:

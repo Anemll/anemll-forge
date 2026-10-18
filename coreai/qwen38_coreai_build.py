@@ -48,6 +48,11 @@ TPS = [int(x) for x in os.environ.get("TPS", "64").split(",")]  # prefill entry 
 # narrow slices cost ANE compile time, so it defaults to max(ATT_BLOCK, 4096). Release graph: ATT_BLOCK=16384.
 ATT_BLOCK = int(os.environ.get("ATT_BLOCK", "2048"))
 ATT_BLOCK_PREFILL = int(os.environ.get("ATT_BLOCK_PREFILL", str(max(ATT_BLOCK, 4096))))
+# ATT_BLOCK_LONG: verify tile width for contexts above ATT_LONG_FROM (default ATT_BLOCK: unchanged). The ANE compile
+# time of a chunk grows much faster than its largest verify entry's tile count (17 Oct 2026, one kv8 chunk: 8K-128K in
+# 6.5 min, 8K-192K in 25.4 min, both 2048-wide); wider tiles keep long entries compilable, short ones keep 2048.
+ATT_BLOCK_LONG = int(os.environ.get("ATT_BLOCK_LONG", str(ATT_BLOCK)))
+ATT_LONG_FROM = int(os.environ.get("ATT_LONG_FROM", "65536"))
 KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "v8")  # v8 | kv8 | fp16 | both (selectable, about 1.5x the compile)
 # cache inputs per attention layer: v8 = FP16 keys + INT8 values; kv8 = INT8 keys and values (scales per token/head)
 KV_INPUTS = {"fp16": ("k", "v"), "v8": ("k", "v", "vs"), "kv8": ("k", "v", "ks", "vs")}
@@ -587,7 +592,7 @@ class AttnW(nn.Module):
 
         def vtile(a, b):
             return dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero) if tile_v else v_st[:, a:b]
-        blk = ATT_BLOCK_PREFILL if T > P else ATT_BLOCK
+        blk = ATT_BLOCK_PREFILL if T > P else (ATT_BLOCK_LONG if ctx > ATT_LONG_FROM else ATT_BLOCK)
         form = ATT_SOFTMAX_PREFILL if T > P else ATT_SOFTMAX
         if ctx <= blk and not cache_v8 and not cache_k8 and not STABLE_ATTN:
             sc_h = ((qg4 @ (k_st if KV_KEYS_T else k_st.transpose(1, 2))) * hd ** -0.5) + mask.reshape(1, 1, ctx)
@@ -1051,6 +1056,8 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
             "numerics": {"SILU": SILU, "MLP_SILU": MLP_SILU, "GDN_SQ": GDN_SQ, "GDN_SV": GDN_SV,   # fp16 fixes built in
                          "MLP_DS_TABLE": os.environ.get("MLP_DS_TABLE"), "MLP_DS": MLP_DS, "GDN_FAST": GDN_FAST,
                          "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL,
+                         **({"ATT_BLOCK_LONG": ATT_BLOCK_LONG, "ATT_LONG_FROM": ATT_LONG_FROM}
+                            if ATT_BLOCK_LONG != ATT_BLOCK else {}),
                          **({"ATT_SOFTMAX": ATT_SOFTMAX} if ATT_SOFTMAX != "two_pass" else {}),
                          **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {}),
                          **({"ATT_INT8MM": ATT_INT8MM, "ATT_S8_UNIT": ATT_S8_UNIT, "ATT_S8B_UNIT": ATT_S8B_UNIT,
