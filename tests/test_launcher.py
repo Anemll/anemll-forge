@@ -60,7 +60,7 @@ class LauncherTests(unittest.TestCase):
     def test_dry_run_does_not_launch_or_write(self):
         export = self.root / "export"
         export.mkdir()
-        with patch("forge.subprocess.call") as run, contextlib.redirect_stdout(io.StringIO()) as out:
+        with patch("forge.call_child") as run, contextlib.redirect_stdout(io.StringIO()) as out:
             result = forge.main(["convert", "--model", str(self.model), "--export", str(export),
                                  "--output", str(self.root / "builds"), "--dry-run"])
         self.assertEqual(result, 0)
@@ -123,7 +123,7 @@ class LauncherTests(unittest.TestCase):
         pkg = self.root / "chunk_L00-03.aimodel"
 
         def child(rc, loading):
-            def call(command, env, cwd):
+            def call(command, env):
                 Path(env[forge.G.STATE_ENV]).write_text(str(pkg) if loading else "")
                 return rc
             return call
@@ -133,7 +133,7 @@ class LauncherTests(unittest.TestCase):
                                             ([-15], True, 1, 0),        # stopped (SIGTERM): no retry
                                             ([1], True, 1, 0)):         # Python error: no retry
             results = iter(rcs)
-            with patch("forge.subprocess.call", side_effect=lambda c, env, cwd: child(next(results), loading)(c, env, cwd)) as run, \
+            with patch("forge.call_child", side_effect=lambda c, env: child(next(results), loading)(c, env)) as run, \
                     patch("forge.G.purge", return_value=3) as purge, contextlib.redirect_stderr(io.StringIO()):
                 rc = forge.run_recovering(["x"], {})
             self.assertEqual((run.call_count, purge.call_count, rc), (calls, purges, rcs[calls - 1]), rcs)
