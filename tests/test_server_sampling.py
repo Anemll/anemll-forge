@@ -2,6 +2,7 @@
 the loop guard's span floor."""
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import numpy as np
@@ -64,6 +65,23 @@ class LoopGuardTests(unittest.TestCase):
         text = self.rng.integers(0, 248000, 3000).tolist()
         self.assertEqual(S.loop_period(text, 3, 1536), 0)
         self.assertEqual(S.loop_period(self.pre + self.row * 60, 0, 1536), 0)
+
+
+class PrefillProgressTests(unittest.TestCase):
+    def test_short_prompts_are_one_piece(self):
+        self.assertEqual(S.PrefillProgress(8191, 0).slice, 0)
+        self.assertEqual(S.PrefillProgress(8192, 0).slice, 4096)
+
+    def test_logs_at_most_every_interval(self):
+        lines, clock = [], [0.0]
+        with unittest.mock.patch.object(S, "log", lines.append), \
+                unittest.mock.patch.object(S.time, "perf_counter", lambda: clock[0]):
+            p = S.PrefillProgress(100_000, 1000)
+            for k in range(1, 25):   # one 4096-token slice every 20 s
+                clock[0] = 20.0 * k
+                p.update(1000 + 4096 * k)
+        self.assertEqual(len(lines), 12)   # every 30 s at most: every second slice
+        self.assertRegex(lines[0], r"prefill: 8192/100000 tok \(8%\) in 40s \| 205 tok/s now")
 
 
 if __name__ == "__main__":

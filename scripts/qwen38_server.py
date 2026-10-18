@@ -207,6 +207,34 @@ class DraftIngestWindows:
             self.drafter.add_context(np.asarray(feats)[keep], positions[keep])
 
 
+class PrefillProgress:
+    """A progress line for long prompts: done / total, the rate of the last slice and the time left at that rate,
+    at most every PREFILL_LOG_S seconds (default 30). The prompt is fed in slices of PREFILL_SLICE tokens (default
+    4096, a multiple of every prefill and verify block size, so the calls are the same as in one piece); prompts
+    shorter than two slices are fed in one piece and log only the final prefill line."""
+
+    def __init__(self, total, reused):
+        size = int(os.environ.get("PREFILL_SLICE", "4096"))
+        self.slice = size if total >= 2 * size else 0
+        self.every = float(os.environ.get("PREFILL_LOG_S", "30"))
+        self.total, self.base = total, reused
+        self.t0 = self.t_last = self.t_slice = time.perf_counter()
+        self.done_slice = 0
+
+    def update(self, pos):
+        if not self.slice:
+            return
+        now, done = time.perf_counter(), pos - self.base
+        rate = (done - self.done_slice) / max(now - self.t_slice, 1e-9)
+        self.t_slice, self.done_slice = now, done
+        if now - self.t_last >= self.every and done < self.total:
+            self.t_last = now
+            left = (self.total - done) / max(rate, 1e-9)
+            log(f"prefill: {done}/{self.total} tok ({100 * done / self.total:.0f}%) in {now - self.t0:.0f}s | "
+                f"{rate:.0f} tok/s now, {done / (now - self.t0):.0f} average | ~{left / 60:.1f} min left at the "
+                f"current rate (it slows as the context grows)")
+
+
 class Engine:
     def __init__(self, a):
         mdir = Path(os.path.expanduser(a.model_dir))
@@ -417,11 +445,14 @@ class Engine:
         ingest = None
         if self.drafter is not None and os.environ.get("DRAFT_INGEST", "window") != "all":
             ingest = DraftIngestWindows(self.drafter, [c for c, _ in cuts] + [len(ids)])
+        progress = PrefillProgress(len(ids) - reused, reused)
         for cut, key in sorted(cuts) + [(len(ids), None)]:
-            if cut > i:  # feed up to the snapshot point, then snapshot
-                logits = self._feed(ids[i:cut], ingest)
-                self.fed.extend(ids[i:cut])
-                i = cut
+            while cut > i:  # feed up to the snapshot point in slices (same calls: slices are whole blocks), then snapshot
+                j = min(cut, i + progress.slice) if progress.slice else cut
+                logits = self._feed(ids[i:j], ingest)
+                self.fed.extend(ids[i:j])
+                i = j
+                progress.update(i)
             if key:
                 self._snapshot(key, ids[:cut])
         dt = time.perf_counter() - t_pre
