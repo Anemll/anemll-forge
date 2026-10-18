@@ -5,7 +5,7 @@ Updates only the target `provider/model` entry of `<pi-dir>/models.json` (contex
 fits and compacts before the window fills. Pi itself clamps every request to
     max_tokens = min(maxTokens, contextWindow - estimated_prompt - 4096)
 (CONTEXT_SAFETY_TOKENS in pi-ai, floored at 1), so the compaction point must leave room for the output cap:
-    maxTokens         = clamp(ctx / 4, 2048, 16384)     (16K -> 4096, 32K -> 8192, 64K -> 16384)
+    maxTokens         = clamp(ctx / 4, 2048, 16384)     (16K -> 4096, 32K -> 8192, 64K and up -> 16384)
     reserveTokens     = maxTokens + 4096                 (16K: compacts above ~8K; 64K: above ~45K)
     keepRecentTokens  = min(ctx / 8, 8192)               (16K -> 2048, 64K -> 8192)
 
@@ -28,7 +28,7 @@ from pathlib import Path
 
 PROVIDER, MODEL = "ane-qwen38", "qwen38-27b-ane"
 PI_SAFETY = 4096  # pi-ai CONTEXT_SAFETY_TOKENS reserved below the window for the response
-CONTEXTS = (8192, 16384, 24576, 32768, 49152, 65536)
+CONTEXTS = (8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072)
 
 
 def budget(ctx: int) -> tuple[int, int, int]:

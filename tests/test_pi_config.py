@@ -33,11 +33,12 @@ class PiConfigTests(unittest.TestCase):
         self.assertEqual(pc.budget(16384), (4096, 8192, 2048))
         self.assertEqual(pc.budget(32768), (8192, 12288, 4096))
         self.assertEqual(pc.budget(65536), (16384, 20480, 8192))
+        self.assertEqual(pc.budget(131072), (16384, 20480, 8192))   # 128K build (M6-only, 17 Oct 2026)
         self.assertEqual(pc.budget(8192), (2048, 6144, 1024))
 
     def test_invalid_context_does_not_modify_profile(self):
         before = {name: (self.pi / name).read_bytes() for name in ("models.json", "settings.json")}
-        for ctx in (-1, 0, 2048, 4096, 12000, 131072):
+        for ctx in (-1, 0, 2048, 4096, 12000, 262144):
             with self.subTest(ctx=ctx), self.assertRaisesRegex(ValueError, "unsupported context"):
                 pc.sync(self.pi, ctx, "coreai", True)
             for name, content in before.items():
