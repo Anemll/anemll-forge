@@ -577,9 +577,15 @@ def load_codebooks(path=None):
     path = Path(path) if path is not None else DRAFTER
     # Prepared inference releases contain only the two selector tables, not the full drafter checkpoint.
     compact = path / "selector.safetensors"
-    with safe_open(compact if compact.is_file() else path / "model.safetensors", framework="pt") as f:
-        return {k: f.get_tensor(k) for k in ("candidate_selector.predecessor_codebook",
-                                             "candidate_selector.successor_codebook")}
+    src = compact if compact.is_file() else path / "model.safetensors"
+    from mapped_files import mappable, note
+    keep = mappable(src)   # get_tensor maps the file; off the home volume, copy the tables into memory (0.25 GB)
+    if not keep:
+        note(src, "reading the selector tables into memory instead of mapping them")
+    with safe_open(src, framework="pt") as f:
+        return {k: (t if keep else t.clone()) for k in ("candidate_selector.predecessor_codebook",
+                                                        "candidate_selector.successor_codebook")
+                for t in [f.get_tensor(k)]}
 
 
 def replay_ane():

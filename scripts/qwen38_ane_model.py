@@ -76,14 +76,16 @@ class Checkpoint:
         """The (vocab, hidden) fp16 embedding table, memory-mapped: written once as a raw .npy (EMBED_NPY, default
         ~/Models/vq27b/embed_tokens_fp16.npy) and then np.load(mmap_mode="r"). Only the rows a conversation uses get
         paged in, and the pages are clean and file-backed (dropped under memory pressure instead of swapped), where a
-        loaded table is 2.5 GB of anonymous memory."""
+        loaded table is 2.5 GB of anonymous memory. A table on another volume than the home directory's is read by
+        rows instead (mapped_files.NpyRows): a mapped page there that fails to read back would kill the server."""
         path = Path(os.path.expanduser(os.environ.get("EMBED_NPY", "~/Models/vq27b/embed_tokens_fp16.npy")))
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".tmp.npy")
             np.save(tmp, self.get("model.language_model.embed_tokens.weight").to(torch.float16).numpy())
             tmp.rename(path)
-        table = np.load(path, mmap_mode="r", allow_pickle=False)
+        from mapped_files import load_rows
+        table = load_rows(path)
         c = cfg()
         expected = (c["vocab_size"], c["hidden_size"])
         if table.shape != expected or table.dtype != np.float16 or not table.flags.c_contiguous:
