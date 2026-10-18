@@ -84,6 +84,7 @@ How to read it:
 
 - **Plan:** how many packages still need compiling, for which macOS build and Python executable name (the cache key), and the estimate for this build's graph, KV formats and contexts.
 - **Hints:** stopping is safe, and options that compile faster: fewer contexts, or `python forge.py compile` ahead of serving.
+- **Stopping `forge.py`:** Ctrl-C, `kill <pid>` (SIGTERM) or SIGHUP stops the compile or server it runs: `forge.py` passes the signal on and waits. After `kill -9` of `forge.py` its child stops by itself within about 2 s. Before 17 October 2026 a plain `kill` of `forge.py` left the child running on its own, still compiling.
 - **Progress:** a `compiling` line per package, a heartbeat every 30 s (`ANE_COMPILE_HEARTBEAT_S`) with the time so far, and a `compiled ... in` line with the time left.
 - **Time left** starts from a model of the build settings (here 27m33s, about 20% high) and is rescaled by the measured package times, so it is close after the first package. A slow package (2m33s here) raises it until the next ones finish.
 - **Later starts** print `all 18 packages already compiled for this Mac (macOS 26A434): loading from cache`.

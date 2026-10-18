@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import signal
 import subprocess
 import sys
 import tempfile
@@ -157,6 +158,27 @@ def prepare(a):
     return [sys.executable, str(ROOT / "scripts" / script), *args], env
 
 
+def call_child(command, env):
+    """subprocess.call that never leaves the child running alone. SIGTERM and SIGHUP to forge.py are passed on to the
+    child and forge.py waits for it to end (a plain `kill` of forge.py used to leave a compile or a server running,
+    still writing compile caches). SIGINT is not passed on: a terminal's Ctrl-C reaches the child too (same process
+    group), and forge.py waits for it. The child gets forge.py's pid ($ANEMLL_FORGE_PARENT) and stops by itself if
+    forge.py dies without a signal (kill -9): coreai_compile_guide.watch_parent."""
+    child = subprocess.Popen(command, env={**env, G.PARENT_ENV: str(os.getpid())}, cwd=ROOT)
+
+    def forward(sig, _frame):
+        if child.poll() is None:
+            child.send_signal(sig)
+
+    old = {s: signal.signal(s, forward) for s in (signal.SIGTERM, signal.SIGHUP)}
+    old[signal.SIGINT] = signal.signal(signal.SIGINT, lambda *_: None)
+    try:
+        return child.wait()
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+
+
 def run_recovering(command, env):
     """Run a package-loading child. If it dies by a crash signal while loading a package (MPSGraph aborts on a cached
     specialization it cannot use), purge that package's cache for this Python and retry once: it recompiles."""
@@ -165,7 +187,7 @@ def run_recovering(command, env):
     env = {**env, G.STATE_ENV: state}
     try:
         for attempt in range(2):
-            rc = subprocess.call(command, env=env, cwd=ROOT)
+            rc = call_child(command, env)
             pkg = Path(state).read_text().strip()
             if attempt or -rc not in G.CRASH_SIGNALS or not pkg:
                 return rc
@@ -249,7 +271,7 @@ def main(argv=None):
     env.update(overrides)
     if a.command in ("serve", "chat"):
         return run_recovering(command, env)
-    return subprocess.call(command, env=env, cwd=ROOT)
+    return call_child(command, env)
 
 
 if __name__ == "__main__":

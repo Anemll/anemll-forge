@@ -1021,6 +1021,8 @@ def startup_banner(a):
 
 def main():
     sys.stdout, sys.stderr = SurvivingStream(sys.stdout), SurvivingStream(sys.stderr)
+    import coreai_compile_guide as G
+    G.watch_parent()   # forge.py serve: stop with forge.py, even after kill -9
     a = parse()
     startup_banner(a)
     engine = Engine(a)

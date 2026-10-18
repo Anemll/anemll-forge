@@ -264,6 +264,8 @@ class Chat:
 
 
 def main():
+    import coreai_compile_guide as G
+    G.watch_parent()
     a = parse()
     chat = Chat(a)
     if a.prompt:

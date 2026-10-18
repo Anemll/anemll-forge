@@ -34,6 +34,7 @@ def stamp(msg: str):
 
 
 def main(argv=None):
+    G.watch_parent()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", type=Path, required=True, help="target build directory (manifest.json, packages)")
     ap.add_argument("--draft", type=Path, help="also compile this DFlash2 drafter package")

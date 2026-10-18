@@ -13,6 +13,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -25,6 +26,26 @@ HEARTBEAT_S = float(os.environ.get("ANE_COMPILE_HEARTBEAT_S", "30"))
 HEAD_S, DRAFTER_S = 30.0, 60.0          # rough cold compile of the head / DFlash2 drafter packages
 STATE_ENV = "ANE_COMPILE_STATE"         # file naming the package being loaded, for a parent to recover from a crash
 CRASH_SIGNALS = (6, 4, 5, 10, 11)       # SIGABRT (MPSGraph assertion), SIGILL, SIGTRAP, SIGBUS, SIGSEGV
+PARENT_ENV = "ANEMLL_FORGE_PARENT"      # pid of the forge.py that started this process (it passes stop signals on)
+
+
+def watch_parent(poll: float = 2.0) -> bool:
+    """In a process forge.py started (compile, serve, chat): stop it (SIGTERM to itself) once forge.py is gone without
+    passing a signal on, e.g. after kill -9, so no compile or server goes on alone, still loading packages and writing
+    compile caches. Only forge.py's direct child watches: the variable is removed, so processes it starts do not
+    inherit it. Returns whether this process watches."""
+    pid = os.environ.pop(PARENT_ENV, "")
+    if not pid.isdigit() or os.getppid() != int(pid):
+        return False
+
+    def run():
+        while os.getppid() == int(pid):
+            time.sleep(poll)
+        print(f"[forge] forge.py (pid {pid}) is gone: stopping this process too", file=sys.stderr, flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=run, name="forge-parent-watch", daemon=True).start()
+    return True
 
 
 def os_build() -> str:
