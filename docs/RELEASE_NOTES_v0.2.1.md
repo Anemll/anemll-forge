@@ -40,7 +40,9 @@ A chunk's scratch memory on the Neural Engine is about rows times its largest co
 
 The runtime allocates only the current context entry's cache. It starts a conversation in the 8K entry, moves to the next entry when the context outgrows it (moving the kept rows), and releases the old cache. A new conversation goes back to the smallest entry that holds it. So memory follows the conversation, not the cap:
 
-Memory by context on a 32 GB M6, the same contexts as the speed table:
+### Memory by context
+
+On a 32 GB M6, for the same contexts as the speed table:
 
 | Context (prompt tokens) | Entry | KV cache (kv8) | KV cache and I/O | Process memory | Neural Engine | Total |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
