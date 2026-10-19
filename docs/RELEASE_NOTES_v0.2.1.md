@@ -110,7 +110,21 @@ The startup log says `[ctx] using the build capped at 16K`. The server listens o
 
 ### Quick test: 16K
 
-Measured on the M6 with the steps above: the compile took **8 min 37 s** (about 32 s per chunk), a 5,926-token prompt prefilled at **267 tok/s** and a 1,619-token one at 280 tok/s, and the server process used 2.0 GB. Any reply in Pi or through the API confirms the pair works; `/health` reports the build and the context.
+Steps 2 and 3 with `--ctx 16K` and `CTX=16K` are the quick test: about 10 minutes from download to a running server, instead of 2 h 11 min for every entry up to 192K. Then check it:
+
+1. **Startup:** the wrapper prints `[ctx] using the build capped at 16K` and ends with `serving OpenAI API ... (speculative ON, ctx 16384)`. On the compile, `[ANE compile]` lines show each chunk at about 30 seconds.
+2. **Health:** `curl -s http://127.0.0.1:8765/health` reports the model, the context and the loaded build.
+3. **A reply:**
+
+   ```sh
+   curl -s http://127.0.0.1:8765/v1/chat/completions -H "Content-Type: application/json" \
+     -d '{"model": "qwen38-27b-ane", "max_tokens": 200,
+          "messages": [{"role": "user", "content": "Write a Python function that checks whether a string is a palindrome."}]}'
+   ```
+
+4. **Speed:** `bash scripts/qwen38_server.sh log` shows a `prefill:` line with the prompt's rate and `decode:` lines with tokens per second and tokens per verify call. Longer prompts give steadier prefill numbers, for example from a Pi session.
+
+Reference, measured on a 32 GB M6 (macOS 27.0.1): compile **8 min 37 s** (about 32 s per chunk); prefill **267 tok/s** for a 5,926-token prompt and 280 tok/s for 1,619 tokens; server process 2.0 GB. Decode depends on the content: at 16K the full build measured 32 tok/s for code, 17 for prose and 58 for JSON (table above).
 
 ### Longer contexts
 
