@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 import coreai_compile_guide as G
 from qwen38_kv_cache import (KV_INPUTS, append_rows, cache_format, cache_formats, cache_entries, keep_rows, key_layout,
-                              put_rows)
+                              prefill_groups, prefill_rows, put_rows)
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -199,8 +199,14 @@ def target_graph(man: dict) -> dict:
     att8 = sorted({n.get("ATT_INT8MM", "") for n in nums}) or [""]  # 8-bit attention forms (research builds)
     by_layer = {k: v for n in nums for k, v in (n.get("ATT_INT8MM_BY_LAYER") or {}).items()}
     pf8 = sorted({n["ATT_PF8_UNIT"] for n in nums if "ATT_PF8_UNIT" in n})
+    attpl = sorted({(int(n["ATT_BLOCK_PREFILL_LONG"]), int(n["PREFILL_LONG_FROM"])) for n in nums
+                    if "ATT_BLOCK_PREFILL_LONG" in n})  # prefill tiles of the long context entries
+    rows = {str(c): r for c, r in prefill_rows(man).items()}
     return {"gdn_fast": one(gdn), "att_block": one(att), "att_block_prefill": one(attp), "recorded": recorded,
-            "att_int8mm": one(att8), "att_int8mm_by_layer": by_layer, "att_pf8_unit": one(pf8) if pf8 else None}
+            "att_int8mm": one(att8), "att_int8mm_by_layer": by_layer, "att_pf8_unit": one(pf8) if pf8 else None,
+            **({"prefill_rows": rows} if rows else {}),
+            **({"att_block_prefill_long": one([a for a, _ in attpl]), "prefill_long_from": one([f for _, f in attpl])}
+               if attpl else {})}
 
 
 ATT8_WORDS = [  # ATT_INT8MM forms (qwen38_coreai_build.py) in words, in reading order
@@ -254,6 +260,10 @@ def graph_line(man: dict, root: Path) -> str:
     fast = g["gdn_fast"] if isinstance(g["gdn_fast"], list) else int(g["gdn_fast"])
     note = "" if g["recorded"] else " (not recorded in manifest: release defaults)"
     pre = "" if g["att_block_prefill"] == g["att_block"] else f" ATT_BLOCK_PREFILL={g['att_block_prefill']}"
+    if "att_block_prefill_long" in g:  # long entries' prefill tiles, and the rows per context when they differ
+        pre += f" ATT_BLOCK_PREFILL_LONG={g['att_block_prefill_long']} above {g['prefill_long_from'] // 1024}K"
+    if len(set((g.get("prefill_rows") or {}).values())) > 1:
+        pre += f" | {prefill_groups(man)}"
     att8 = ""
     if g["att_int8mm"]:
         n0 = next((c.get("numerics") or {} for c in man.get("chunks", [])), {})
@@ -282,7 +292,7 @@ class CoreAIQwen:
         if self.kv_cache_dtype in ("v8", "kv8") or len(self.kv_cache_formats) > 1:
             raise ValueError("V8/KV8/selectable KV cache requires the Swift bridge; set COREAI_BRIDGE=1")
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
-        self.TP = man.get("TP", 0)
+        self.TP, self.ptp = man.get("TP", 0), prefill_rows(man)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
         # KV history rows per entry (the ANE caps [history | block] at 65536: the 64K entry holds 65472, 65536 minus
         # the 64-row prefill block)
@@ -319,10 +329,11 @@ class CoreAIQwen:
         self.inp = {n: buffer(s) for n, s in (("cos", (T, rot)), ("sin", (T, rot)), ("conv_sel", (3, self.P + 3)),
                                               ("commit", (1, self.P, 1)), ("commit_last", (1, self.P, 1)),
                                               ("x", (1, hid, 1, T)), ("hx", (1, hid, 1, T)), ("xb", (1, hid, 1, T)))}
-        self.pin = {n: buffer(s) for n, s in (("cos", (TP, rot)), ("sin", (TP, rot)), ("conv_sel", (3, self.P + 3)),
-                                              ("commit", (1, self.P, 1)), ("commit_last", (1, self.P, 1)),
-                                              ("conv_sel_out", (3, TP + 3)), ("valid", (1, TP, 1)), ("x", (1, hid, 1, TP)),
-                                              ("xb", (1, hid, 1, TP)))}
+        self.pins = {tp: {n: buffer(s) for n, s in (
+            ("cos", (tp, rot)), ("sin", (tp, rot)), ("conv_sel", (3, self.P + 3)), ("commit", (1, self.P, 1)),
+            ("commit_last", (1, self.P, 1)), ("conv_sel_out", (3, tp + 3)), ("valid", (1, tp, 1)), ("x", (1, hid, 1, tp)),
+            ("xb", (1, hid, 1, tp)))} for tp in sorted(set(self.ptp.values()) or {TP})}  # one set per prefill size
+        self.pin = self.pins[max(self.pins)]
         self.pos, self.pending, self.hi = 0, 0, 0   # hi: KV rows present in the cache (snapshots may point below it)
         self.stats = {"calls": 0, "resize": []}
         self._alloc_kv(self.ctx, keep=0)
@@ -498,21 +509,29 @@ class CoreAIQwen:
         self.accept(1)
         return logits
 
+    def tp(self, ctx=None) -> int:
+        """Rows of the prefill entry of a context entry (default: the current one), 0 without one: a build may prefill
+        its short contexts with more rows than its long ones (builder TPS_LONG)."""
+        return self.ptp.get(self.ctx if ctx is None else ctx, 0)
+
     def has_prefill(self) -> bool:
-        """A TP-row entry for the current length whose KV history matches the verify entries' buffers."""
-        return bool(self.TP) and f"p{self.TP}_{self.ctx // 1024}k" in self.chunks[0]["fns"] and \
+        """A prefill entry for the current length whose KV history matches the verify entries' buffers."""
+        tp = self.tp()
+        return bool(tp) and f"p{tp}_{self.ctx // 1024}k" in self.chunks[0]["fns"] and \
             self.pkvlen.get(self.ctx, self.ctx) == self.cap(self.ctx)
 
     def prefill_block(self, ids):
-        """Up to TP tokens through the p<TP> entry points, all committed. Returns the last token's logits."""
-        TP, n, p0 = self.TP, len(ids), self.pos
-        assert 0 < n <= TP
+        """Up to tp() tokens through the current entry's p<rows> entry points, all committed. Returns the last token's
+        logits."""
+        n, p0 = len(ids), self.pos
         if not self.fit(p0 + n):
             raise ValueError(f"{p0 + n} positions exceed the largest context {self.ladder[-1]}")
+        TP = self.tp()
+        assert 0 < n <= TP, (n, TP)
         entry = f"p{TP}_{self.ctx // 1024}k"
         if not any(entry in ch["fns"] for ch in self.chunks[:1]):
             raise ValueError(f"no prefill entry {entry}")
-        d = self.pin
+        d = self.pins[TP]
         xw = d["x"][1]
         xw[:] = 0
         xw[0, :, 0, :n] = self.emb[ids].T
@@ -557,12 +576,14 @@ class CoreAIQwen:
         return self._features(n)
 
     def feed(self, ids, on_features=None):
-        """Prompt tokens from any position: TP-token prefill calls while more than T remain, then T-token calls."""
+        """Prompt tokens from any position: prefill calls of the current entry's size (tp() rows) while more than T
+        remain, then T-token calls. A block that would cross into the next context entry moves there first and takes
+        that entry's size (TPS_LONG=32: a 64-row block at the end of the 64K entry becomes 32 rows in the 96K entry)."""
         logits, i = None, 0
         while i < len(ids):
             r = len(ids) - i
-            if r > self.T and self.fit(self.pos + min(r, self.TP or 64)) and self.has_prefill():
-                blk = ids[i:i + min(r, self.TP)]
+            if r > self.T and self.fit(self.pos + min(r, self.tp() or 64)) and self.has_prefill():
+                blk = ids[i:i + min(r, self.tp())]
                 p0 = self.pos
                 logits = self.prefill_block(blk)
                 if on_features and getattr(on_features, "wants", lambda a, n: True)(p0, len(blk)):
@@ -609,7 +630,7 @@ class CoreAIQwenBridge(CoreAIQwen):
                                  "kv8": "INT8 K / INT8 V + FP16 token/head scales"}[self.kv_cache_dtype]
                  + (" | keys stored transposed (head dim x token: no key transposes in attention)" if self.keys_t else ""))
         self.man, self.T, self.P, self.taps = man, man["T"], man["pend"], man["taps"]
-        self.TP = man.get("TP", 0)
+        self.TP, self.ptp = man.get("TP", 0), prefill_rows(man)
         self.ladder = sorted(set(ladder or man["ctxs"]) & set(man["ctxs"]))
         self.kvlen = {int(k): v for k, v in man.get("kv_len", {}).items()}
         self.pkvlen = {int(k): v for k, v in man.get("pkv_len", {}).items()}
@@ -650,9 +671,13 @@ class CoreAIQwenBridge(CoreAIQwen):
         buf = lambda f, n: (lambda b: (b, b.np))(f.buffer("input", n))  # noqa: E731
         self.inp = {n: buf(v8, n) for n in ("cos", "sin", "conv_sel", "commit", "commit_last", "x")}
         self.inp["hx"] = buf(self.head, "x")
-        pf = next((f for e, f in fns0.items() if e.startswith(f"p{self.TP}_")), None)
-        self.pin = {} if pf is None else {n: buf(pf, n) for n in (
-            "cos", "sin", "conv_sel", "commit", "commit_last", "conv_sel_out", "valid", "x")}
+        self.pins = {}  # one input set per prefill size (rows)
+        for tp in sorted(set(self.ptp.values())):
+            pf = next((f for e, f in fns0.items() if e.startswith(f"p{tp}_")), None)
+            if pf is not None:
+                self.pins[tp] = {n: buf(pf, n) for n in (
+                    "cos", "sin", "conv_sel", "commit", "commit_last", "conv_sel_out", "valid", "x")}
+        self.pin = self.pins.get(self.TP, {})
         hl = self.head.outputs["logits"]
         assert hl["shape"][0] == self.T, f"head logits shape {hl['shape']}"
         self.hout = {n: self.head.buffer("output", n) for n in self.head.output_names}
@@ -743,8 +768,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         """(chunks plan, head plan, chunks + head plan) for the current parity."""
         key = (entry, self.par)
         if key not in self._plans:
-            B, prefill = self.B, entry.startswith(f"p{self.TP}_")
-            d = self.pin if prefill else self.inp
+            B, prefill = self.B, entry.startswith("p")       # p<rows>_<ctx>k prefill, v8_<ctx>k verify
+            d = self.pins[int(entry[1:entry.index("_")])] if prefill else self.inp
             shared = {n: v[0] for n, v in d.items() if n not in ("x", "hx")}
             shared["mask"] = self.mask[0]
             x, bs = d["x"][0], []
@@ -801,14 +826,15 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.hi = max(self.hi, self.pos)
 
     def prefill_block(self, ids):
-        TP, n, p0 = self.TP, len(ids), self.pos
-        assert 0 < n <= TP
+        n, p0 = len(ids), self.pos
         if not self.fit(p0 + n):
             raise ValueError(f"{p0 + n} positions exceed the largest context {self.ladder[-1]}")
+        TP = self.tp()
+        assert 0 < n <= TP, (n, TP)
         entry = f"p{TP}_{self.ctx // 1024}k"
         if entry not in self.chunks[0]["fns"]:
             raise ValueError(f"no prefill entry {entry}")
-        d = self.pin
+        d = self.pins[TP]
         xw = d["x"][1]
         xw[:] = 0
         xw[0, :, 0, :n] = self.emb[ids].T

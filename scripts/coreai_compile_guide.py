@@ -125,13 +125,23 @@ def build_settings(man: dict) -> dict:
     formats = 2 if man.get("kv_cache", {}).get("format") == "selectable" else 1
     return {"gdn_fast": bool(nums.get("GDN_FAST", False)), "att_block": vb, "att_block_prefill": pb,
             "formats": formats, "ctxs": [int(c) for c in man.get("kv_len", {}).values()] or man.get("ctxs", []),
-            "pctxs": [int(c) for c in man.get("pkv_len", {}).values()] or man.get("pctxs", [])}
+            "pctxs": [int(c) for c in man.get("pkv_len", {}).values()] or man.get("pctxs", []),
+            # long context entries' tile widths (builder ATT_BLOCK_LONG above ATT_LONG_FROM, ATT_BLOCK_PREFILL_LONG
+            # above PREFILL_LONG_FROM)
+            "att_block_long": int(nums.get("ATT_BLOCK_LONG", vb)), "att_long_from": int(nums.get("ATT_LONG_FROM", 65536)),
+            "att_block_prefill_long": int(nums.get("ATT_BLOCK_PREFILL_LONG", pb)),
+            "prefill_long_from": int(nums.get("PREFILL_LONG_FROM", 65536))}
 
 
 def estimate_chunk_s(s: dict) -> float:
     """Cold compile seconds of one 4-layer chunk on the M6. Fit to measured chunks: release 82.9 s (both formats) /
-    45.9 s (V8), 2048-wide tiles 407.6 s, 2048 / 4096 (prefill) 135.9 s (both) / 90.3 s (V8). Within about 25%."""
-    tv, tp = tiles(s["ctxs"], s["att_block"]), tiles(s["pctxs"], s["att_block_prefill"])
+    45.9 s (V8), 2048-wide tiles 407.6 s, 2048 / 4096 (prefill) 135.9 s (both) / 90.3 s (V8). Within about 25%.
+    Long context entries count with their own tile widths."""
+    def count(ctxs, block, long_block, start):
+        return tiles([c for c in ctxs if int(c) <= start], block) + tiles([c for c in ctxs if int(c) > start], long_block)
+    tv = count(s["ctxs"], s["att_block"], s.get("att_block_long", s["att_block"]), s.get("att_long_from", 65536))
+    tp = count(s["pctxs"], s["att_block_prefill"], s.get("att_block_prefill_long", s["att_block_prefill"]),
+               s.get("prefill_long_from", 65536))
     return (40 + 0.25 * tv + 0.024 * tp * tp) * (1.65 if s["formats"] > 1 else 1.0)
 
 

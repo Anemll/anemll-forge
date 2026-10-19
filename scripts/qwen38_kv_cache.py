@@ -40,6 +40,24 @@ def cache_formats(manifest):
     return (actual,)
 
 
+def prefill_rows(manifest):
+    """{context: rows} of the prefill entries the runtime uses, from the manifest's ptp (qwen38_coreai_build.py: TPS, or
+    TPS_LONG above PREFILL_LONG_FROM); manifests before ptp prefill with TP rows at every prefill context."""
+    if manifest.get("ptp"):
+        return {int(c): int(r) for c, r in manifest["ptp"].items()}
+    return {int(c): int(manifest["TP"]) for c in manifest.get("pctxs", [])} if manifest.get("TP") else {}
+
+
+def prefill_groups(manifest):
+    """The prefill entries in words, e.g. 'prefill 64-row 8K-64K, 32-row 96K-192K' ('no prefill entries')."""
+    groups = {}
+    for c, r in sorted(prefill_rows(manifest).items()):
+        groups.setdefault(r, []).append(c)
+    span = lambda cs: f"{cs[0] // 1024}K" + (f"-{cs[-1] // 1024}K" if len(cs) > 1 else "")  # noqa: E731
+    words = [f"{r}-row {span(cs)}" for r, cs in sorted(groups.items(), key=lambda g: g[1][0])]
+    return ("prefill " + ", ".join(words)) if words else "no prefill entries"
+
+
 def cache_entries(manifest, chunk, mode):
     """Map runtime's canonical names onto a selected format's physical functions."""
     if manifest.get("kv_cache", {}).get("format") != "selectable":
@@ -49,8 +67,7 @@ def cache_entries(manifest, chunk, mode):
     if not isinstance(aliases, dict) or not aliases:
         raise ValueError(f"Missing {mode} KV entry map for {chunk.get('file', 'chunk')}")
     required = {f"v8_{c // 1024}k" for c in manifest.get("ctxs", [])}
-    if manifest.get("TP", 0):
-        required.update(f"p{manifest['TP']}_{c // 1024}k" for c in manifest.get("pctxs", []))
+    required.update(f"p{r}_{c // 1024}k" for c, r in prefill_rows(manifest).items())
     if not required.issubset(aliases):
         raise ValueError(f"Incomplete {mode} KV entry map for {chunk.get('file', 'chunk')}")
     if any(not isinstance(k, str) or not isinstance(v, str) or v not in chunk["entries"]

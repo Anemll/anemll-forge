@@ -53,6 +53,20 @@ ATT_BLOCK_PREFILL = int(os.environ.get("ATT_BLOCK_PREFILL", str(max(ATT_BLOCK, 4
 # 6.5 min, 8K-192K in 25.4 min, both 2048-wide); wider tiles keep long entries compilable, short ones keep 2048.
 ATT_BLOCK_LONG = int(os.environ.get("ATT_BLOCK_LONG", str(ATT_BLOCK)))
 ATT_LONG_FROM = int(os.environ.get("ATT_LONG_FROM", "65536"))
+# TPS_LONG / ATT_BLOCK_PREFILL_LONG: prefill rows and tile width of the context entries above PREFILL_LONG_FROM
+# (default: TPS and ATT_BLOCK_PREFILL everywhere). A chunk's scratch is sized by its largest prefill entry, about rows x
+# context (the attention scores), so 64-row entries up to 64K need less than 32-row entries at 192K: a 192K ladder
+# prefills its short contexts 64 rows per call at the 32-row scratch (v0.2: 301 tok/s at 8K with 64 rows, 224 with 32).
+TPS_LONG = [int(x) for x in os.environ.get("TPS_LONG", "").split(",") if x] or TPS
+PREFILL_LONG_FROM = int(os.environ.get("PREFILL_LONG_FROM", "65536"))
+ATT_BLOCK_PREFILL_LONG = int(os.environ.get("ATT_BLOCK_PREFILL_LONG", str(ATT_BLOCK_PREFILL)))
+
+
+def prefill_rows(ctx: int) -> list[int]:
+    """Prefill entry sizes (rows) of the context entry ctx."""
+    return TPS_LONG if ctx > PREFILL_LONG_FROM else TPS
+
+
 KV_CACHE_DTYPE = os.environ.get("KV_CACHE_DTYPE", "v8")  # v8 | kv8 | fp16 | both (selectable, about 1.5x the compile)
 # cache inputs per attention layer: v8 = FP16 keys + INT8 values; kv8 = INT8 keys and values (scales per token/head)
 KV_INPUTS = {"fp16": ("k", "v"), "v8": ("k", "v", "vs"), "kv8": ("k", "v", "ks", "vs")}
@@ -592,7 +606,8 @@ class AttnW(nn.Module):
 
         def vtile(a, b):
             return dequant8(v_st[:, a:b], self.v8_unit, self.v8_zero) if tile_v else v_st[:, a:b]
-        blk = ATT_BLOCK_PREFILL if T > P else (ATT_BLOCK_LONG if ctx > ATT_LONG_FROM else ATT_BLOCK)
+        blk = ((ATT_BLOCK_PREFILL_LONG if ctx > PREFILL_LONG_FROM else ATT_BLOCK_PREFILL) if T > P
+               else (ATT_BLOCK_LONG if ctx > ATT_LONG_FROM else ATT_BLOCK))
         form = ATT_SOFTMAX_PREFILL if T > P else ATT_SOFTMAX
         if ctx <= blk and not cache_v8 and not cache_k8 and not STABLE_ATTN:
             sc_h = ((qg4 @ (k_st if KV_KEYS_T else k_st.transpose(1, 2))) * hd ** -0.5) + mask.reshape(1, 1, ctx)
@@ -792,13 +807,13 @@ ANE_MAX_DIM = 65536
 def kv_len(ctx: int, T: int) -> int:
     """KV history rows of every entry at context ctx. The single-softmax graph concatenated [history | block] along one
     axis, which the ANE caps at 65536 (64K + 8 failed ANEC for the whole package), so entries up to 64K keep
-    65536 - the largest block (the runtime binds the verify and prefill entries of a context to the same KV buffers;
-    T is only checked). Longer entries always take the tiled history path, which never forms that tensor: 80K and
-    100K attention cores compile fully onto the ANE (scripts/m6_long_ctx_attn.py), so they hold their whole context."""
-    assert T == P or T in TPS, T
+    65536 - the context's largest block (the runtime binds the verify and prefill entries of a context to the same KV
+    buffers; T is only checked). Longer entries always take the tiled history path, which never forms that tensor: 80K
+    and 100K attention cores compile fully onto the ANE (scripts/m6_long_ctx_attn.py), so they hold their whole context."""
+    assert T == P or T in prefill_rows(ctx), T
     if ctx > ANE_MAX_DIM:
         return ctx
-    return min(ctx, ANE_MAX_DIM - max([P] + TPS))
+    return min(ctx, ANE_MAX_DIM - max([P] + prefill_rows(ctx)))
 
 
 class Entry(nn.Module):
@@ -1037,7 +1052,7 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
     for mode in modes:
         aliases[mode] = {}
         shapes = [(f"v8_{ctx // 1024}k", ctx, 8) for ctx in ctxs]
-        shapes += [(f"p{tp}_{ctx // 1024}k", ctx, tp) for ctx in pctxs for tp in TPS]
+        shapes += [(f"p{tp}_{ctx // 1024}k", ctx, tp) for ctx in pctxs for tp in prefill_rows(ctx)]
         for canonical, ctx, rows in shapes:
             physical = canonical + ("_kvv8" if len(modes) > 1 and mode == "v8" else "")
             e = Entry(mods, ctx, rows, kv_cache_dtype=mode)
@@ -1058,6 +1073,9 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          "ATT_BLOCK": ATT_BLOCK, "ATT_BLOCK_PREFILL": ATT_BLOCK_PREFILL,
                          **({"ATT_BLOCK_LONG": ATT_BLOCK_LONG, "ATT_LONG_FROM": ATT_LONG_FROM}
                             if ATT_BLOCK_LONG != ATT_BLOCK else {}),
+                         **({"TPS": TPS, "TPS_LONG": TPS_LONG, "PREFILL_LONG_FROM": PREFILL_LONG_FROM,
+                             "ATT_BLOCK_PREFILL_LONG": ATT_BLOCK_PREFILL_LONG}
+                            if TPS_LONG != TPS or ATT_BLOCK_PREFILL_LONG != ATT_BLOCK_PREFILL else {}),
                          **({"ATT_SOFTMAX": ATT_SOFTMAX} if ATT_SOFTMAX != "two_pass" else {}),
                          **({"ATT_SOFTMAX_PREFILL": ATT_SOFTMAX_PREFILL} if ATT_SOFTMAX_PREFILL != ATT_SOFTMAX else {}),
                          **({"ATT_INT8MM": ATT_INT8MM, "ATT_S8_UNIT": ATT_S8_UNIT, "ATT_S8B_UNIT": ATT_S8B_UNIT,
@@ -1135,10 +1153,13 @@ def main():
         wanted_format = "selectable" if KV_CACHE_DTYPE == "both" else KV_CACHE_DTYPE
         if man_path.exists() and prior_format != wanted_format:
             raise ValueError("Existing build has a different KV format; choose a new OUT directory")
-        tp = max(TPS)  # the runtime prefills through the largest p<TP>_ entry (TPS=32: half the 64-row scratch)
-        man.update({"version": "coreai1", "T": 8, "TP": tp if pctxs else 0, "pend": P, "taps": TAPS, "ctxs": ctxs,
+        # the runtime prefills each context through its largest p<rows>_ entry (TPS=32: half the 64-row scratch); ptp
+        # holds those rows per context (TPS_LONG above PREFILL_LONG_FROM), TP the largest
+        ptp = {str(c): max(prefill_rows(c)) for c in pctxs}
+        tp = max(ptp.values(), default=0)
+        man.update({"version": "coreai1", "T": 8, "TP": tp, "ptp": ptp, "pend": P, "taps": TAPS, "ctxs": ctxs,
                     "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
-                    "pkv_len": {str(c): kv_len(c, tp) for c in pctxs}, "export": str(M.EXPORT_DIR)})
+                    "pkv_len": {str(c): kv_len(c, ptp[str(c)]) for c in pctxs}, "export": str(M.EXPORT_DIR)})
         if basis is not None:  # rot1: the build carries its basis (the runtime checks the embedding table and
             # gives the drafter R for fix B); R.npy and basis.json are copied next to the manifest
             man["rot1_basis"] = {k: basis[k] for k in ("basis_id", "name", "r_kind", "r_seed", "fold_norms")}

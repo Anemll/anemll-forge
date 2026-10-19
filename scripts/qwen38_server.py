@@ -1028,8 +1028,13 @@ def startup_banner(a):
     mdir = Path(os.path.expanduser(a.model_dir))
     if a.runtime == "coreai" and (mdir / "manifest.json").exists():
         man = json.loads((mdir / "manifest.json").read_text())
-        build = (f"Core AI: verify-8 contexts {[c for c in man['ctxs'] if c <= a.ctx]}, prefill-{man.get('TP', 0)} "
-                 f"contexts {man.get('pctxs', [])}, KV {man.get('kv_cache', {}).get('format', 'fp16')}, one weight copy")
+        from qwen38_kv_cache import prefill_rows
+        groups = {}
+        for c, r in sorted(prefill_rows(man).items()):
+            groups.setdefault(r, []).append(c)
+        pre = ", ".join(f"prefill-{r} contexts {cs}" for r, cs in groups.items()) or "prefill-0 contexts []"
+        build = (f"Core AI: verify-8 contexts {[c for c in man['ctxs'] if c <= a.ctx]}, {pre}, "
+                 f"KV {man.get('kv_cache', {}).get('format', 'fp16')}, one weight copy")
     else:
         build = "build manifests " + (", ".join(sorted(f.name for f in mdir.glob(f"manifest_ctx{a.ctx}_v*.json")))
                                       or "v1 (none)")
