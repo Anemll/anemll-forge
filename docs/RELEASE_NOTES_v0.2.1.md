@@ -152,13 +152,13 @@ Compile and start with the cap you want, in the same two commands: `--ctx 64K` w
 
 | CTX | Compile on M6 | Pi compacts above | Top entry: prefill / decode, mean of five tasks | Process memory at the top |
 | --- | --- | ---: | --- | ---: |
-| 16K | 8 min 37 s (measured) | about 8K | 267 to 280 / about 34 tok/s | 2.0 GB |
+| 16K | 8 min 37 s (measured) | about 8K | 237 / 34.0 tok/s | 2.0 GB |
 | 64K | not yet measured | about 45K | 160 / 31.6 tok/s | 3.8 GB |
-| 96K | not yet measured | about 78K | 123 / 27.4 tok/s | 4.9 GB |
+| 96K | 45 min 43 s (measured) | about 78K | 123 / 27.4 tok/s | 4.9 GB |
 | 128K | not yet measured | about 111K | 95 / 25.1 tok/s | 6.0 GB |
 | 192K | 2 h 11 min (full build) | about 176K | 62 / 20.6 tok/s | 8.2 GB |
 
-Decode, and every rate above 16K, was measured on the full build; a capped build runs the same entries, and prefilled faster at 16K. On a 32 GB Mac, 128K is the comfortable maximum: a prompt just past 128K runs in the slower 192K entry, and the move into it added 1.3 GB of swap.
+Decode, and every rate above 16K, was measured on the full build; a capped build runs the same entries at the same speed. On a 32 GB Mac, 128K is the comfortable maximum: a prompt just past 128K runs in the slower 192K entry, and the move into it added 1.3 GB of swap.
 
 Every macOS update, minor ones included, compiles again. Ctrl-C stops a compile safely: finished packages stay cached, and running it again (or starting the server) compiles the rest. To free a capped build's disk, delete its folder under `~/.anemll-forge/builds/`.
 
@@ -168,7 +168,7 @@ Every macOS update, minor ones included, compiles again. Ctrl-C stops a compile 
 - **Most of that time is the long entries.** A chunk of the full build takes about 8 minutes, most of it in the prefill entries' history tiles above 64K; a chunk with only the 8K and 16K entries takes 32 seconds.
 - **The time is spent on your Mac.** About 94% of it is the system's Neural Engine compiler, whose output stays in a system cache, so neither a download nor precompiled `.aimodelc` files can skip it.
 - **How `--ctx` works.** It writes a copy of each chunk that keeps only the functions of the contexts up to the cap, with the same weights (`coreai/strip_functions.py`, about a second per chunk), and a manifest to match (`scripts/ctx_variant.py`). The download is not modified. Deriving is deterministic: deriving again from the same download gave byte-identical packages (the same `main.hash`, which keys the compile cache).
-- **It also helps speed and memory.** The Neural Engine reserves each chunk's scratch for its largest function, so a capped build reserves less, and the 16K build prefilled about 11% faster than the full build at the same length.
+- **It also lowers memory, not speed.** The Neural Engine reserves each chunk's scratch for its largest function, so a capped build reserves less. Its entries run at the full build's speed: target-only prefill calls measured 255 to 257 tok/s at 8K and 237 at 16K for the full, 96K and 16K builds alike.
 
 ## Requirements and limits
 
