@@ -6,13 +6,15 @@ The first model is an independent ANEMLL adaptation of **[Qwen/Qwen3.8-27B](http
 
 **Release 0.2** replaces the quantized weights: every MLP matrix is a three-bit vector lookup table, the token mixers get online Hadamard rotations, and the weights are fitted by GPTQ and quantization-aware training (QAT) against the BF16 model. On the M6 ANE, KL-512 to BF16 falls from 0.184 to **0.052** and top-1 agreement rises from 86.0% to **91.9%**, at the previous packages' speed and with less compiled ANE memory. Details: [quantization](docs/QUANTIZATION.md#release-02-three-bit-mlp-and-token-mixer-rotations).
 
+**Release 0.2.1** (19 October 2026, M6) runs the same release 0.2 weights with up to **192K context** (196,608 tokens), from [anemll/anemll-forge-qwen3.8-27B-192K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-192K). Memory changes make it fit on a 32 GB Mac: an INT8 key and value cache (32.25 KiB per position, a third less than release 0.2's cache), drafters that use the target's output head (0.74 GB of Neural Engine memory instead of 1.60 GB, same speed), prefill rows chosen per context entry, and one cache allocated at a time as the context grows. See the [release 0.2.1 notes](docs/RELEASE_NOTES_v0.2.1.md) and [how to run it](#long-context-release-021-m6).
+
 The [quantization training guide](docs/QUANTIZATION_TRAINING.md) covers the included GPTQ, centroid fitting, QAT, corpus generation and export materialization code, with source provenance and reproduction limits.
 
 **Paper:** [Three Bit MLP Vector Quantization in Apple Neural Engine (PDF)](docs/papers/anemll-forge-v02.pdf) — release 0.2 methods, diagrams, evaluations and references.
 
 ## Hardware and software
 
-- **M6 is the main development and performance target.** M5, M5 Pro, and M5 Max are also supported; expect roughly half the M6 throughput (about 2× slower) for comparable ANE workloads. This is approximate guidance, not a matched benchmark across every chip and context size.
+- **M6 is the main development and performance target.** M5, M5 Pro, and M5 Max are also supported; expect roughly half the M6 throughput (about 2× slower) for comparable ANE workloads. This is approximate guidance, not a matched benchmark across every chip and context size. The release 0.2.1 long-context packages (192K) are M6 only for now.
 - **macOS 27 with a compatible Xcode 27 / Core AI SDK.** The bridge was checked with Apple Swift 6.4. Older macOS/SDK versions without `CoreAI` cannot build this runtime.
 - **Python 3.11** for inference; **Node.js 22.19 or newer** and npm for optional Pi coding sessions.
 - **32 GB or more unified memory is recommended.** Start with 16K context. The paired bundle is approximately 16 GB; allow additional disk space for downloads and compilation caches (11–14 GB was observed for a cold target compilation).
@@ -69,6 +71,27 @@ python scripts/check_update_model.py --bundle "$FORGE_BUNDLE"
 ```
 
 This fetches only the latest release inventory, compares model, tokenizer and matching drafter hashes, and reports whether model files or only release metadata changed. It prints a download command pinned to the checked Hub commit with a new output directory. It does not replace the installed model or restart the server. `--bundle` defaults to `FORGE_BUNDLE`, then `~/Models/anemll-forge-qwen3.8-27B`; `--repo` and `--revision` select another repository or release. Add `--json` for scripts: completed checks exit 0, and failed checks exit 1. This is an inventory comparison; use `forge.py quick-test --check-only` to verify local file integrity. After downloading, test the new bundle, stop the server, and switch `FORGE_BUNDLE` to the new directory before restarting.
+
+### Long context (release 0.2.1, M6)
+
+For contexts above 64K, use the 192K packages of release 0.2.1 (same weights, M6 only). They live in their own repository with their own layout, so download them with `hf` (installed with `huggingface_hub`) rather than `forge.py download`:
+
+```sh
+export FORGE_192K="$HOME/Models/anemll-forge-qwen3.8-27B-192K"
+hf download anemll/anemll-forge-qwen3.8-27B-192K \
+  --local-dir "$FORGE_192K" --exclude "drafter/gu2a3/*"
+
+# once per macOS version: about 2 h 11 min on M6 (Ctrl-C keeps finished packages; rerun to resume)
+python forge.py compile --build "$FORGE_192K/coreai/m6-192k" \
+  --draft "$FORGE_192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel"
+
+MODEL="$FORGE_192K/model" BUILD="$FORGE_192K/coreai/m6-192k" \
+DRAFT="$FORGE_192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel" \
+DRAFTER="$FORGE_192K/drafter/all3" \
+CTX=128K bash scripts/qwen38_server.sh start
+```
+
+`CTX` takes 64K, 96K, 128K or 192K. It bounds how far the cache grows and sets Pi's window; the packages and their Neural Engine memory are the same for every cap, and 128K is the comfortable maximum on a 32 GB Mac. Up to 64K, the release 0.2 bundle above is faster and also runs on the M5 family. Memory, speed per context and drafter choice: [release 0.2.1 notes](docs/RELEASE_NOTES_v0.2.1.md).
 
 ## 3. Run a quick inference test
 
@@ -127,7 +150,7 @@ The API supports chat completions, streaming, and tool calls. It has no authenti
 
 `scripts/qwen38_server.sh` wraps the same `forge.py serve` command with `start`, `stop`, `restart`, `status`, `check`, and `log` subcommands. Before loading models or stopping a server for restart, it validates the checkpoint, context, and target/drafter pairing and checks that the Swift bridge library exists, can load, and has the expected ABI. If the bridge check fails, run `bash coreai/swift_bridge/build.sh` from this checkout. The release server requires the Swift bridge for the target and drafter.
 
-The wrapper reads `FORGE_BUNDLE` (default `~/Models/anemll-forge-qwen3.8-27B`), `MODEL`/`BUILD`, `CTX` (a number or `16K`/`64K`), `KV_CACHE_DTYPE`, `PORT`, `BIND_HOST`, `DRAFT`/`DRAFTER`, `PY`, `LOG`/`PIDFILE`, `PI_SYNC`/`PI_DIR` and `START_WAIT_S` from the environment ([defaults](docs/SERVER.md#startup-options)):
+The wrapper reads `FORGE_BUNDLE` (default `~/Models/anemll-forge-qwen3.8-27B`), `MODEL`/`BUILD`, `CTX` (a number or a size such as `16K`, `64K` or, with the release 0.2.1 packages, `128K`), `KV_CACHE_DTYPE`, `PORT`, `BIND_HOST`, `DRAFT`/`DRAFTER`, `PY`, `LOG`/`PIDFILE`, `PI_SYNC`/`PI_DIR` and `START_WAIT_S` from the environment ([defaults](docs/SERVER.md#startup-options)):
 
 ```sh
 scripts/qwen38_server.sh start              # CTX defaults to 16384
