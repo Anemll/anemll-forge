@@ -54,7 +54,7 @@ While it moves from one entry to the next, both caches exist briefly: the move f
 
 ### Neural Engine total
 
-The target packages take about **15.8 GB** of Neural Engine memory (weights plus scratch), against about 13.0 GB for release 0.2's 64K packages; the long entries need the extra scratch. With the `all3` drafter the total is about 16.5 GB, about 2 GB more than release 0.2 for three times the context. This does not depend on `CTX`: Core AI loads every function of a chunk and reserves its scratch at the first call.
+The target packages take about **15.8 GB** of Neural Engine memory (weights plus scratch), against about 13.0 GB for release 0.2's 64K packages; the long entries need the extra scratch. With the `all3` drafter the total is about 16.5 GB, about 2 GB more than release 0.2 for three times the context. With the full build this does not depend on `CTX`: Core AI loads every function of a chunk and reserves its scratch at the first call. A build compiled with `--ctx` (below) reserves only what its largest entry needs.
 
 ## Longer context
 
@@ -80,9 +80,9 @@ Decode: 256 generated tokens, greedy except thinking (temperature 1.0). Time to 
 
 ## How to use
 
-These steps assume the inference environment from the [README](../README.md#1-set-up-the-inference-environment), with Forge source from 19 October 2026 or later (body-only drafters and per-context prefill rows).
+These steps assume the inference environment from the [README](../README.md#1-set-up-the-inference-environment), with Forge source from 19 October 2026 or later. Run the commands from the Forge checkout with its venv active, and start the server with the same Python that compiled: Core AI keeps a compile cache per Python executable, so another interpreter compiles everything again (with a venv outside the checkout, set `PY=` to its `python` for the server wrapper).
 
-**1. Download** (about 15 GB with one drafter):
+**1. Download** (about 15 GB with one drafter; leave out `--exclude` to get both):
 
 ```sh
 export FORGE_192K="$HOME/Models/anemll-forge-qwen3.8-27B-192K"
@@ -90,38 +90,51 @@ hf download anemll/anemll-forge-qwen3.8-27B-192K \
   --local-dir "$FORGE_192K" --exclude "drafter/gu2a3/*"
 ```
 
-Leave out `--exclude` to get both drafters.
-
-**2. Compile for the ANE, once** (about 2 h 11 min on M6; needs about 23 GB more disk for the compile caches):
+**2. Compile for the context you need.** `--ctx` compiles only the context entries up to that cap (see [why](#why-compile-per-context)). Start with a quick 16K test:
 
 ```sh
-python forge.py compile --build "$FORGE_192K/coreai/m6-192k" \
+python forge.py compile --ctx 16K --build "$FORGE_192K/coreai/m6-192k" \
   --draft "$FORGE_192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel"
 ```
 
-It prints the plan and a line per package with the time left. Ctrl-C stops it safely: finished packages stay cached, and running it again (or starting the server) compiles the rest. Every macOS update, minor ones included, compiles again. Shipping precompiled `.aimodelc` files would not avoid this: most of the time is the system's Neural Engine compiler, which runs on every Mac.
-
-**3. Start the server** with a context cap (stop a running server first with `bash scripts/qwen38_server.sh stop`):
+**3. Start the server with the same `CTX`** (stop a running server first with `bash scripts/qwen38_server.sh stop`):
 
 ```sh
 MODEL="$FORGE_192K/model" BUILD="$FORGE_192K/coreai/m6-192k" \
 DRAFT="$FORGE_192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel" \
 DRAFTER="$FORGE_192K/drafter/all3" \
-CTX=128K bash scripts/qwen38_server.sh start
+CTX=16K bash scripts/qwen38_server.sh start
 ```
 
-The server listens on `http://127.0.0.1:8765/v1` (OpenAI-compatible) and updates Pi's model entry for the cap. For the smaller drafter, point `DRAFT` and `DRAFTER` at `drafter/gu2a3`. Start the server with the same Python that compiled the packages: Core AI keeps a compile cache per Python executable, so a different interpreter compiles everything again. The wrapper uses the checkout's `.venv`; with a venv elsewhere, set `PY=` to its `python`. Check it with `curl -s http://127.0.0.1:8765/health`.
+The startup log says `[ctx] using the build capped at 16K`. The server listens on `http://127.0.0.1:8765/v1` (OpenAI-compatible), updates Pi's model entry for the cap, and answers `curl -s http://127.0.0.1:8765/health`. For the smaller drafter, point `DRAFT` and `DRAFTER` at `drafter/gu2a3`.
 
-**Choosing `CTX`:** 64K, 96K, 128K or 192K. The cap bounds how far the cache grows and sets Pi's window; the packages and their Neural Engine memory are the same for every cap.
+### Quick test: 16K
 
-| CTX | Pi compacts above | Top entry: prefill / decode, mean of five tasks | Process memory at the top |
-| --- | ---: | --- | ---: |
-| 64K | about 45K | 160 / 31.6 tok/s | 3.8 GB |
-| 96K | about 78K | 123 / 27.4 tok/s | 4.9 GB |
-| 128K | about 111K | 95 / 25.1 tok/s | 6.0 GB |
-| 192K | about 176K | 62 / 20.6 tok/s | 8.2 GB |
+Measured on the M6 with the steps above: the compile took **8 min 37 s** (about 32 s per chunk), a 5,926-token prompt prefilled at **267 tok/s** and a 1,619-token one at 280 tok/s, and the server process used 2.0 GB. Any reply in Pi or through the API confirms the pair works; `/health` reports the build and the context.
 
-On a 32 GB Mac, 128K is the comfortable maximum: a prompt just past 128K runs in the slower 192K entry, and the move into it added 1.3 GB of swap.
+### Longer contexts
+
+Compile and start with the cap you want, in the same two commands: `--ctx 64K` with `CTX=64K`, `--ctx 128K` with `CTX=128K`, and so on. Each cap is its own build with its own one-time compile and one more copy of the chunks on disk (about 10 GB, in `~/.anemll-forge/builds/`). A server uses the smallest capped build that holds its `CTX`; without one, it uses the full download, which holds every entry up to 192K and compiles all of them on its first start (**2 h 11 min** on M6). `--ctx 192K`, or no `--ctx`, compiles the full download.
+
+| CTX | Compile on M6 | Pi compacts above | Top entry: prefill / decode, mean of five tasks | Process memory at the top |
+| --- | --- | ---: | --- | ---: |
+| 16K | 8 min 37 s (measured) | about 8K | 267 to 280 / about 34 tok/s | 2.0 GB |
+| 64K | not yet measured | about 45K | 160 / 31.6 tok/s | 3.8 GB |
+| 96K | not yet measured | about 78K | 123 / 27.4 tok/s | 4.9 GB |
+| 128K | not yet measured | about 111K | 95 / 25.1 tok/s | 6.0 GB |
+| 192K | 2 h 11 min (full build) | about 176K | 62 / 20.6 tok/s | 8.2 GB |
+
+Decode, and every rate above 16K, was measured on the full build; a capped build runs the same entries, and prefilled faster at 16K. On a 32 GB Mac, 128K is the comfortable maximum: a prompt just past 128K runs in the slower 192K entry, and the move into it added 1.3 GB of swap.
+
+Every macOS update, minor ones included, compiles again. Ctrl-C stops a compile safely: finished packages stay cached, and running it again (or starting the server) compiles the rest. To free a capped build's disk, delete its folder under `~/.anemll-forge/builds/`.
+
+### Why compile per context
+
+- **Core AI compiles a package as a whole.** Each target chunk is one package holding all 14 of its functions: a verify entry and a prefill entry for each of the seven contexts. Loading it compiles every function, whatever context the server will use.
+- **Most of that time is the long entries.** A chunk of the full build takes about 8 minutes, most of it in the prefill entries' history tiles above 64K; a chunk with only the 8K and 16K entries takes 32 seconds.
+- **The time is spent on your Mac.** About 94% of it is the system's Neural Engine compiler, whose output stays in a system cache, so neither a download nor precompiled `.aimodelc` files can skip it.
+- **How `--ctx` works.** It writes a copy of each chunk that keeps only the functions of the contexts up to the cap, with the same weights (`coreai/strip_functions.py`, about a second per chunk), and a manifest to match (`scripts/ctx_variant.py`). The download is not modified. Deriving is deterministic: deriving again from the same download gave byte-identical packages (the same `main.hash`, which keys the compile cache).
+- **It also helps speed and memory.** The Neural Engine reserves each chunk's scratch for its largest function, so a capped build reserves less, and the 16K build prefilled about 11% faster than the full build at the same length.
 
 ## Requirements and limits
 
@@ -135,3 +148,4 @@ On a 32 GB Mac, 128K is the comfortable maximum: a prompt just past 128K runs in
 - **Body-only drafters** (`scripts/dflash2_coreai_drafter.py`, `scripts/qwen38_server.py`, `scripts/hf_release.py`): a drafter package without an LM head drafts through the target's head, given `head_normw_fp16.npy` beside its configuration.
 - **Prefill rows per context entry** (`coreai/qwen38_coreai_build.py`, `scripts/qwen38_coreai_model.py`, `scripts/qwen38_kv_cache.py`): builder options `TPS_LONG`, `PREFILL_LONG_FROM` and `ATT_BLOCK_PREFILL_LONG`; the manifest records the rows of each entry (`ptp`); the runtime prefills each entry with its own rows, also across entry switches.
 - **Server wrapper** (`scripts/qwen38_server.sh`): `CTX` accepts every context of the build, up to 192K.
+- **Builds per context cap** (`scripts/ctx_variant.py`, `forge.py compile --ctx`, `scripts/coreai_compile.py`, `scripts/qwen38_coreai_model.py`): `compile --ctx` derives and compiles a build with only the entries up to the cap; the runtime uses it for a `CTX` it holds.

@@ -74,24 +74,24 @@ This fetches only the latest release inventory, compares model, tokenizer and ma
 
 ### Long context (release 0.2.1, M6)
 
-For contexts above 64K, use the 192K packages of release 0.2.1 (same weights, M6 only). They live in their own repository with their own layout, so download them with `hf` (installed with `huggingface_hub`) rather than `forge.py download`:
+For contexts above 64K, use the 192K packages of release 0.2.1 (same weights, M6 only). They live in their own repository with their own layout, so download them with `hf` (installed with `huggingface_hub`) rather than `forge.py download`. Then compile for the context you need and start with the same `CTX`: `--ctx` compiles only the entries up to that cap, so a quick 16K test compiles in about 9 minutes instead of 2 h 11 min for all entries up to 192K.
 
 ```sh
 export FORGE_192K="$HOME/Models/anemll-forge-qwen3.8-27B-192K"
 hf download anemll/anemll-forge-qwen3.8-27B-192K \
   --local-dir "$FORGE_192K" --exclude "drafter/gu2a3/*"
 
-# once per macOS version: about 2 h 11 min on M6 (Ctrl-C keeps finished packages; rerun to resume)
-python forge.py compile --build "$FORGE_192K/coreai/m6-192k" \
+# once per cap and macOS version (Ctrl-C keeps finished packages; rerun to resume)
+python forge.py compile --ctx 16K --build "$FORGE_192K/coreai/m6-192k" \
   --draft "$FORGE_192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel"
 
 MODEL="$FORGE_192K/model" BUILD="$FORGE_192K/coreai/m6-192k" \
 DRAFT="$FORGE_192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel" \
 DRAFTER="$FORGE_192K/drafter/all3" \
-CTX=128K bash scripts/qwen38_server.sh start
+CTX=16K bash scripts/qwen38_server.sh start
 ```
 
-`CTX` takes 64K, 96K, 128K or 192K. It bounds how far the cache grows and sets Pi's window; the packages and their Neural Engine memory are the same for every cap, and 128K is the comfortable maximum on a 32 GB Mac. Up to 64K, the release 0.2 bundle above is faster and also runs on the M5 family. Memory, speed per context and drafter choice: [release 0.2.1 notes](docs/RELEASE_NOTES_v0.2.1.md).
+For longer contexts, use `--ctx 64K`, `96K`, `128K` or `192K` with the same `CTX`; 128K is the comfortable maximum on a 32 GB Mac. Each cap is a one-time compile and about 10 GB more disk in `~/.anemll-forge/builds/`; without a capped build for its `CTX`, the server uses the full download and compiles every entry on its first start. Start the server with the same Python that compiled (the compile cache is per Python executable). Up to 64K, the release 0.2 bundle above is faster and also runs on the M5 family. Why per-context builds, memory, speed per context and drafter choice: [release 0.2.1 notes](docs/RELEASE_NOTES_v0.2.1.md).
 
 ## 3. Run a quick inference test
 
