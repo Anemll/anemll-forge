@@ -110,7 +110,7 @@ DRAFTER="$FORGE_192K/drafter/all3" \
 CTX=128K bash scripts/qwen38_server.sh start
 ```
 
-The server listens on `http://127.0.0.1:8765/v1` (OpenAI-compatible) and updates Pi's model entry for the cap. For the smaller drafter, point `DRAFT` and `DRAFTER` at `drafter/gu2a3`. Check it with `curl -s http://127.0.0.1:8765/health`.
+The server listens on `http://127.0.0.1:8765/v1` (OpenAI-compatible) and updates Pi's model entry for the cap. For the smaller drafter, point `DRAFT` and `DRAFTER` at `drafter/gu2a3`. Start the server with the same Python that compiled the packages: Core AI keeps a compile cache per Python executable, so a different interpreter compiles everything again. The wrapper uses the checkout's `.venv`; with a venv elsewhere, set `PY=` to its `python`. Check it with `curl -s http://127.0.0.1:8765/health`.
 
 **Choosing `CTX`:** 64K, 96K, 128K or 192K. The cap bounds how far the cache grows and sets Pi's window; the packages and their Neural Engine memory are the same for every cap.
 
