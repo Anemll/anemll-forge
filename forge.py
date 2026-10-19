@@ -37,6 +37,9 @@ def parser():
                    "(and drafter) first, so every package recompiles")
     c.add_argument("--follow", action="store_true", help="run alongside a build: compile each chunk as soon as the "
                    "builder lists it, then the head and drafter when it finishes")
+    c.add_argument("--ctx", help="compile only the context entries up to this cap (e.g. 16K, 128K): a capped copy of "
+                   "the build is derived once and compiled, much faster than the full build; a server started with "
+                   "that CTX uses it")
     c.add_argument("--dry-run", action="store_true", help="print command only")
     hf_release.add_commands(sub)
     for name in ("quantize", "convert", "chat", "serve"):
@@ -219,6 +222,7 @@ def main(argv=None):
         command += ["--draft", str(draft)] if draft else []
         command += ["--force"] if a.force else []
         command += ["--follow"] if a.follow else []
+        command += ["--ctx", str(a.ctx)] if a.ctx else []
         if a.dry_run:
             print(json.dumps(dict(argv=command), indent=2))
             return 0

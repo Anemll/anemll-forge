@@ -617,6 +617,8 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.soc = soc
         import soc_variant  # a build with per-chip function sets: this chip's set (derived once on an M5)
         root = soc_variant.prepare(root, soc.klass, log)
+        import ctx_variant  # a build capped for this context, when `forge.py compile --ctx` derived one
+        root = ctx_variant.prepare(root, max(ladder) if ladder else None, log, create=False)
         self.root, self.log = root, log
         man = json.loads((root / "manifest.json").read_text())
         self.kv_cache_dtype = cache_format(man, kv_cache_dtype)

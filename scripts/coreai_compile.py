@@ -41,6 +41,8 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true", help="drop this Python's cached specializations first and recompile")
     ap.add_argument("--follow", action="store_true",
                     help="compile each chunk as soon as a running build lists it, then the head and drafter")
+    ap.add_argument("--ctx", help="compile a build capped at this context (e.g. 16K): only the entries up to it, "
+                    "derived once from --build (scripts/ctx_variant.py); a server started with that CTX uses it")
     a = ap.parse_args(argv)
     try:
         SOC.apply(strict=True)
@@ -51,6 +53,8 @@ def main(argv=None):
         return follow(a)
     import soc_variant  # a build with per-chip function sets: compile this chip's set (derived once on an M5)
     a.build = soc_variant.prepare(a.build, SOC.detect_soc().klass, stamp)
+    import ctx_variant  # --ctx: only the context entries up to the cap (derived once; much shorter compile)
+    a.build = ctx_variant.prepare(a.build, a.ctx, stamp)
     man = json.loads((a.build / "manifest.json").read_text())
     stamp(graph_line(man, a.build))
     if a.force:
