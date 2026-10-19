@@ -40,15 +40,25 @@ A chunk's scratch memory on the Neural Engine is about rows times its largest co
 
 The runtime allocates only the current context entry's cache. It starts a conversation in the 8K entry, moves to the next entry when the context outgrows it (moving the kept rows), and releases the old cache. A new conversation goes back to the smallest entry that holds it. So memory follows the conversation, not the cap:
 
-| Context | Entry | Process memory | of it KV cache and I/O |
-| --- | --- | ---: | ---: |
-| 1K to 8K | 8K | 1.5 to 1.9 GB | 0.58 GB |
-| 16K | 16K | 2.2 GB | 0.86 GB |
-| 32K | 32K | 2.8 GB | 1.40 GB |
-| 64K | 64K | 3.8 GB | 2.48 GB |
-| 96K | 96K | 4.9 GB | 3.56 GB |
-| 128K | 128K | 6.0 GB | 4.64 GB |
-| 160K to 195K | 192K | 8.2 GB | 6.81 GB |
+Memory by context on a 32 GB M6, the same contexts as the speed table:
+
+| Context (prompt tokens) | Entry | KV cache (kv8) | KV cache and I/O | Process memory | Neural Engine | Total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1K (1,000) | 8K | 0.27 GB | 0.58 GB | 1.5 to 1.9 GB | 16.5 GB | 18.0 to 18.4 GB |
+| 8K (7,000) | 8K | 0.27 GB | 0.58 GB | 1.5 to 1.9 GB | 16.5 GB | 18.0 to 18.4 GB |
+| 16K (15,000) | 16K | 0.54 GB | 0.86 GB | 2.2 GB | 16.5 GB | 18.7 GB |
+| 32K (31,500) | 32K | 1.08 GB | 1.40 GB | 2.8 GB | 16.5 GB | 19.3 GB |
+| 64K (64,000) | 64K | 2.16 GB | 2.48 GB | 3.8 GB | 16.5 GB | 20.3 GB |
+| 96K (97,000) | 96K | 3.25 GB | 3.56 GB | 4.9 GB | 16.5 GB | 21.4 GB |
+| 128K (129,500) | 128K | 4.33 GB | 4.64 GB | 6.0 GB | 16.5 GB | 22.5 GB |
+| 160K (160,000) | 192K | 6.49 GB | 6.81 GB | 8.2 GB | 16.5 GB | 24.7 GB |
+| 192K (195,000) | 192K | 6.49 GB | 6.81 GB | 8.2 GB | 16.5 GB | 24.7 GB |
+
+- **Entry:** the context entry that holds a prompt of that size. Memory follows the entry, not the prompt: every prompt that fits the 8K entry costs the same.
+- **KV cache (kv8):** the entry's logical cache, 32.25 KiB per position (computed). **KV cache and I/O** adds the entry's input and output buffers (measured).
+- **Process memory:** the server process's footprint, measured with the full build, without the drafter (it adds a few hundred MB of host memory).
+- **Neural Engine:** the full build's target packages (about 15.8 GB) plus the `all3` drafter (0.74 GB), the same for every context. A build compiled with `--ctx` reserves less scratch; its Neural Engine memory has not been measured yet (the 16K build's server process measured 2.0 GB).
+- **Total** is process plus Neural Engine. The rest of a 32 GB Mac is left for macOS and other apps; the move from the 128K to the 192K entry briefly peaks 4.3 GB higher (both caches exist).
 
 While it moves from one entry to the next, both caches exist briefly: the move from 128K to 192K peaks at 12.5 GB of process memory.
 
