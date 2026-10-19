@@ -357,16 +357,25 @@ def check_drafter_pair(pkg, directory, target, config):
         raise ValueError("Expected the tested five-layer DFlash2 drafter (T=8/R=8/RP=64/W=2048)")
     target_id = Path(target.get("export", "")).name
     draft_target = Path(meta.get("target_export", "")).name
-    head_id = Path(meta.get("head_export", "")).parent.name
-    if not target_id or draft_target != target_id or head_id != target_id:
+    head_id = Path(meta.get("head_export") or "").parent.name
+    # a body-only package (no head_export) drafts with the target's own head, given its norm gain next to the config
+    shared = meta.get("head_export") is None and (directory / "head_normw_fp16.npy").is_file()
+    # a body-only package carries no target weights (the head and its norm gain come from the target), so it may come
+    # from a build for another target; verification keeps the output exact, only acceptance can differ
+    if not target_id or (not shared and (draft_target != target_id or head_id != target_id)):
         raise ValueError("DFlash2 target/head export mismatch; use the drafter built with this target's head")
+    if shared and draft_target != target_id:
+        print(f"drafter: body-only package built beside {draft_target}, drafting for {target_id} with its head",
+              file=sys.stderr)
     rank = dc.get("selector_rank")
     if type(rank) is not int or rank != 256:
         raise ValueError("Expected DFlash2 selector_rank 256")
     check_selector(directory / SELECTOR_FILE, cfg["vocab_size"], rank)
     entries = meta.get("entries", {})
-    if not {"draft", "ctx64"} <= set(entries) or "logits" not in entries.get("draft", {}).get("outputs", []):
-        raise ValueError("Drafter needs draft/ctx64 entries and the matching target head")
+    outs = entries.get("draft", {}).get("outputs", [])
+    if not {"draft", "ctx64"} <= set(entries) or ("hidden" not in outs if shared else "logits" not in outs):
+        raise ValueError("Drafter needs draft/ctx64 entries and the matching target head (or a body-only package "
+                         "with head_normw_fp16.npy)")
     return cfg, meta
 
 

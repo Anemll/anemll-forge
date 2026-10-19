@@ -26,7 +26,7 @@ NEG = -1e4
 
 
 class CoreAIDrafter:
-    def __init__(self, pkg, cfg, w_sel, emb, unrot=None):
+    def __init__(self, pkg, cfg, w_sel, emb, unrot=None, head=None, normw=None):
         sys.path.insert(0, str(BRIDGE_DIR))
         import coreai_bridge as B
         # torch's multithreaded CPU pool (the top-k over 7 x 248320 logits below) keeps its threads spinning on the
@@ -48,6 +48,15 @@ class CoreAIDrafter:
         self.L = cfg["num_hidden_layers"]
         self.ring = [(self.din[f"kc{i}"].np, self.din[f"vc{i}"].np) for i in range(self.L)]
         self.has_head = "logits" in self.dout
+        # A body-only package (NO_HEAD=1) drafts through the target's own head: fed x = h / normw (h: the drafter's normed
+        # hidden state, normw: the head's final-norm gain 1 + g), the head returns W rot(h) / rms(x), so the drafter's
+        # logits are the head's times rms(x), one factor per row. Saves the drafter's head copy (0.64 GB for the release
+        # target's LUT4 head); the iPhone app drafts the same way (ios/CoreAIPhoneTest Drafter.swift).
+        self.shared = not self.has_head and head is not None and normw is not None
+        if self.shared:
+            self.normw = np.asarray(normw, np.float32).reshape(-1)
+            self.hx, self.hlog = head.buffer("input", "x"), head.buffer("output", "logits")
+            self.head_plan = B.Plan([head.bind({"x": self.hx}, {"logits": self.hlog})])
         self.cfg, self.emb = cfg, emb
         self.unrot = unrot  # rot1 fix B (rot1_runtime.Unrotate): target taps / anchor row back to the unrotated basis
         # selector tables as stored (BF16 / FP16, mapped from the file by safetensors): propose converts only the rows it
@@ -124,9 +133,18 @@ class CoreAIDrafter:
         self._commit(self.dout, rows)
         hp = torch.from_numpy(self.dout["hp"].np[0, :, 0, 1:].T.astype(np.float32))           # (7, 256)
         hidden = self.dout["hidden"].np[0, :, 0, :].T.astype(np.float32)
-        if not self.has_head:
+        if self.shared:
+            x = (hidden[1:] / self.normw).astype(f16)                                           # (7, hidden)
+            hx = self.hx.np
+            hx[:] = 0
+            hx[0, :, 0, :T - 1] = x.T
+            self.head_plan.run()
+            r = np.sqrt((x.astype(np.float32) ** 2).mean(1) + 1e-6)
+            logits = torch.from_numpy(self.hlog.np[:T - 1].astype(np.float32) * r[:, None])   # (7, V)
+        elif not self.has_head:
             return [], dict(hp=hp, hidden=hidden)
-        logits = torch.from_numpy(self.dout["logits"].np.astype(np.float32))                  # (7, V)
+        else:
+            logits = torch.from_numpy(self.dout["logits"].np.astype(np.float32))              # (7, V)
         unary, cand = torch.topk(logits, top_k, dim=-1)
         pred, path = int(anchor), []
         for i in range(T - 1):

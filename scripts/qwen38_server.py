@@ -291,18 +291,22 @@ class Engine:
             unrot = rot1_runtime.unrotate_for(mdir) if self.runtime == "coreai" else None
             if unrot is not None:
                 log(f"rot1: target basis {unrot.name} ({unrot.kind}); drafter inputs un-rotated on the host (fix B)")
+            # a body-only drafter package drafts with the target's head (head_normw_fp16.npy: the head's norm gain)
+            nw = Path(ddir) / "head_normw_fp16.npy"
+            shared = dict(head=getattr(self.model, "head", None), normw=np.load(nw) if nw.is_file() else None)
             def make():
                 try:
-                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, unrot=unrot)
+                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, unrot=unrot, **shared)
                 except Exception as e:  # noqa: BLE001  a stale cached specialization (nilError): recompile once
                     import coreai_compile_guide as G
                     n = G.purge(Path(dpath))
                     if not n:
                         raise
                     log(f"drafter load failed ({str(e)[:60]}); purged {n} cached specializations, recompiling")
-                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, unrot=unrot)
+                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, unrot=unrot, **shared)
             self.drafter = guide.load(f"drafter {Path(dpath).name}", make) if guide else make()
-            log(f"drafter: Core AI {dpath.name}")
+            log(f"drafter: Core AI {dpath.name}" + (" (body only, drafting with the target's head)"
+                                                     if getattr(self.drafter, "shared", False) else ""))
         self.tok = AutoTokenizer.from_pretrained(str(hf))
         self.a = a
         # usable positions: a Core AI 64K entry holds 65472 KV rows (the ANE caps [history | block] at 65536)
