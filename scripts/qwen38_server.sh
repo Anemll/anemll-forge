@@ -11,7 +11,9 @@
 # Overrides (env):
 #   FORGE_BUNDLE  bundle with model/ + coreai/ + drafter/ (default: ~/Models/anemll-forge-qwen3.8-27B)
 #   MODEL, BUILD  override the checkpoint / Core AI build separately
-#   CTX           context cap; a number or 8K / 16K / 24K / 32K / 48K / 64K (default: 16384)
+#   CTX           context cap, one of the build's contexts: a number or 8K / 16K / 32K / 48K / 64K / 96K / 128K /
+#                 192K (default: 16384). It caps the KV growth and Pi's window (compaction 20,480 tokens below it
+#                 from 64K up); the Neural Engine programs and their memory are the same for every cap of a build
 #   KV_CACHE_DTYPE auto (manifest), fp16, v8 or kv8; requires the matching BUILD export
 #   SUMMARY_THINK 1: keep thinking for context-summary requests (Pi's compaction); default 0: they run without
 #   PORT          listen port (default: 8765)
@@ -62,7 +64,7 @@ PI_DIR="${PI_DIR:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
 PI_BUILD="${PI_BUILD:-$(basename "$BUILD")}"
 
 CTX_UPPER=$(printf '%s' "$CTX" | tr '[:lower:]' '[:upper:]')
-[[ "$CTX_UPPER" =~ ^[0-9]+K?$ ]] || { echo "CTX must be a number or 8K..64K, got '$CTX'"; exit 1; }
+[[ "$CTX_UPPER" =~ ^[0-9]+K?$ ]] || { echo "CTX must be a number or a size such as 64K or 96K, got '$CTX'"; exit 1; }
 case "$CTX_UPPER" in *K) CTX=$(( 10#${CTX_UPPER%K} * 1024 )) ;; esac
 
 managed_pids() {
