@@ -2,7 +2,7 @@
 
 19 October 2026. Model files: [anemll/anemll-forge-qwen3.8-27B-192K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-192K).
 
-Release 0.2.1 runs the **release 0.2 weights** (`release_vq3pA_mixh_s600_k1_mat`, unchanged) with a context of up to **196,608 tokens (192K)** on the M6 Neural Engine, three times the 64K of the release 0.2 packages. Four memory optimizations make that fit on a 32 GB Mac. The quantization and the measured quality of the weights are those of [release 0.2](../README.md); what is new is the context length, the cache format, the drafters and the runtime that grows the context.
+Release 0.2.1 runs the **release 0.2 target weights** (`release_vq3pA_mixh_s600_k1_mat`, unchanged) with a context of up to **196,608 tokens (192K)** on the M6 Neural Engine, three times the 64K of the release 0.2 packages. Four memory optimizations make that fit on a 32 GB Mac, and three runtime fixes free memory the previous runtime kept. The target's quantization and measured quality are those of [release 0.2](../README.md); new are the context length, the INT8 key cache, the drafters (re-quantized, without their own output head) and the runtime that grows the context. Speculative decoding verifies every token against the target, so the drafter affects speed, not the output.
 
 Release 0.2.1 is for **M6 only**. Up to 64K, the [release 0.2 packages](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B) remain faster (about 15% more prefill at short context) and also run on the M5 family.
 
@@ -67,6 +67,14 @@ While it moves from one entry to the next, both caches exist briefly: the move f
 ### Neural Engine total
 
 The target packages take about **15.8 GB** of Neural Engine memory (weights plus scratch), against about 13.0 GB for release 0.2's 64K packages; the long entries need the extra scratch. With the `all3` drafter the total is about 16.5 GB, about 2 GB more than release 0.2 for three times the context. With the full build this does not depend on `CTX`: Core AI loads every function of a chunk and reserves its scratch at the first call. A build compiled with `--ctx` (below) reserves only what its largest entry needs.
+
+### Runtime memory fixes
+
+- **Old caches are released when the context grows.** A loaded Core AI function keeps the buffers of its last call, so the cache of every entry the runtime had left stayed in memory: about 4.9 GB of stale caches at 64K with the release 0.2 packages. The runtime now releases them after each move (about 13 ms).
+- **The drafter keeps its selector tables as stored**, converting only the rows a draft reads: 0.51 GB less RAM, identical drafts.
+- **Models on external drives no longer crash the server.** The embedding and selector are read safely instead of memory-mapped from other volumes.
+
+These are runtime changes: they apply to the release 0.2 packages too, with current source.
 
 ## Longer context
 
