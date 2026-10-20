@@ -6,8 +6,8 @@ long entries' prefill tiles. The Neural Engine also reserves each chunk's scratc
 build keeps, in each chunk, only the functions of the contexts up to the cap (same weights, coreai/strip_functions.py,
 about a second per chunk) and the manifest entries to match; it is written once to $ANEMLL_FORGE_STATE/builds/ (the
 download stays read-only; one more copy of the chunks on disk), the head linked, the manifest written last.
-Measured on the M6 from the 192K build: a 16K cap compiled in 8 min 37 s and prefilled 267 to 280 tok/s (the full
-build 241 to 260).
+Measured on the M6 from the 192K build: a 16K cap compiled in 8 min 37 s and a 96K cap in 45 min 43 s; the capped
+builds prefill at the full build's speed (255 to 257 tok/s at the 8K entry, 237 at 16K).
 
 `forge.py compile --ctx 16K` creates and compiles the capped build; the runtime then uses it for any start whose
 context cap fits in it (CTX=16K), and the full build otherwise. Needs coreai-core on the Mac that derives."""
