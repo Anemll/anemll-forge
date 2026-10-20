@@ -24,7 +24,7 @@ Smaller weights can make a large model more practical to run, but compression is
 
 **Activations** are the temporary values produced while processing tokens. The **KV cache** stores earlier attention keys and values, so later tokens can attend to them. **DeltaNet state** is a separate recurrent state used by the model's linear-attention layers. These are runtime data, not the saved learned weights.
 
-Our target is primarily a weight-compression recipe with floating-point execution and state. In particular, `KV_FMT="INT8 per-channel"` in the quantizer names the **attention K/V projection weights**. It does **not** mean an INT8 KV cache. The current Core AI runtime's host-owned K/V history buffers are **FP16**, as are its graph inputs for those buffers. It copies accepted rows into them without an INT8 cache-quantization step.
+The weight recipe and runtime attention precision are separate. `KV_FMT="INT8 per-channel"` names the **attention K/V projection weights**, with one FP16 scale per output channel. The release 0.2 runtime also uses a [V8 cache](KV_CACHE_V8.md): transposed FP16 keys and signed INT8 values, with one FP16 scale per token and KV head. Accepted value rows are quantized when written to the cache. INT8 scores and M6 FP8 softmax intermediates are a third, independent runtime choice; see [Accelerated attention on the ANE](#accelerated-attention-on-the-ane). DeltaNet state remains floating point.
 
 Consequently, “two-bit model” is an incomplete description. It neither describes every weight nor establishes two-bit activations, an integer multiply-accumulate path, or the model's total RAM requirement.
 
@@ -106,7 +106,7 @@ $$\min_Q\frac{1}{N}\left\|X(W-Q)^T\right\|_F^2,\qquad H=\frac{X^TX}{N}.$$
 
 Here `Q` must be representable by the chosen LUT/scale or INT8 format. The objective weights errors by the actual input distribution, rather than treating every weight difference as equally harmful.
 
-The implementation orders input columns by descending `diag(H)`, adds diagonal damping equal to 1% of the mean Hessian diagonal, and processes columns in blocks of 128. It uses FP64 Hessian factorization (cuSOLVER when CUDA is available, the existing CPU helper otherwise) and propagates each column's rounding error into columns not yet quantized. Its vector groups stay within one input column, so the column-wise feedback can use the same structure as a scalar rounder. See [`gptq`](../scripts/qwen3_lut_common.py).
+The implementation orders input columns by descending `diag(H)`, adds diagonal damping equal to 1% of the mean Hessian diagonal, and processes columns in blocks of 128. It uses FP64 Hessian factorization (cuSOLVER on the selected CUDA device, the CPU helper for CPU/MPS runs) and propagates each column's rounding error into columns not yet quantized. Its vector groups stay within one input column, so the column-wise feedback can use the same structure as a scalar rounder. See [`gptq`](../scripts/qwen3_lut_common.py).
 
 Calibration is **true sequential**. MLP gate/up are quantized first; down's Hessian is formed from the resulting gated activation after gate/up quantization. Mixer input projections are quantized before recapturing the output projection's input. Later layers receive outputs propagated through already-quantized earlier layers. This helps calibration reflect the model it is actually building. It does not eliminate quantization error or guarantee generalization to different prompts.
 
@@ -154,19 +154,19 @@ The historical experiments found stronger benefit from these factors on DeltaNet
 
 Block reconstruction keeps indices fixed while adjusting LUT entries/scales, optionally factors, against a reference activation stream. It needs its own held-out selection. Neither it nor the activation-weighted/dynamic factor scripts should silently replace the deployed plain rank-64 recipe when explaining this artifact.
 
-### 9. INT8 projection weights and floating-point state
+### 9. INT8 projection weights and runtime state
 
 The full-attention K/V weight rounder uses symmetric per-output-channel scaling, approximately `s = max(abs(W)) / 127`, and codes obtained by rounding/clipping `W / s` to `[-127, 127]`. The export stores signed eight-bit codes and FP16 row scales. The residual factors above can correct these projections too.
 
-**This format describes the quantizer export.** In the current Core AI builder, [`QConv`](../coreai/qwen38_coreai_build.py) expands INT8 weights and their scales to FP16 before Torch export. Later compression/lowering is a separate stage. An `INT8` metadata field is therefore not sufficient evidence of final package storage or native INT8 arithmetic.
+The default Core AI builder preserves these codes as **compile-time INT8 weights**, together with their FP16 channel scales. [`QConv`](../coreai/qwen38_coreai_build.py) passes them through `constexpr_blockwise_shift_scale`; only the compatibility option `QCONV_INT8=0` expands them to FP16. The [M6 compiled-program inspection](research/M6_COMPUTE_ACCELERATION_2026-10-03.md) reports INT8 projection kernels without an FP16 weight copy: 40 MB instead of 50 MB per attention layer, and 152 instead of 272 static cycles for a 64-row projection task. Those are local program measurements, not a whole-model speedup. GPTQ fits the approximation in this format; the compiler provides the accelerated inference path.
 
-The Core AI [runtime](../scripts/qwen38_coreai_model.py) allocates FP16 host-owned attention history, copies newly accepted K/V rows, and maintains floating-point DeltaNet state separately. Cache memory grows with context even though the model weights stay fixed. This distinction matters when measuring context scaling and RAM.
+The Core AI [runtime](../scripts/qwen38_coreai_model.py) supports cache formats declared by the selected package. Release 0.2 uses FP16 keys and INT8 historical values; [cache management](../scripts/qwen38_kv_cache.py) quantizes accepted values with per-token/head scales. FP16-only packages retain FP16 history. DeltaNet state is separate and floating point. Cache memory grows with context even though the model weights stay fixed.
 
 ### 10. From quantizer export to Core AI execution
 
 The offline export contains LUTs, byte-sized index tensors, scales, rotation metadata and optional factors. A reference path reconstructs effective weights to evaluate quantization separately from compiler effects.
 
-The Core AI [builder](../coreai/qwen38_coreai_build.py) mirrors the graph in FP16, registers exact exported LUTs/indices, and injects them into palettization rather than independently fitting a new codebook. For LUT branches, per-channel scale is applied after the convolution. Palettization runs before `optimize()` because folding that multiply into weights would destroy the intended shared codebook structure. The local compression hook uses the known codebook/vector axis; the compiler produces the runtime representation.
+The Core AI [builder](../coreai/qwen38_coreai_build.py) uses floating-point reference operations with explicit quantization boundaries, preserves INT8 projection constants by default, and registers exact exported LUTs/indices for palettization rather than fitting replacement codebooks. For LUT branches, per-channel scale is applied after the convolution. Palettization runs before `optimize()` because folding that multiply into weights would destroy the intended shared codebook structure. The local compression hook uses the known codebook/vector axis; the compiler produces the runtime representation.
 
 This means the host inference loop does not unpack every LUT weight on every token. The compressed representation is part of the model package consumed by the compiler/runtime. It still does not establish the physical lookup circuitry, dequantization placement, accumulator precision, or a universal native two-bit compute path. Placement reports and same-weight tensor comparisons are needed for the graph actually deployed.
 
@@ -181,6 +181,108 @@ A quantized PyTorch model can approximate the source well while the compiled gra
 The retained build uses **tanh-form SiLU** in DeltaNet and MLP, mathematically `0.5 × x × (1 + tanh(x / 2))`, and overflow-safe softplus, `relu(x) + log(1 + exp(−abs(x)))`. It scales DeltaNet q by 16 and v by 64, with the corresponding squared scale in normalization epsilon. These choices address numerical problems measured on the tested FP16 path; they are not a different low-bit weight format.
 
 Promising early-layer MLP down-input scaling was later rejected after static and dynamic variants corrupted late-layer outputs. The final manifest records `MLP_DS=1` and no scale table. An algebraically equivalent expression may also be fused into a problematic native operation, so source math alone is insufficient. See [numerical experiments and superseded variants](../ANE_DELTANET_NUMERICS.md) and [session lessons](SESSION_LESSONS.md).
+
+## Accelerated attention on the ANE
+
+The runtime graph adds acceleration beyond GPTQ weight fitting. The [builder](../coreai/qwen38_coreai_build.py), [compiled-program analysis](ANE_HWX_MLIR_ANALYSIS.md), and [dated measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md) distinguish the following stages of cached-history attention:
+
+**The default cache quantizes V only.** `--kv-cache-dtype v8` stores K in FP16 and V in INT8; `--kv-cache-dtype kv8` exports a separate graph with both K and V in INT8. Within each attention layer, each quantized cache stores one FP16 scale per cached token and KV head, shared across all components of that head’s key or value vector. K and V have separate scales when both are quantized. The option `--kv-cache-dtype both` instead packages selectable FP16 and V8 layouts; it does not mean INT8 K plus INT8 V. Runtime selection requires matching exported functions. These cache choices are independent of the projection weights: GPTQ's `KV_FMT="INT8 per-channel"` applies to **both** `k_proj` and `v_proj`. See [cache export choices](KV_CACHE_V8.md#cache-export-choices).
+
+![M6 attention uses FP16 queries and keys, INT8 scores and cached values, and FP8 softmax intermediates. The denominator branches before value scales are folded. M5 keeps softmax intermediates in FP16.](images/attention-precision.svg)
+
+The diagram follows one tiled softmax calculation. Exponential weights feed both the normalization sum and the weighted sum of cached values. The value-cache scales are folded into the latter branch, leaving the denominator unchanged. Tile results are rescaled, combined with the floating-point current block, and divided by the combined denominator. The attention gate and output projection follow this result and are omitted here. Dtype labels describe tensor formats, not undocumented internal accumulator precision.
+
+| Stage | M6 | M5 |
+| --- | --- | --- |
+| Query/key operands | FP16 | FP16 |
+| Scores after quantization and masking | INT8, step 1/4 | INT8, step 1/4 |
+| Exponentials read by the softmax sum | FP8 E4M3 | FP16 |
+| Maximum and sum reduction outputs | FP16 | FP16 |
+| Scaled softmax weights used with cached V | FP8 E4M3 | FP16 |
+| Stored keys / values | FP16 / INT8 | FP16 / INT8 |
+| Attention output | FP16 | FP16 |
+
+On M6, `ATT_INT8MM=s8,s8b,sm8,pvf8` places quantize/dequantize boundaries on scores and **softmax intermediates**. The two FP8 switches mark stages of the same path: `sm8` stores `exp(score − tile_max)` in FP8 before the normalization sum, while `pvf8` stores the value-scale-adjusted softmax weights in FP8 before they multiply the INT8 cached values. These weights are still unnormalized; division happens after the partial results are combined. The boundaries fuse into producer and consumer tasks, so large intermediate tensors cross memory in one-byte formats. The compiled program has no dedicated hardware softmax instruction, and the observed reduction outputs are FP16. Internal accumulator precision is not established by the output format.
+
+The measured product of INT8 values and FP8 softmax weights has the same multiply-add cycle count as its FP16-weight control; reduced traffic supplies the benefit there. Uniform UINT8 softmax weights can multiply faster, but the tested value-scale fold lost about 7% of softmax mass to zero rounding, versus 0.02% for FP8 in the real-text sample. This is why the selected M6 path retains FP8 softmax intermediates.
+
+The M6 FP8 scale is `ATT_PF8_UNIT=1/64`: softmax intermediates bounded to [0, 1] reach FP8 values of at most 64 after scaling. This bound does not mean the weights sum to one. An earlier scale of 1/256 produced incorrect device results for one captured head with values near 200 despite E4M3's larger representable range. The corrected range matched the host simulation in that investigation. The tested M5 ANE compiler rejects FP8, so its functions use `ATT_INT8MM_M5=s8,s8b`: INT8 scores with FP16 softmax intermediates and FP16 softmax weights in the value product. Both variants retain transposed FP16 keys (`KV_KEYS_T=1`). [Release 0.2 M5 validation](VALIDATION_M5_RELEASE_0_2.md) confirms the selected function set and ANE placement.
+
+### Measured FP8 benefits
+
+**Release 0.1 did not use FP8 attention.** The [5 October measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) below concern later experimental graphs, preceding the release 0.2 M6 path described above. They test FP8 at different stages of the same softmax path, then the combined model graph. **Latency reductions and throughput increases are different quantities**; the table labels each explicitly. Rows have different controls and their gains must not be added together.
+
+| Change and measured scope | Control | Recorded result on M6 |
+| --- | --- | --- |
+| Store scaled softmax weights in FP8 before the value product (`pvf8`), one historical `kv8` attention core; denominator path stays FP16 | INT8 cached values × FP16 softmax weights | Prefill latency: 7.55 → 6.69–6.74 ms at 32K, **10.7–11.4% lower**; 14.83 → 13.04 ms at 64K, **12.1% lower**. Verify was essentially unchanged. |
+| Also store the exponentials read by the softmax sum in FP8 (`sm8`), in the fixed INT8-score core with UINT8 softmax weights (`s8b,pvtu`) | Same core without `sm8` | Prefill latency reduction against the shared FP16 baseline grows from 20.7% to 27.5% at 32K and 21.5% to 28.2% at 64K. This is an **additional 8.6% and 8.5% latency reduction**, respectively, relative to the already optimized control. |
+| INT8 scores plus FP8 exponentials and sum, isolated softmax tile | FP16 tile | **22–25% lower prefill latency**, about **15% lower verify latency**. This probe also quantizes centered scores (`s − max`) to INT8; it is not the selected release graph. |
+| Later experimental INT8-score and range-corrected FP8 graph (`s8,s8b,sm8,pvf8`, form C2), full target without drafter | Same-weight, non-FP8 V8 graph, before transposed keys | Prefill throughput: **292.5 → 310.8 tokens/s at 8K (+6.3%)** and **199.6 → 223.9 at 64K (+12.2%)**. |
+
+The first three rows are historical research probes, not interchangeable full-model benchmarks. The `kv8` cores stored both keys and values in INT8; release 0.2 uses FP16 keys and INT8 values. The incremental `sm8` result isolates the benefit of FP8 exponentials and summation **within the UINT8-PV research variant**, whose probability rounding was subsequently rejected for the selected M6 path. The increment is calculated from the reported common-baseline timings, for example `1 − (1 − 0.275) / (1 − 0.207) = 8.6%`; it is not a 27.5% FP8-only speedup. See [8-bit softmax](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-softmax) for the tile and core controls.
+
+The full-target experiment reused the earlier weights while changing the runtime graph; its FP8 candidate was **not the released 0.1 runtime**. Its 64K direct KL to the non-FP8 V8 control was 0.00048. It measures the combined attention changes, not FP8 alone, and is neither a release-to-release comparison nor a new release 0.2 measurement. The earlier DeltaNet/tile-size gains and the later transposed-key gains are separate experiments and must not be attributed to FP8. See [range-corrected C2](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#form-c-at-long-context-the-fp8-range-fault-and-c2) and [transposed keys](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#transposed-key-cache-c2t).
+
+### Measured INT8 compute and its limits
+
+Quantizing **both weights and activations** (W8A8) can engage the ANE's faster INT8 × INT8 compute path. [Apple documents this for M4-class hardware](https://apple.github.io/coremltools/docs-guides/source/opt-quantization-perf.html); the measurements below directly confirm it on M6. The recorded results do not constitute a matched M4/M5/M6 comparison or establish an exact twofold speedup for every shape and scale layout.
+
+The graph can still contain `quantize → dequantize` pairs around apparently floating-point operations. With supported constant scales and zero-point-zero forms, the compiler folds those boundaries into producer and consumer tasks: the producer writes INT8 and the multiply-add reads INT8 directly. The [HWX signatures](ANE_HWX_MLIR_ANALYSIS.md#4-8-bit-rules-int8-uint8-fp8-and-their-hwx-signatures) establish execution formats; a `dequantize` in source code alone does not imply a separate FP16 conversion at runtime. Offset and runtime-scale variants can prevent this fusion.
+
+The [INT8 compute probe](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#int8-compute-on-the-ane) confirms that the M6 ANE executes **INT8 × INT8** for both constant weights and runtime operands. With dense 4,096 × 4,096 convolutions and 1,024 rows per call, it recorded:
+
+| Operand format | Measured throughput | Relative to FP16 |
+| --- | ---: | ---: |
+| FP16 weights and activations | 18.6 TOPS | 1.00× |
+| INT8 weights and activations (W8A8), per-channel weight scales | 38.4 TOPS | **2.06×** |
+| W8A8, shared weight scale | 52.8 TOPS | **2.84×** |
+
+These are isolated arithmetic-throughput measurements, not LLM tokens/s. A runtime INT8 × INT8 matmul reached 53.2 TOPS in the same investigation. GPTQ's exported INT8 K/V weights alone do **not** make the projection W8A8: the default `QConv` preserves INT8 weights but does not insert INT8 activation quantization. The separate projection evidence above (272 → 152 static cycles and 50 → 40 MB) concerns that weight-format change, not a measured 2.84× layer speedup.
+
+The [real-layer tests](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part) show why scope matters. Adding W8A8 K/V projections changed layer-3 prefill from 2.510 to 2.448 ms at 8K, but only 15.075 to 15.061 ms at 64K. Multiplying INT8 cached values by UINT8 softmax weights cut layer prefill by 6.3% at 8K and 9.4% at 64K, but its rounding error motivated the selected FP8 path. INT8 QK with per-row rescaling made prefill slower. The deployed M6 path therefore combines INT8 projection weights, FP16 query/key operands, INT8 scores, and FP8 softmax weights used with INT8 cached values; it does not use INT8 × INT8 throughout attention.
+
+The [recorded C2 HWX excerpt](ANE_HWX_MLIR_ANALYSIS.md#5-attention-what-the-program-looks-like) makes the distinction concrete: QK has `in=float16`, `kern=fp16`, `out=int8`; the cached-value product has `in=int8`, `kern=e4m3`, `out=float16`. An INT8 **score output** does not make QK an INT8 × INT8 operation. Likewise, exporting an INT8 key cache with `kv8` does not by itself quantize the queries. W8A8 projections and INT8-query research variants were tested separately from the selected release graph.
+
+## DFlash2 and verifier optimizations
+
+Release inference pairs the quantized target with a matching DFlash2 drafter. Several graph and runtime optimizations make this practical beyond the weight formats and accelerated attention above. The [speculative-decoding guide](SPECULATIVE_DECODING.md) describes acceptance and package pairing; the measurements below are historical M6 experiments, not a new benchmark of release 0.2.
+
+### Exact block solve for Gated DeltaNet
+
+An eight-row verifier processes an anchor plus seven draft tokens. Within each Gated DeltaNet block, later rows depend on earlier rows. The chunkwise formulation resolves this through a small triangular system `(I + N) X = rhs`. Because `N` is strictly lower triangular and has eight rows, `N^8 = 0`, giving the exact finite product:
+
+$$ (I + N)^{-1} = (I - N)(I + N^2)(I + N^4). $$
+
+The [`GDN_FAST=1` implementation](../coreai/qwen38_coreai_build.py) replaces seven serial row updates with this product and a multiplication by the right-hand side. This is an implementation of the established chunkwise delta-rule formulation and its finite path sum, explained by [Songlin Yang](https://sustcsonglin.github.io/blog/2024/deltanet-2/). The ANE-specific choice is to express the small products as **broadcast multiply plus reduction**: a direct chain of computed matrix multiplications failed ANE compilation in the recorded experiment. The same switch uses native depthwise convolution and combines two state products into one during each eight-row prefill sub-block. It is enabled by default in the current builder.
+
+The [three-core microbenchmark](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#gated-deltanet-core-measured), excluding input/output projections, recorded:
+
+| Gated DeltaNet implementation | Eight-row verification | 64-row prefill |
+| --- | ---: | ---: |
+| Earlier row-by-row solve | 1.18 ms | 6.82 ms |
+| Final `GDN_FAST` combination | 0.64–0.69 ms | 3.42–3.49 ms |
+
+The variants matched the FP32 host reference within a maximum relative difference of `3e-7`; recorded device output error was unchanged at the reported precision. Algebraic equivalence does not imply bit-identical floating-point execution. A one-token recurrent step has no block solve, so this particular benefit applies to blocked verification and prefill.
+
+### Eight-row verification with deferred state commit
+
+The target keeps the current block's recurrent updates pending until acceptance is known. [`commit_pending`](../coreai/qwen38_coreai_build.py) applies only the accepted prefix on the next target call, while the [runtime's `accept(k)`](../scripts/qwen38_coreai_model.py) appends only accepted K/V rows. Rejected proposals therefore do not advance the target's committed state. The runtime also reuses Swift binding plans and persistent buffers across calls at the same context entry.
+
+Full attention uses different history-tile widths for these workloads: `ATT_BLOCK=2048` for verification and `ATT_BLOCK_PREFILL=4096` for prefill by default. The [tile-size measurements](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#attention-history-tiles-measured) motivated smaller tiles than the earlier 16K setting; more tiles also increase cold compilation work. These controls change the compiled graph, rather than the quantized weights.
+
+The [verifier-width experiment](verifier_len.md) explains the eight-row choice. At 64K, measured full-target calls took 131.5 ms for eight rows, 127.2 ms for four and 123.1 ms for three. Shortening the block saved little while reducing the number of drafts that could be accepted. Applying the recorded acceptance distribution to those timings predicted **21–36% lower throughput** for the shorter blocks on the coding-agent workload. These percentages are an acceptance-based model with fixed non-verifier overhead, **not end-to-end server measurements of shorter verifiers**. Package entry sets also differed. Eight evaluated rows still do not guarantee eight emitted tokens.
+
+### Fused drafting and selective prompt ingestion
+
+The [Core AI drafter](../coreai/dflash2_coreai_build.py) combines up to eight newly committed target-feature rows with the next eight-row draft block in one call. Its `draft` and 64-row context-update entries share weights. The host owns the 2,048-slot K/V ring and writes returned rows after the call; putting those state writes inside the graph caused GPU placement in the recorded conversion.
+
+During prompt prefill, [`DraftIngestWindows`](../scripts/qwen38_server.py) sends the drafter only the last `W + R = 2,056` feature rows before each cached-prefix snapshot boundary and the prompt end. Earlier drafter rows would be overwritten before a draft or snapshot could use them, since each context row's K/V depends only on that row's target features. This avoids unnecessary feature copies and context-update calls while preserving the ring and pending rows needed at those boundaries. **The target still processes the entire prompt.** `DRAFT_INGEST=all` retains the full-ingestion comparison path.
+
+### Quantized drafter and matching output head
+
+The drafter's LUT4 policy uses GPTQ-fitted scalar tables with per-output-channel scaling for its large projections, INT8 per-channel weights for the small convolution-kernel projections, and an FP16 selector projection; see the [format policy](../scripts/dflash2_ane_drafter.py). The [runtime](../scripts/dflash2_coreai_drafter.py) evaluates the full target vocabulary head, then uses the upstream rank-256 chain selector over the top 16 candidates per draft position. Candidate filtering reduces host selection work; it does not remove the full vocabulary head from the graph.
+
+After target QAT, rebuild the drafter with that target export's `lm_head.safetensors` through `HEAD_EXPORT`. A stale head can reduce acceptance and invalidate a pairing comparison. The current selector proposes a deterministic path; sampling proposals from a richer drafter distribution, multi-branch verification and relaxed acceptance remain [research proposals](research/DFLASH2_SAMPLING_PLAN.md), not release optimizations.
 
 ## GPTQ, then quantization-aware training (QAT)
 
@@ -296,6 +398,10 @@ Release 0.2 (`release_vq3pA_mixh_s600_k1`) changes two things against the format
 
 The same layout as [`vector 2x16 + pcs`](#2-exactly-what-vector-2x16--pcs-means) with 64 centroids instead of 16: a six-bit index selects one of 64 learned two-component centroids, the components being two consecutive output channels at the same input column, so one index covers two weights at **three bits per weight**. Packed storage is `3 × Cout × Cin / 8` bytes plus a 256-byte codebook and `2 × Cout` bytes of scales. The exported `.safetensors` keep one `uint8` per pair (four bits per weight in the file), as for 2x16.
 
+![One six-bit index selects a two-component FP16 centroid. Separate output-row scales reconstruct two weights, giving three index bits per weight.](images/vector-3bpw.svg)
+
+The illustration uses example index 7 to select the centroid `(0.5, −1.0)`. Multiplying by the two output-row scales `(2.0, 0.25)` reconstructs weights `(1.0, −0.25)` in the same input column. Each scale is shared across its entire output row, and the 64-entry codebook is shared across the matrix. The **3 bpw** figure describes the packed index payload; it excludes the FP16 codebook and row scales and does not imply INT3 arithmetic.
+
 On the ANE the table holds 128 values (64 entries of 2), within the 256-value limit of [vector LUTs](history/VECTOR_LUT_README.md). The Core AI builder packs each exported LUT with its own index width (four bits for 16 entries, six for 64). Measured on the M6, a 2x64 MLP compiles to exactly three bits per weight: a four-layer chunk's compiled program grows by 133.8 MB against 2x16, one bit for its 1.07 B MLP weights. An earlier micro-benchmark had found six-bit indices padded to eight bits; with FP16 LUT values and the current compiler they are not.
 
 ### Why three bits in every MLP matrix
@@ -336,6 +442,8 @@ PyTorch on M3 Ultra, KL to BF16 with the shared system prompt excluded (developm
 | **Release 0.2** | **9.74** | **0.0536 (0.0565)** | **0.0707** | **0.762** |
 
 Against `u48` release 0.2 is 26.6% better on the development trace and 27.5% held out; against `u15`, 2.8% and 2.7% worse, neither significant, and better on WikiText (-9.8%) and the 16K windows (-6.0%; -5.0% [-8.1, -1.7] against the two seeds of the rotation experiment's `u15` controls).
+
+**Comparison with IQ3 baselines:** both [Unsloth UD-IQ3_XXS](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) and [Draw Things IQ3_XXS](https://huggingface.co/drawthingsai/Qwen3.8-27B-GGUF) use fine-grained block quantization with local scales; see llama.cpp's [IQ3 block definitions](https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-common.h). This block scaling is not supported by the ANE execution path used here. ANEMLL instead uses one learned vector codebook per MLP matrix with per-output-channel scales. Comparisons therefore assess fidelity and storage under different hardware constraints; these GGUF formats are not directly executable ANE alternatives. Apple's [quantization guidance](https://apple.github.io/coremltools/docs-guides/source/opt-quantization-perf.html) distinguishes per-block GPU quantization from per-channel scaling on the ANE; the [vector LUT investigation](history/VECTOR_LUT_README.md) records the tested ANE constraints.
 
 Compiled Core AI packages on the ANE (dual M6 / M5 functions, the same harness as before):
 

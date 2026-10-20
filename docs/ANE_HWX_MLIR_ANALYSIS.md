@@ -155,6 +155,8 @@ PE  y:e4m3[C4 H48 W1024]@dram     = add(a:e4m3[...]@dram, b:float16@l2)         
 NE4 y:float16[C48 H1 W0]@dram     = mac(x:int8[C2048 H1 W0]@dram, kern:e4m3)         # PV: INT8 values x FP8 weights
 ```
 
+This selected path uses INT8 **scores** and INT8 **cached values**, but its QK multiply-add is FP16 × FP16 and its cached-value multiply-add is INT8 × FP8. The default K/V projections separately retain INT8 weight kernels with FP16 activations; `QConv` does not add activation quantization. True INT8 × INT8 projections and history QK, and INT8 × UINT8 history PV, are confirmed in the [separate W8A8 and attention experiments](research/M6_COMPUTE_ACCELERATION_2026-10-03.md#8-bit-attention-part-by-part). Their formats should not be attributed to C2 merely because its switch is named `ATT_INT8MM`. An optional `kv8` export quantizes cached K as well as V; it does not by itself quantize Q.
+
 What to look for in an attention change:
 
 - shares from `roles`: in the FP16 core prefill, softmax elementwise and reductions are about 62% of cycles, QK and
