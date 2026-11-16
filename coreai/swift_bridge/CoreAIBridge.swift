@@ -211,6 +211,22 @@ final class BufferH {
         self.shape = shape
         strides = st
     }
+
+    /// A view of another buffer's IOSurface (no copy): a different shape with explicit element strides inside the
+    /// base's storage (e.g. the first L rows of a longer KV cache). Only the span is checked; whether Core AI accepts
+    /// a view whose last dimension differs from the surface width is left to Core AI.
+    init(view base: BufferH, shape: [Int], strides st: [Int]) throws {
+        guard !shape.isEmpty, shape.allSatisfy({ $0 > 0 }), st.count == shape.count, st.allSatisfy({ $0 > 0 }),
+              st.last == 1 else { throw BridgeError("bad view shape \(shape) / strides \(st)") }
+        let spanElems = zip(shape, st).map { ($0 - 1) * $1 }.reduce(0, +) + 1
+        guard spanElems * dtypeSize(base.type) <= base.surface.allocationSize else {
+            throw BridgeError("view span \(spanElems * dtypeSize(base.type)) B > surface \(base.surface.allocationSize) B")
+        }
+        surface = base.surface
+        type = base.type
+        self.shape = shape
+        strides = st
+    }
 }
 
 final class BindingH {
@@ -385,6 +401,24 @@ public func cai_buffer_create(_ dtype: Int32, _ rank: Int32, _ shape: UnsafePoin
             let sh = (0..<Int(rank)).map { Int(shape[$0]) }
             let st = strides.map { s in (0..<Int(rank)).map { Int(s[$0]) } }
             return retained(try BufferH(type: t.type, shape: sh, strides: st))
+        } catch {
+            fail(err, errcap, error)
+            return nil
+        }
+    }
+}
+
+/// A view of buffer `base` (same IOSurface, no copy) with its own shape and element strides.
+@_cdecl("cai_buffer_view")
+public func cai_buffer_view(_ base: UnsafeMutableRawPointer?, _ rank: Int32, _ shape: UnsafePointer<Int64>?,
+                            _ strides: UnsafePointer<Int64>?, _ err: UnsafeMutablePointer<CChar>?,
+                            _ errcap: Int32) -> UnsafeMutableRawPointer? {
+    return autoreleasepool {
+        do {
+            let b = try object(base, BufferH.self)
+            guard rank > 0, let shape, let strides else { throw BridgeError("view needs rank, shape and strides") }
+            let sh = (0..<Int(rank)).map { Int(shape[$0]) }, st = (0..<Int(rank)).map { Int(strides[$0]) }
+            return retained(try BufferH(view: b, shape: sh, strides: st))
         } catch {
             fail(err, errcap, error)
             return nil

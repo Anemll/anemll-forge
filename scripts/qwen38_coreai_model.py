@@ -36,8 +36,8 @@ from pathlib import Path
 
 import numpy as np
 import coreai_compile_guide as G
-from qwen38_kv_cache import (KV_INPUTS, append_rows, cache_format, cache_formats, cache_entries, keep_rows, key_layout,
-                              prefill_groups, prefill_rows, put_rows)
+from qwen38_kv_cache import (KV_INPUTS, append_rows, append_rows_seg, cache_format, cache_formats, cache_entries,
+                              keep_rows, key_layout, prefill_groups, prefill_rows, put_rows, seg_starts)
 
 # (no sklearn stub: qwen3_lut_common imports KMeans lazily; a stub made transformers think sklearn exists)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -360,6 +360,8 @@ class CoreAIQwen:
         return self.kvlen.get(ctx, ctx)
 
     def _alloc_kv(self, ctx: int, keep: int):
+        if getattr(self, "man", {}).get("kv_seg"):
+            raise ValueError("a segmented-KV build (manifest kv_seg) needs the bridge runtime (CoreAIQwenBridge)")
         old = getattr(self, "kv", None)
         L = self.cap(ctx)
         self.kv = []
@@ -424,7 +426,10 @@ class CoreAIQwen:
         self.hi = keep
         ev = {"from": old, "to": ctx, "pos": self.pos, "ms": 1e3 * (time.time() - t0)}
         self.stats["resize"].append(ev)
-        self.log(f"[ctx] {old} -> {ctx} at pos {self.pos}: {keep} KV rows moved in {ev['ms']:.0f} ms")
+        if getattr(self, "kv_seg", 0):
+            self.log(f"[ctx] {old} -> {ctx} at pos {self.pos}: segments bound, no KV rows copied ({ev['ms']:.0f} ms)")
+        else:
+            self.log(f"[ctx] {old} -> {ctx} at pos {self.pos}: {keep} KV rows moved in {ev['ms']:.0f} ms")
         return ev
 
     def fit(self, need: int) -> bool:
@@ -638,6 +643,9 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.pkvlen = {int(k): v for k, v in man.get("pkv_len", {}).items()}
         self.pctxs = sorted(man.get("pctxs", []))
         self.ctx = ctx or self.ladder[0]
+        self.kv_seg = man.get("kv_seg", 0)  # segmented history: one size or a list of sizes, buffers shared by every entry
+        if self.kv_seg:
+            self.log(f"KV history in segments of {self.kv_seg} rows: a longer context binds more segments, nothing is copied")
         self.c = c = M.cfg()
         self.nkv, self.hd, hid = c["num_key_value_heads"], c["head_dim"], c["hidden_size"]
         nv, dk, dv = (c[k] for k in ("linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim"))
@@ -717,7 +725,54 @@ class CoreAIQwenBridge(CoreAIQwen):
                 self.log(f"load of {file} failed ({str(e)[:80]}); purged {n} cache entries, retrying")
                 gc.collect()
 
+    def _alloc_kv_seg(self, ctx: int):
+        """Segmented history: make sure segments [0, n) exist for every attention layer (new ones from the entry's
+        input specs, fresh scales = KV_UNUSED_SCALE) and drop the ones past n (a shrink frees them); existing segments
+        are kept as they are, so growing copies nothing."""
+        old = getattr(self, "kv", None)
+        old_ctx = self.ctx if old is not None else None
+        starts = seg_starts(self.kv_seg, self.cap(ctx))
+        n = len(starts) - 1
+        entry = f"v8_{ctx // 1024}k"
+        mode = self.kv_cache_dtype
+        kv = old if old is not None else [{} for _ in self.chunks]
+        for i, ch in enumerate(self.chunks):
+            f = ch["fns"][entry]
+            d = kv[i]
+            for name in [k for k in d if int(k.rsplit("_", 1)[1]) >= n]:
+                del d[name]
+            for j in ch["att_j"]:
+                for s in KV_INPUTS[mode]:
+                    for g in range(n):
+                        name = f"{s}{j}_{g}"
+                        if name in d:
+                            continue
+                        b = f.buffer("input", name)
+                        S = starts[g + 1] - starts[g]
+                        expected = ((self.nkv, S) if s in ("ks", "vs") else
+                                    (self.nkv, self.hd, S) if s == "k" and self.keys_t else (self.nkv, S, self.hd))
+                        if b.shape != expected:
+                            raise ValueError(f"KV segment layout mismatch for {name}: {b.shape}; expected {expected}")
+                        if s in ("ks", "vs"):
+                            b.np[:] = float(os.environ.get("KV_UNUSED_SCALE", "1"))
+                        d[name] = (b, b.np)
+        self.kv = kv
+        mb = self.chunks[0]["fns"][entry].buffer("input", "mask")
+        self.mask = (mb, mb.np)
+        self.ctx = ctx
+        self._plans = {}
+        if old_ctx is not None and old_ctx != ctx:
+            self._release_entry(old_ctx)
+
+    def _append(self, i, ow, ch, p0, n):
+        if self.kv_seg:
+            append_rows_seg(self.kv[i], ow, ch["att_j"], p0, n, self.kv_cache_dtype, self.kv_seg, self.keys_t)
+        else:
+            append_rows(self.kv[i], ow, ch["att_j"], p0, n, self.kv_cache_dtype, self.keys_t)
+
     def _alloc_kv(self, ctx: int, keep: int):
+        if self.kv_seg:
+            return self._alloc_kv_seg(ctx)
         old = getattr(self, "kv", None)
         old_ctx = self.ctx if old is not None else None
         L = self.cap(ctx)
@@ -779,7 +834,7 @@ class CoreAIQwenBridge(CoreAIQwen):
                 f = ch["fns"][entry]
                 cur, nxt = ch["stb"][self.par], ch["stb"][1 - self.par]
                 ins = {n: b for n, b in shared.items() if n in f.inputs}
-                ins.update({"x": x, **cur, **{n: v[0] for n, v in self.kv[i].items()}})
+                ins.update({"x": x, **cur, **{n: v[0] for n, v in self.kv[i].items() if n in f.inputs}})
                 outs = {**ch["ob"][entry], **{f"{n}_out": b for n, b in nxt.items()}}
                 bs.append(f.bind(ins, outs))
                 x = ch["ob"][entry]["y"]
@@ -822,8 +877,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         assert 0 <= k <= self._n
         if k:
             for i, ch in enumerate(self.chunks):
-                ow = ch["ow"][self._last]
-                append_rows(self.kv[i], ow, ch["att_j"], self.pos, k, self.kv_cache_dtype, self.keys_t)
+                self._append(i, ch["ow"][self._last], ch, self.pos, k)
         self.pending, self.pos = k, self.pos + k
         self.hi = max(self.hi, self.pos)
 
@@ -854,8 +908,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         hx[0, :, 0, 0] = self.chunks[-1]["ow"][entry]["y"][0, :, 0, n - 1]
         head.run()
         for i, ch in enumerate(self.chunks):
-            ow = ch["ow"][entry]
-            append_rows(self.kv[i], ow, ch["att_j"], p0, n, self.kv_cache_dtype, self.keys_t)
+            self._append(i, ch["ow"][entry], ch, p0, n)
         self._last = entry
         self.pending, self.pos, self._nP = 0, p0 + n, n
         self.hi = max(self.hi, self.pos)

@@ -79,6 +79,34 @@ ATT_SOFTMAX_PREFILL = os.environ.get("ATT_SOFTMAX_PREFILL", ATT_SOFTMAX)  # the 
 # INT8 caches: dequantize each history tile next to its matmul instead of the whole history once per call (no FP16
 # copy of the cache inside the program; the same values, dequantization is elementwise)
 ATT_TILE_DEQUANT = os.environ.get("ATT_TILE_DEQUANT", "0") == "1"
+ATT_FUSE = set(filter(None, os.environ.get("ATT_FUSE", "").split(",")))  # research: kv | lrb (see AttnW)
+# KV_SEG: the KV history of every attention layer as fixed-size segments (rows per segment; 0 = one tensor per input).
+# Inputs k<j>_<i>, v<j>_<i>, ks<j>_<i>, vs<j>_<i> for i < ctx / KV_SEG: every context entry binds the first n of the same
+# segment buffers, so a longer context binds more and nothing is copied or resized (bit-identical to one tensor;
+# tile widths must divide KV_SEG). kv8 / v8 only (the single-softmax FP16 path concatenates the history).
+# KV_SEG is one size ("8192": every segment that size) or a list of sizes ("8192,8192,16384,32768,32768": segment i has
+# that many rows; each context entry must end on a segment boundary). A function binds at most about 51 tensors on the
+# M6 (inputs + outputs: 55 failed at run time with "no procedureInfo entry", 12 Nov 2026), so long contexts need few,
+# large segments.
+KV_SEG_SIZES = [int(x) for x in os.environ.get("KV_SEG", "0").split(",") if x.strip()]
+KV_SEG = KV_SEG_SIZES[0] if KV_SEG_SIZES else 0
+KV_SEG_UNIFORM = len(KV_SEG_SIZES) == 1
+
+
+def kv_seg_sizes(n_rows: int) -> list[int]:
+    """Segment sizes that make up a history of n_rows (KV_SEG builds)."""
+    if KV_SEG_UNIFORM:
+        if n_rows % KV_SEG:
+            raise ValueError(f"KV_SEG={KV_SEG}: {n_rows} rows are not a whole number of segments")
+        return [KV_SEG] * (n_rows // KV_SEG)
+    out, tot = [], 0
+    for sz in KV_SEG_SIZES:
+        if tot >= n_rows:
+            break
+        out.append(sz); tot += sz
+    if tot != n_rows:
+        raise ValueError(f"KV_SEG={KV_SEG_SIZES}: {n_rows} rows do not end on a segment boundary")
+    return out
 # key cache layout: KV_KEYS_T=1 stores keys as (KV head, head dim, token), the (256, token) operand QK reads, so no key
 # tile is transposed inside the program (otherwise a pass per tile before every QK); the new key rows are still
 # returned as (KV head, T, head dim) and the runtime writes them transposed
@@ -520,8 +548,37 @@ class GDNW(nn.Module):
 
 def dequant8(codes, unit, zero, axis=0, minval=None, input_dtype=None):
     """INT8 cache codes to FP16 codes * unit with the native op (host tests substitute a torch version)."""
+    if isinstance(codes, SegKV):  # a segmented history: per segment
+        return codes.map(lambda t: dequant8(t, unit, zero, axis, minval, input_dtype))
     return torch.ops.coreai.dequantize(codes, unit, zero_point=zero, minval=minval, axis=axis, input_dtype=input_dtype,
                                        output_dtype=torch.float16)
+
+
+class SegKV:
+    """A KV history held as fixed-size segments along the token axis (separate inputs / buffers of one shape, so a
+    longer context binds more of the same buffers and nothing is copied or resized). Indexing answers the history tile
+    slices AttnW takes ([:, a:b] or, for dim_token keys, [:, :, a:b]) from the one segment that holds the tile, so the
+    graph computes exactly what the single-tensor history does as long as tiles do not cross segment boundaries."""
+
+    def __init__(self, segs, axis: int):
+        self.segs, self.axis = list(segs), axis
+        self.starts = [0]
+        for t in self.segs:
+            self.starts.append(self.starts[-1] + int(t.shape[axis]))   # segment i holds rows [starts[i], starts[i+1])
+
+    def map(self, fn):
+        return SegKV([fn(t) for t in self.segs], self.axis)
+
+    def __getitem__(self, idx):
+        idx = idx if isinstance(idx, tuple) else (idx,)
+        sl = idx[self.axis] if len(idx) > self.axis else slice(None)
+        a, b = sl.start or 0, sl.stop
+        i = max(k for k in range(len(self.segs)) if self.starts[k] <= a)
+        if b is None or b > self.starts[i + 1] or sl.step not in (None, 1):
+            raise ValueError(f"history slice {a}:{b} crosses a segment boundary {self.starts} (tile widths must divide it)")
+        rel = list(idx) + [slice(None)] * (self.axis + 1 - len(idx))
+        rel[self.axis] = slice(a - self.starts[i], b - self.starts[i])
+        return self.segs[i][tuple(rel)]
 
 
 class AttnW(nn.Module):
@@ -530,6 +587,21 @@ class AttnW(nn.Module):
         p = f"{i}/self_attn."
         self.layer_index = i
         self.q, self.k, self.v, self.o = (QConv(W, p + f"{m}_proj.weight") for m in "qkvo")
+        # ATT_FUSE (research): projections that read the same input as one conv; exact per output channel.
+        #   kv   K and V weights as one (2 * nkv * hd)-output conv (both dense or both palettized-free FP16)
+        #   lrb  the rank-r corrections' first factors (lr_b of q, k, v) as one (3r)-output conv
+        self.fuse_kv = "kv" in ATT_FUSE and all(m.conv is not None and m.scale is None and not hasattr(m, "w8")
+                                                for m in (self.k, self.v))
+        if self.fuse_kv:
+            w = torch.cat([self.k.conv.weight, self.v.conv.weight], 0)
+            self.kv_conv = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
+            self.kv_conv.weight = nn.Parameter(w, requires_grad=False)
+        self.fuse_lrb = "lrb" in ATT_FUSE and all(m.lr_b is not None for m in (self.q, self.k, self.v))
+        if self.fuse_lrb:
+            w = torch.cat([self.q.lr_b.weight, self.k.lr_b.weight, self.v.lr_b.weight], 0)
+            self.lrb_conv = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
+            self.lrb_conv.weight = nn.Parameter(w, requires_grad=False)
+            self.lr_r = [int(m.lr_b.weight.shape[0]) for m in (self.q, self.k, self.v)]
         s_in, s_out = mixer_rotation(W, i)
         self.rmix = Hadamard(hid, s_in) if s_in is not None else None
         self.rout = Hadamard(nh * hd, s_out) if s_out is not None else None
@@ -557,18 +629,44 @@ class AttnW(nn.Module):
                                                           dtype=torch.float16))
             self.register_buffer("pf5_unit", torch.tensor(1 / 32768, dtype=torch.float16))  # pvf5: e5m2 max 57344
 
+    def project(self, x):
+        """q (with gate), k, v projection outputs (1, C, 1, T): QConv each, or with ATT_FUSE the K / V weights as one
+        conv and / or the low-rank first factors of all three as one conv (exact per output channel)."""
+        if not (getattr(self, "fuse_kv", False) or getattr(self, "fuse_lrb", False)):
+            return self.q(x), self.k(x), self.v(x)
+
+        def main(m):
+            y = m.conv(x)
+            return y if m.scale is None else y * m.scale
+        if self.fuse_kv:
+            kv = self.kv_conv(x)
+            nk = self.k.conv.weight.shape[0]
+            outs = [main(self.q), kv[:, :nk], kv[:, nk:]]
+        else:
+            outs = [main(m) if m.conv is not None else m(x) - (m.lr_a(m.lr_b(x)) if m.lr_a is not None else 0)
+                    for m in (self.q, self.k, self.v)]
+        mods = (self.q, self.k, self.v)
+        if self.fuse_lrb:
+            b = self.lrb_conv(x)
+            r0, r1, _ = self.lr_r
+            parts = (b[:, :r0], b[:, r0:r0 + r1], b[:, r0 + r1:])
+            return tuple(o + m.lr_a(pb) for o, m, pb in zip(outs, mods, parts))
+        return tuple(o if m.lr_a is None else o + m.lr_a(m.lr_b(x)) for o, m in zip(outs, mods))
+
     def forward(self, h, cos, sin, mask, k_st, v_st, ctx: int, T: int, vscale=None, cache_v8=None, kscale=None,
                 cache_k8=None):
         cache_v8 = self.cache_v8 if cache_v8 is None else cache_v8
         cache_k8 = self.cache_k8 if cache_k8 is None else cache_k8
+
         def tmajor(x, c):
             return x.reshape(c, T).transpose(0, 1)
         rmix = getattr(self, "rmix", None)
         hq = rmix(h) if rmix is not None else h
-        qg = tmajor(self.q(hq), 2 * nh * hd).reshape(T, nh, 2 * hd)
+        q_o, k_o, v_o = self.project(hq)
+        qg = tmajor(q_o, 2 * nh * hd).reshape(T, nh, 2 * hd)
         qh, gate = rms_last(qg[:, :, :hd], self.qn), qg[:, :, hd:].reshape(T, nh * hd)
-        kh = rms_last(tmajor(self.k(hq), nkv * hd).reshape(T, nkv, hd), self.kn)
-        vh = tmajor(self.v(hq), nkv * hd).reshape(T, nkv, hd)
+        kh = rms_last(tmajor(k_o, nkv * hd).reshape(T, nkv, hd), self.kn)
+        vh = tmajor(v_o, nkv * hd).reshape(T, nkv, hd)
         c3, s3 = cos.reshape(T, 1, rot), sin.reshape(T, 1, rot)
 
         def rope(t):
@@ -811,9 +909,17 @@ def kv_len(ctx: int, T: int) -> int:
     buffers; T is only checked). Longer entries always take the tiled history path, which never forms that tensor: 80K
     and 100K attention cores compile fully onto the ANE (scripts/m6_long_ctx_attn.py), so they hold their whole context."""
     assert T == P or T in prefill_rows(ctx), T
+    if KV_SEG:  # segmented history (tiled path only, no [history | block] tensor): the whole context, in segments
+        kv_seg_sizes(ctx)
+        return ctx
     if ctx > ANE_MAX_DIM:
         return ctx
     return min(ctx, ANE_MAX_DIM - max([P] + prefill_rows(ctx)))
+
+
+def kv_segments(ctx: int) -> int:
+    """KV segments per history tensor of a context entry (KV_SEG builds; 0 = one tensor per history input)."""
+    return len(kv_seg_sizes(ctx)) if KV_SEG else 0
 
 
 class Entry(nn.Module):
@@ -828,6 +934,13 @@ class Entry(nn.Module):
             raise ValueError("Entry KV format must be fp16, v8 or kv8")
         self.kv_mode, self.cache_v8, self.cache_k8 = mode, mode in ("v8", "kv8"), mode == "kv8"
         self.ctx = kv_len(ctx, T)
+        self.nseg = kv_segments(self.ctx)
+        if self.nseg:
+            if mode == "fp16":
+                raise ValueError("KV_SEG needs a v8 / kv8 cache (the FP16 single-softmax path concatenates the history)")
+            blks = {ATT_BLOCK, ATT_BLOCK_PREFILL, ATT_BLOCK_LONG, ATT_BLOCK_PREFILL_LONG}
+            if any(sz % b for sz in KV_SEG_SIZES for b in blks):
+                raise ValueError(f"KV_SEG={KV_SEG_SIZES}: every segment must be a multiple of every tile width {sorted(blks)}")
         self.gdn_j = [j for j, l in enumerate(layers) if l.kind == "linear_attention"]
         self.att_j = [j for j, l in enumerate(layers) if l.kind != "linear_attention"]
         last = layers[-1].i
@@ -837,7 +950,10 @@ class Entry(nn.Module):
         return (["x", "cos", "sin", "mask", "conv_sel", "commit", "commit_last"]
                 + (["conv_sel_out", "valid"] if self.prefill else [])
                 + [f"{s}{j}" for j in self.gdn_j for s in ("conv", "rec", "pend")]
-                + [f"{s}{j}" for j in self.att_j for s in KV_INPUTS[self.kv_mode]])
+                + [n for j in self.att_j for s in KV_INPUTS[self.kv_mode] for n in self.kv_names(s, j)])
+
+    def kv_names(self, s, j):
+        return [f"{s}{j}_{i}" for i in range(self.nseg)] if self.nseg else [f"{s}{j}"]
 
     def output_names(self):
         return (["y"] + [f"tap{l}" for l in self.taps]
@@ -859,7 +975,11 @@ class Entry(nn.Module):
         if self.prefill:
             conv_sel_out, valid = next(it), next(it)
         gdn_in = {j: (next(it), next(it), next(it)) for j in self.gdn_j}
-        att_in = {j: {s: next(it) for s in KV_INPUTS[self.kv_mode]} for j in self.att_j}
+        if self.nseg:  # segment inputs -> one SegKV per history tensor (keys along axis 2 when stored dim_token)
+            att_in = {j: {s: SegKV([next(it) for _ in range(self.nseg)], 2 if s == "k" and KV_KEYS_T else 1)
+                          for s in KV_INPUTS[self.kv_mode]} for j in self.att_j}
+        else:
+            att_in = {j: {s: next(it) for s in KV_INPUTS[self.kv_mode]} for j in self.att_j}
         taps, gdn_out, att_out = [], [], []
         for j, layer in enumerate(self.layers):
             h = rms_hidden(x, layer.ln1)
@@ -891,11 +1011,13 @@ class Entry(nn.Module):
         for _ in self.gdn_j:
             ex += [torch.zeros(P + 3, cdim, dtype=f), torch.zeros(nv, dk, dv, dtype=f), torch.zeros(nv, 3 * P + 1, dv, dtype=f)]
         int8 = {"k": self.cache_k8, "v": self.cache_v8}
+        sizes = kv_seg_sizes(self.ctx) if self.nseg else [self.ctx]
         for _ in self.att_j:
             for s in KV_INPUTS[self.kv_mode]:
-                shape = (nkv, hd, self.ctx) if s == "k" and KV_KEYS_T else (nkv, self.ctx, hd)
-                ex.append(torch.ones(nkv, self.ctx, dtype=f) / 128 if s in ("ks", "vs") else
-                          torch.zeros(*shape, dtype=torch.int8 if int8[s] else f))
+                for L in sizes:
+                    shape = (nkv, hd, L) if s == "k" and KV_KEYS_T else (nkv, L, hd)
+                    ex.append(torch.ones(nkv, L, dtype=f) / 128 if s in ("ks", "vs") else
+                              torch.zeros(*shape, dtype=torch.int8 if int8[s] else f))
         return tuple(ex)
 
 
@@ -967,11 +1089,14 @@ def save_program(entries: list[tuple[str, nn.Module, list, list]], out: Path, lu
     from coreai_opt.coreai_utils.common import CompressionGranularity
     from coreai_opt.coreai_utils.passes.weight_palettization import palettize_weights
     conv = coreai_torch.TorchConverter(mode=coreai_torch.TorchConverter.Mode.RELEASE)
-    for name, mod, ins, outs in entries:
+    for e in entries:  # (name, module, inputs, outputs[, state names]): buffers the graph writes become Core AI states
+        name, mod, ins, outs = e[:4]
+        states = list(e[4]) if len(e) > 4 and e[4] else None
         ep = torch.export.export(mod, mod.example() if hasattr(mod, "example") else (torch.zeros(1, hid, 1, mod.T, dtype=torch.float16),),
                                  strict=False).run_decompositions(coreai_torch.get_decomp_table())
         cast_to_16_bit_precision(ep)
-        conv.add_exported_program(ep, input_names=ins, output_names=outs, entrypoint_name=name)
+        conv.add_exported_program(ep, input_names=ins, output_names=outs, entrypoint_name=name,
+                                  **({"state_names": states} if states else {}))
     prog = conv.to_coreai()
     patch_palettizer()
     # palettize before optimize(): optimize folds the per-channel-scale mul into the weight (no longer a per-tensor LUT)
@@ -1088,6 +1213,7 @@ def build_chunk(ck, layers: list[int], ctxs: list[int], pctxs: list[int], name: 
                          **({"QCONV_INT8": QCONV_INT8} if not QCONV_INT8 else {}),
                          **({"ATT_TILE_DEQUANT": True} if ATT_TILE_DEQUANT else {}),
                          **({"KV_KEYS_T": True} if KV_KEYS_T else {}),
+                         **({"KV_SEG": KV_SEG_SIZES} if KV_SEG else {}),
                          **rot_numerics(layers)}}
     if len(modes) > 1:
         info["entries_by_kv"] = aliases
@@ -1160,6 +1286,8 @@ def main():
         man.update({"version": "coreai1", "T": 8, "TP": tp, "ptp": ptp, "pend": P, "taps": TAPS, "ctxs": ctxs,
                     "pctxs": pctxs, "kv_len": {str(c): kv_len(c, 8) for c in ctxs},
                     "pkv_len": {str(c): kv_len(c, ptp[str(c)]) for c in pctxs}, "export": str(M.EXPORT_DIR)})
+        if KV_SEG:
+            man["kv_seg"] = KV_SEG if KV_SEG_UNIFORM else KV_SEG_SIZES  # history inputs k<j>_<i> ... of KV_SEG rows (runtime: segment buffers, no resize copy)
         if basis is not None:  # rot1: the build carries its basis (the runtime checks the embedding table and
             # gives the drafter R for fix B); R.npy and basis.json are copied next to the manifest
             man["rot1_basis"] = {k: basis[k] for k in ("basis_id", "name", "r_kind", "r_seed", "fold_norms")}

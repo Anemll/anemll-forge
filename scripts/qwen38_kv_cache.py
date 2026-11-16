@@ -151,3 +151,50 @@ def append_rows(kv, outputs, attention_indices, position, count, mode, keys_t=Fa
             kv[f"vs{j}"][1][:, position:end] = scales
         else:
             kv[f"v{j}"][1][:, position:end] = values
+
+def seg_starts(seg, n_rows):
+    """Segment start rows for a history of n_rows: seg is the manifest's kv_seg (one size, or a list of sizes)."""
+    sizes = [seg] * (-(-n_rows // seg)) if isinstance(seg, int) else list(seg)
+    starts = [0]
+    for sz in sizes:
+        if starts[-1] >= n_rows:
+            break
+        starts.append(starts[-1] + sz)
+    return starts
+
+
+def seg_locate(seg, position):
+    """(segment index, row in it, rows left in it) of a history position."""
+    if isinstance(seg, int):
+        i, r = divmod(position, seg)
+        return i, r, seg - r
+    start = 0
+    for i, sz in enumerate(seg):
+        if position < start + sz:
+            return i, position - start, start + sz - position
+        start += sz
+    raise ValueError(f"position {position} is past the last segment of {seg}")
+
+
+def append_rows_seg(kv, outputs, attention_indices, position, count, mode, seg, keys_t=False):
+    """append_rows for a segmented history (build manifest kv_seg: one size or a list of sizes): buffers k<j>_<i>,
+    v<j>_<i>, ks<j>_<i>, vs<j>_<i>; seg_locate maps a position to its segment and row. The rows are quantized exactly as
+    append_rows does (per token and head, so splitting them at a segment boundary changes nothing)."""
+    if not count:
+        return
+    for j in attention_indices:
+        keys = outputs[f"k{j}_new"][:, :count]
+        values = outputs[f"v{j}_new"][:, :count]
+        kc, ksc = quantize_values(keys) if mode == "kv8" else (keys, None)
+        vc, vsc = quantize_values(values) if mode in INT8_LAYOUTS else (values, None)
+        off = 0
+        while off < count:
+            i, r, left = seg_locate(seg, position + off)
+            m = min(count - off, left)
+            put_rows(kv[f"k{j}_{i}"][1], kc[:, off:off + m], r, m, keys_t)
+            if ksc is not None:
+                kv[f"ks{j}_{i}"][1][:, r:r + m] = ksc[:, off:off + m]
+            kv[f"v{j}_{i}"][1][:, r:r + m] = vc[:, off:off + m]
+            if vsc is not None:
+                kv[f"vs{j}_{i}"][1][:, r:r + m] = vsc[:, off:off + m]
+            off += m
