@@ -63,15 +63,19 @@ class FeedTests(unittest.TestCase):
         def resize(c):
             m.ctx = c
 
-        def prefill_block(ids):
+        m.heads = []                                     # logits requested per call, in order
+
+        def prefill_block(ids, logits=True):
             assert m.fit(m.pos + len(ids)) and len(ids) <= m.tp(), (len(ids), m.ctx)
             m.calls.append(("prefill", len(ids), m.ctx))
+            m.heads.append(logits)
             m.pos += len(ids)
-            return None
+            return "logits" if logits else None
 
-        def call(ids):
+        def call(ids, logits=True):
             m.calls.append(("verify", len(ids), m.ctx))
-            return [None] * len(ids)
+            m.heads.append(logits)
+            return ["logits"] * len(ids) if logits else None
 
         def accept(k):
             m.pos += k
@@ -91,6 +95,17 @@ class FeedTests(unittest.TestCase):
         m = self.model(196608, 150000)
         m.feed(list(range(70)))
         self.assertEqual(m.calls, [("prefill", 32, 196608)] * 2 + [("verify", 6, 196608)])
+
+    def test_only_the_last_block_runs_the_head(self):
+        m = self.model(8192, 0)
+        self.assertEqual(m.feed(list(range(130))), "logits")       # 64 + 64 + 2: the head for the last block only
+        self.assertEqual(m.heads, [False, False, True])
+        m = self.model(8192, 0)
+        self.assertEqual(m.feed(list(range(128))), "logits")       # ends on a prefill block
+        self.assertEqual(m.heads, [False, True])
+        m = self.model(8192, 0)
+        self.assertIsNone(m.feed(list(range(130)), logits=False))  # a non-final slice of a prompt: no head at all
+        self.assertEqual(m.heads, [False, False, False])
 
     def test_has_prefill_follows_the_entry(self):
         m = self.model(65536, 0)

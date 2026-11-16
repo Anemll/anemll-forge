@@ -26,12 +26,17 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ngram_draft import NgramDrafter, TokenHistory  # noqa: E402
+from ane_compile_mode import detect_soc  # noqa: E402
+
 MODEL_ID = "qwen38-27b-ane"
-# The drafter's ANE call stalls (300-700 ms, a few per 100 cycles, the next verify too) when it is submitted
-# within ~2 ms of the target verify's return: greedy leaves ~1.5 ms of host work there, sampling ~6 ms. A 3 ms
-# minimum gap removes the stalls (M6, Core AI target + drafter, 16K greedy, 4 runs each: 10 drafter + 4 verify
-# stalls vs none; historical drafter_gap_test.py harness, not distributed).
-DRAFT_GAP = float(os.environ.get("DRAFT_GAP_MS", "3")) / 1e3
+# Earlier M6 greedy runs observed 300-700 ms dispatch stalls with gaps under 3 ms.
+# Paired Qwen3.8-27B release-0.2 runs on the current server showed that 1 ms keeps
+# those stalls away while improving decode 2-3%; 0 ms did not improve request time.
+# Keep the established 3 ms default on other chips until measured there.
+_default_draft_gap_ms = "1" if detect_soc().klass == "m6" else "3"
+DRAFT_GAP = float(os.environ.get("DRAFT_GAP_MS", _default_draft_gap_ms)) / 1e3
 # Thinking budget: a reasoning that reaches its budget without "</think>" is closed with Qwen's budget phrase and the
 # answer follows (the quantized model can deliberate past pi's 16K maxTokens: 2026-09-28, 16384 tokens of thinking,
 # no answer). ANSWER_RESERVE tokens of max_tokens stay for the answer.
@@ -97,6 +102,11 @@ def parse(argv=None):
     modes.add_argument("--draft", help="Core AI DFlash2 package (default: bundle/drafter/dflash2_lut4_gptq.aimodel)")
     modes.add_argument("--plain", action="store_true", help="diagnostic target-only generation")
     p.add_argument("--drafter", help="drafter config/selector directory (default: drafter package parent)")
+    p.add_argument("--ngram-draft", type=int, default=int(os.environ.get("NGRAM_DRAFT", "0")),
+                   help="prompt-lookup drafts (ngram_draft.py): when the last N or more tokens occurred earlier in the "
+                        "context, the 7 tokens that followed are verified instead of a DFlash2 draft, skipping the "
+                        "drafter call; N adapts per request. 0 = off (env NGRAM_DRAFT; default 0: greedy "
+                        "output with lookup drafts differed in 5 of 12 fork benchmark responses, not explained)")
     args = p.parse_args(argv)
     if args.plain and args.drafter:
         p.error("--drafter cannot be combined with --plain")
@@ -181,6 +191,75 @@ def loop_period(out, reps, span=1536, min_period=4, max_period=1024):
         if np.array_equal(t[P:], t[:-P]):
             return P
     return 0
+
+
+_TORCH = None
+
+
+def _torch():
+    """torch with one CPU thread (a multithreaded pool spinning on the cores delays the bridge's ANE dispatch: see
+    dflash2_coreai_drafter.py), or None when it is not installed."""
+    global _TORCH
+    if _TORCH is None:
+        try:
+            import torch
+            torch.set_num_threads(1)
+            _TORCH = torch
+        except ImportError:  # pragma: no cover
+            _TORCH = False
+    return _TORCH or None
+
+
+def top_indices(row, k):
+    """Indices of the k largest entries of a logits row (any order). torch.topk on the row as stored (FP16 from the
+    head) takes 0.23 ms for 248,320 entries, against 0.9 ms for widening to FP32 and np.argpartition (M5 Max); the
+    selected set is the same up to ties at the k-th value."""
+    t = _torch() if k <= 1024 else None
+    if t is not None:
+        return t.topk(t.from_numpy(np.ascontiguousarray(row)), k).indices.numpy()
+    return np.argpartition(-np.asarray(row, np.float32), k)[:k]
+
+
+def argmax(row):
+    """np.argmax of a logits row; an FP16 row is widened first (exact, 3x faster than NumPy's FP16 argmax)."""
+    row = np.asarray(row)
+    return int(np.argmax(row.astype(np.float32) if row.dtype == np.float16 else row))
+
+
+class IncrementalDetokenizer:
+    """Streamed text of a growing token list without decoding the whole output per token (O(n^2) over a reply: 1.3 ms
+    per token at 16K output tokens, M5 Max). Each step decodes only the tokens since the last complete text (the
+    prefix/read offsets of TGI's and vLLM's incremental detokenizers) and holds text back while it ends in an incomplete
+    UTF-8 sequence (U+FFFD), so a multi-byte character split over tokens is streamed whole instead of as U+FFFD. For a
+    byte-level BPE tokenizer the concatenated deltas equal tok.decode(all tokens) (final() adds anything held back)."""
+
+    def __init__(self, tok):
+        self.tok, self.ids, self.prefix, self.read, self.text = tok, [], 0, 0, ""
+
+    def _decode(self, ids):
+        return self.tok.decode(ids, skip_special_tokens=False)
+
+    def add(self, token):
+        """Append one token -> the new complete text ('' while a character is incomplete)."""
+        self.ids.append(int(token))
+        prev = self._decode(self.ids[self.prefix:self.read]) if self.read > self.prefix else ""
+        new = self._decode(self.ids[self.prefix:])
+        if len(new) > len(prev) and not new.endswith("�"):
+            self.prefix, self.read = self.read, len(self.ids)
+            delta = new[len(prev):]
+            self.text += delta
+            return delta
+        return ""
+
+    def final(self):
+        """Text held back at the end (an incomplete character decodes as U+FFFD, as in a full decode)."""
+        if self.read == len(self.ids):
+            return ""
+        prev = self._decode(self.ids[self.prefix:self.read]) if self.read > self.prefix else ""
+        delta = self._decode(self.ids[self.prefix:])[len(prev):]
+        self.prefix = self.read = len(self.ids)
+        self.text += delta
+        return delta
 
 
 class DraftIngestWindows:
@@ -307,6 +386,12 @@ class Engine:
             self.drafter = guide.load(f"drafter {Path(dpath).name}", make) if guide else make()
             log(f"drafter: Core AI {dpath.name}" + (" (body only, drafting with the target's head)"
                                                      if getattr(self.drafter, "shared", False) else ""))
+        # prompt-lookup drafts next to DFlash2 (ngram_draft.py); self.tokens mirrors self.fed as an array per request
+        self.ngram = NgramDrafter(a.ngram_draft) if self.drafter is not None and a.ngram_draft > 0 else None
+        self.tokens = None
+        if self.ngram is not None:
+            log(f"prompt-lookup drafts: on (suffix match of {a.ngram_draft}+ tokens, adaptive; --ngram-draft 0 or "
+                f"NGRAM_DRAFT=0 turns them off)")
         self.tok = AutoTokenizer.from_pretrained(str(hf))
         self.a = a
         # usable positions: a Core AI 64K entry holds 65472 KV rows (the ANE caps [history | block] at 65536)
@@ -398,17 +483,28 @@ class Engine:
             self.model.half = snap.get("half", 0)
         self.fed = list(snap["ids"])
 
-    def _feed(self, ids, ingest=None):
+    def _feed(self, ids, ingest=None, logits=True):
         """Tokens into the model; logits after the last one (v2+: batched prefill; with the drafter, the tap
-        features go into the drafter's context: every token, or only the rows `ingest` keeps)."""
+        features go into the drafter's context: every token, or only the rows `ingest` keeps). logits=False: the
+        caller discards them, so a Core AI target skips the output head (one head call per prefill block, about 6 ms
+        on M6) and returns None."""
+        kw = {"logits": False} if not logits and self._feed_logits_kw() else {}
         if self.drafter is not None:
-            return self.model.feed(ids, on_features=ingest or self.drafter.add_context)
+            return self.model.feed(ids, on_features=ingest or self.drafter.add_context, **kw)
         if self.v2:
-            return self.model.feed(ids)
+            return self.model.feed(ids, **kw)
         logits = None
         for t in ids:
             logits = self.model.step(t)
         return logits
+
+    def _feed_logits_kw(self):
+        """Whether the model's feed() takes logits= (the Core AI runtimes)."""
+        if not hasattr(self, "_feed_kw"):
+            import inspect
+            feed = getattr(self.model, "feed", None)
+            self._feed_kw = feed is not None and "logits" in inspect.signature(feed).parameters
+        return self._feed_kw
 
     def prefill(self, ids):
         """Bring the model state to `ids`; returns (logits after the last token, tokens reused).
@@ -453,7 +549,7 @@ class Engine:
         for cut, key in sorted(cuts) + [(len(ids), None)]:
             while cut > i:  # feed up to the snapshot point in slices (same calls: slices are whole blocks), then snapshot
                 j = min(cut, i + progress.slice) if progress.slice else cut
-                logits = self._feed(ids[i:j], ingest)
+                logits = self._feed(ids[i:j], ingest, logits=j == len(ids))  # only the prompt's last logits are used
                 self.fed.extend(ids[i:j])
                 i = j
                 progress.update(i)
@@ -474,10 +570,9 @@ class Engine:
         None for greedy. Plain and speculative decoding sample from exactly this."""
         if temp <= 0:
             return None
-        logits = logits.astype(np.float32)
         k = min(top_k or len(logits), len(logits) - 1)
-        idx = np.argpartition(-logits, k)[:k]
-        z = logits[idx].astype(np.float64)
+        idx = top_indices(logits, k)
+        z = np.asarray(logits[idx], np.float64)
         if presence and seen is not None:
             z = z - presence * seen[idx]
         if dry and dry[0] > 0 and hist is not None and len(hist) > dry[2]:
@@ -500,7 +595,7 @@ class Engine:
     def sample(self, logits, temp, top_p, top_k, rng, seen=None, presence=0.0, hist=None, dry=None):
         d = self.dist(logits, temp, top_p, top_k, seen, presence, hist, dry)
         if d is None:
-            return int(np.argmax(logits))
+            return argmax(logits)
         return int(d[0][rng.choice(len(d[0]), p=d[1])])
 
     def accept_rate(self):
@@ -528,9 +623,23 @@ class Engine:
         m, d = self.model, self.drafter
         p = m.pos
         t0 = time.perf_counter()
-        if t0 < self.verify_end + DRAFT_GAP:           # see DRAFT_GAP; counted in the draft phase
-            time.sleep(self.verify_end + DRAFT_GAP - t0)
-        drafts = [int(t) for t in d.propose(anchor, p)[0]]
+        lazy = hasattr(d, "flush")   # queued drafter context is written only after the gap (propose / flush)
+        # a prompt-lookup draft (the context's suffix occurred earlier) skips the drafter call; else DFlash2
+        drafts = None
+        if self.ngram is not None and self.tokens is not None and lazy:
+            drafts = self.ngram.propose(self.tokens, anchor)
+        source = "dflash" if drafts is None else "lookup"
+
+        def gap():
+            now = time.perf_counter()
+            if now < self.verify_end + DRAFT_GAP:      # see DRAFT_GAP; counted in the draft phase
+                time.sleep(self.verify_end + DRAFT_GAP - now)
+        if drafts is None:
+            gap()
+            drafts = [int(t) for t in d.propose(anchor, p)[0]]
+        elif len(d.pending) >= d.R + d.RP:              # lookup cycles in a row: write full RP-row context blocks
+            gap()
+            d.flush()
         t1 = time.perf_counter()
         lg = m.call([anchor] + drafts)
         t2 = self.verify_end = time.perf_counter()
@@ -540,13 +649,14 @@ class Engine:
             h = None if hist is None else hist + drafts[:k]           # row k's context: output + accepted drafts
             dk, dist = drafts[k], self.dist(lg[k], temp, top_p, top_k, seen, presence, h, dry)
             if dist is None:
-                ok = int(np.argmax(lg[k])) == dk
+                top = argmax(lg[k])
+                ok = top == dk
             else:
                 hit = np.where(dist[0] == dk)[0]
                 ok = bool(len(hit)) and rng.random() < float(dist[1][hit[0]])
             if not ok:
                 if dist is None:
-                    nxt = int(np.argmax(lg[k]))
+                    nxt = top
                 else:
                     ids_, pr = dist
                     if len(hit):
@@ -563,14 +673,26 @@ class Engine:
         if nxt is None:
             nxt = self.sample(lg[7], *samp[:3], rng, seen, samp[3], None if hist is None else hist + drafts, dry)
         t3 = time.perf_counter()
-        d.add_context(m.features(k + 1), np.arange(p, p + k + 1))
+        if lazy:
+            d.add_context(m.features(k + 1), np.arange(p, p + k + 1), flush=False)
+        else:
+            d.add_context(m.features(k + 1), np.arange(p, p + k + 1))
         m.accept(k + 1)
         t4 = time.perf_counter()
         for key, dt in (("draft", t1 - t0), ("verify", t2 - t1), ("sample", t3 - t2), ("ctx", t4 - t3)):
             self.tm[key] += dt
         self.cycles += 1
         self.acc_hist[k] += 1
+        if source == "lookup":
+            self.ngram.update(k)
         return drafts[:k] + [nxt], [anchor] + drafts[:k]
+
+    def lookup_summary(self):
+        """Prompt-lookup cycles of this request, e.g. 'lookup 42/180 cycles, 5.9 tok/verify' ('' when off/unused)."""
+        g = self.ngram
+        if g is None or not g.cycles:
+            return ""
+        return f"lookup {g.cycles}/{self.cycles} cycles, {(g.accepted + g.cycles) / g.cycles:.2f} tok/verify"
 
     def think_budget(self, thinking, effort, max_tokens):
         """Reasoning tokens allowed before the server closes the thinking (0: no limit)."""
@@ -600,6 +722,13 @@ class Engine:
         self.tm = dict.fromkeys(("draft", "verify", "sample", "ctx", "host"), 0.0)
         t_host = time.perf_counter()
         next_check, next_log = 64, time.time() + 10
+        detok = IncrementalDetokenizer(self.tok)
+        stop = [s_ for s_ in (stop or []) if s_]
+        stop_w = max((len(s_) for s_ in stop), default=1) - 1  # a new stop string ends in the new text
+        stopped = False                                          # by a stop string (text truncated) or the client
+        if self.ngram is not None:
+            self.ngram.reset()
+            self.tokens = TokenHistory(self.fed)                 # the model's tokens (prompt) for prompt lookups
         anchor = self.sample(logits, temp, top_p, top_k, rng, seen, presence, out, dry)
         new, done = [anchor], False
         while not done:
@@ -609,14 +738,14 @@ class Engine:
                     break
                 out.append(nxt)
                 seen[nxt] = 1.0
-                full = self.tok.decode(out, skip_special_tokens=False)
-                delta, text = full[len(text):], full
-                if stop and any(s_ in text for s_ in stop):
+                delta = detok.add(nxt)
+                text += delta
+                if stop and delta and any(s_ in text[-(len(delta) + stop_w):] for s_ in stop):
                     text = text[:min(text.index(s_) for s_ in stop if s_ in text)]
-                    finish, done = "stop", True
+                    finish, done, stopped = "stop", True, True
                     break
-                if on_text(delta) is False:
-                    finish, done = "stop", True
+                if delta and on_text(delta) is False:
+                    finish, done, stopped = "stop", True, True
                     break
                 if len(out) >= max_tokens:
                     done = True
@@ -624,9 +753,10 @@ class Engine:
             if time.time() >= next_log:  # live decode progress
                 next_log = time.time() + 10
                 el = time.time() - t_gen
+                look = self.lookup_summary()
                 log(f"decode: {len(out)} tok, {el:.0f}s, {len(out) / max(el, 1e-9):.1f} tok/s"
                     + (f", {len(out) / max(1, self.cycles):.2f} tok/verify, accept {self.accept_rate():.0f}%, {self.cycle_ms()}"
-                       if self.drafter is not None else ""))
+                       if self.drafter is not None else "") + (f", {look}" if look else ""))
             el = time.perf_counter() - decode_started  # live stats for /health (visible while the turn runs)
             self.decode_live = {"active": True, "tokens": len(out), "seconds": el,
                                 "tokens_per_second": len(out) / max(el, 1e-9)}
@@ -644,13 +774,15 @@ class Engine:
                 seq = [new[-1]] + self.think_stop
                 logits = self._feed(seq)
                 self.fed.extend(seq)
+                if self.tokens is not None:
+                    self.tokens.extend(seq)
                 out.extend(self.think_stop)
                 seen[self.think_stop] = 1.0
-                full = self.tok.decode(out, skip_special_tokens=False)
-                delta, text = full[len(text):], full
+                delta = "".join(detok.add(t) for t in self.think_stop)
+                text += delta
                 log(f"[think] reasoning budget {think_budget} reached at {self.think_forced} tokens: thinking closed")
                 if on_text(delta) is False:
-                    finish = "stop"
+                    finish, stopped = "stop", True
                     break
                 new = [self.sample(logits, temp, top_p, top_k, rng, seen, presence, out, dry)]
                 continue
@@ -660,10 +792,18 @@ class Engine:
                 new, committed = self.draft_cycle(anchor, samp, rng, seen, out, dry)
                 t_host = time.perf_counter()
                 self.fed.extend(committed)
+                if self.tokens is not None:
+                    self.tokens.extend(committed)
             else:
                 logits = self.model.step(anchor)
                 self.fed.append(anchor)
                 new = [self.sample(logits, temp, top_p, top_k, rng, seen, presence, out, dry)]
+        if not stopped:  # an incomplete character held back at the end: as a full decode shows it (U+FFFD)
+            rest = detok.final()
+            if rest:
+                text += rest
+                on_text(rest)
+        self.tokens = None
         decode_seconds = time.perf_counter() - decode_started
         last_logits = getattr(self.model, "logits", None)
         if not isinstance(last_logits, np.ndarray):
@@ -674,6 +814,8 @@ class Engine:
                              "tokens_per_call": len(out) / self.cycles if self.cycles else None,
                              "draft_accept_percent": self.accept_rate() if self.drafter is not None else None,
                              "draft_accept_histogram": list(self.acc_hist),
+                             "lookup_cycles": self.ngram.cycles if self.ngram is not None else None,
+                             "lookup_accepted": self.ngram.accepted if self.ngram is not None else None,
                              "phase_seconds": dict(self.tm), "finish_reason": finish,
                              "last_logits_finite": bool(np.isfinite(last_logits).all())}
         self.think_n = out.index(self.think_close) if self.think_close in out else None  # reasoning tokens
@@ -1013,6 +1155,7 @@ def make_handler(engine):
                       f"{len(ids) - reused} in {t_pre:.1f}s) | gen {n} in {dt:.1f}s ({n / max(dt, 1e-9):.1f} tok/s"
                       + (f", {n / max(1, engine.cycles):.2f} tok/verify, accept {engine.accept_rate():.0f}% "
                          f"(accepted/7 per cycle: {engine.accept_hist()}), {engine.cycle_ms()}" if engine.drafter is not None else "")
+                      + (f", {engine.lookup_summary()}" if engine.drafter is not None and engine.lookup_summary() else "")
                       + ") | "
                       + (f"LOOP period {engine.loop} stopped | " if engine.loop else "")
                       + (f"THINK closed at {engine.think_forced} (budget) | " if engine.think_forced else "")
@@ -1042,7 +1185,8 @@ def startup_banner(a):
         f"started {time.strftime('%Y-%m-%d %H:%M:%S')}  pid {os.getpid()}  listen {a.host}:{a.port}",
         f"model dir     {mdir}  (max ctx {a.ctx}; {build})",
         f"checkpoint    {os.path.expanduser(a.hf)}",
-        f"speculative   {'ON  drafter ' + os.path.expanduser(a.draft) if a.draft else 'OFF (no drafter)'}",
+        f"speculative   {'ON  drafter ' + os.path.expanduser(a.draft) if a.draft else 'OFF (no drafter)'}"
+        + (f"; prompt-lookup drafts {a.ngram_draft}+ token matches" if a.draft and a.ngram_draft > 0 else ""),
         f"thinking      default {'on' if a.think else 'off'} (clients override via chat_template_kwargs.enable_thinking)"
         + ("; context-summary requests (Pi's compaction): as requested (--summary-think)" if a.summary_think
            else "; context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)"),

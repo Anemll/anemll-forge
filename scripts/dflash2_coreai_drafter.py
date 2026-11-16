@@ -100,11 +100,20 @@ class CoreAIDrafter:
                 v[:, s] = outs[f"v_new{i}"].np[:, j]
             self.slot_pos[s] = p
 
-    def add_context(self, feats, positions):
-        """Queue committed target features; flushed in RP-row calls, the last <= R go with the next draft call."""
+    def add_context(self, feats, positions, flush=True):
+        """Queue committed target features; flushed in RP-row calls, the last <= R go with the next draft call.
+        flush=False only queues them: the next propose (or flush()) writes them. The server's decode cycle queues this
+        way, so no drafter call is submitted right after a target verify (see DRAFT_GAP in qwen38_server.py) and the
+        rows of several lookup cycles (no draft call) are written in full RP-row calls."""
         self.pending += list(zip(np.asarray(feats, f16), [int(p) for p in positions]))
-        while len(self.pending) > self.R:
-            n = min(self.RP, len(self.pending) - self.R)
+        if flush:
+            self.flush()
+
+    def flush(self, keep=None):
+        """Write queued rows in RP-row context calls until at most `keep` (default R) remain for the next draft call."""
+        keep = self.R if keep is None else keep
+        while len(self.pending) > keep:
+            n = min(self.RP, len(self.pending) - keep)
             rows, self.pending = self.pending[:n], self.pending[n:]
             self._fill(self.cin, rows, self.RP)
             self.ctx_plan.run()
@@ -112,6 +121,7 @@ class CoreAIDrafter:
 
     def propose(self, anchor, p0, top_k=16):
         T, W, R = self.T, self.W, self.R
+        self.flush()                     # rows queued with add_context(flush=False) beyond the R this call takes
         rows, self.pending = self.pending, []
         assert len(rows) <= R, len(rows)
         self._fill(self.din, rows, R)
@@ -140,15 +150,43 @@ class CoreAIDrafter:
             hx[0, :, 0, :T - 1] = x.T
             self.head_plan.run()
             r = np.sqrt((x.astype(np.float32) ** 2).mean(1) + 1e-6)
-            logits = torch.from_numpy(self.hlog.np[:T - 1].astype(np.float32) * r[:, None])   # (7, V)
+            raw = np.array(self.hlog.np[:T - 1])                                                # (7, V) fp16
         elif not self.has_head:
             return [], dict(hp=hp, hidden=hidden)
         else:
-            logits = torch.from_numpy(self.dout["logits"].np.astype(np.float32))              # (7, V)
-        unary, cand = torch.topk(logits, top_k, dim=-1)
+            r = None
+            raw = np.array(self.dout["logits"].np)                                              # (7, V) fp16
+        # Top-k of the FP16 rows, then the row factor r (> 0) on the k values only: the same candidates and unary
+        # scores as the top-k of FP32(raw) * r (an exact FP16 -> FP32 widening and a positive factor keep the order),
+        # without widening 7 x 248320 logits every cycle. Full logits are built only when a caller reads info["logits"].
+        unary, cand = torch.topk(torch.from_numpy(raw), top_k, dim=-1)
+        unary = unary.float()
+        if r is not None:
+            unary = unary * torch.from_numpy(r.astype(np.float32))[:, None]
         pred, path = int(anchor), []
         for i in range(T - 1):
             s = unary[i] + self.sc[cand[i]].float() @ (self.pc[pred].float() * hp[i])
             pred = int(cand[i, int(torch.argmax(s))])
             path.append(pred)
-        return path, dict(logits=logits, hp=hp, cand=cand, hidden=hidden)
+        return path, _DraftInfo(lambda: torch.from_numpy(raw.astype(np.float32) * (1 if r is None else r[:, None])),
+                                hp=hp, cand=cand, hidden=hidden)
+
+
+class _DraftInfo(dict):
+    """propose()'s info dict; "logits" (7, V) FP32 is computed from a copy of the head output on first access."""
+
+    def __init__(self, make_logits, **kw):
+        super().__init__(**kw)
+        self._make_logits = make_logits
+
+    def __missing__(self, key):
+        if key != "logits":
+            raise KeyError(key)
+        self[key] = v = self._make_logits()
+        return v
+
+    def __contains__(self, key):
+        return key == "logits" or super().__contains__(key)
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default

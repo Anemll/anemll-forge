@@ -477,8 +477,9 @@ class CoreAIQwen:
             x = xb[0]
         return x
 
-    def call(self, ids):
-        """Run len(ids) <= T tokens at pos (committed by accept). Returns logits (n, vocab) fp16."""
+    def call(self, ids, logits=True):
+        """Run len(ids) <= T tokens at pos (committed by accept). Returns logits (n, vocab) fp16; logits=False skips
+        the output head and returns None (prompt blocks whose logits are discarded)."""
         T, n, p0 = self.T, len(ids), self.pos
         assert 0 < n <= T
         if not self.fit(p0 + n):
@@ -492,11 +493,11 @@ class CoreAIQwen:
 
         async def go():
             y = await self._run_chunks(entry, d, d["x"][0])
-            return await self.head(inputs={"x": y})
+            return await self.head(inputs={"x": y}) if logits else None
         out = self.loop.run_until_complete(go())
         self.stats["calls"] += 1
         self._n, self._prefill = n, False
-        return out["logits"].numpy()[:n]
+        return out["logits"].numpy()[:n] if logits else None
 
     def accept(self, k: int):
         """Commit the first k rows of the last call: their K / V rows go into the caches (rejected rows never do)."""
@@ -525,9 +526,9 @@ class CoreAIQwen:
         return bool(tp) and f"p{tp}_{self.ctx // 1024}k" in self.chunks[0]["fns"] and \
             self.pkvlen.get(self.ctx, self.ctx) == self.cap(self.ctx)
 
-    def prefill_block(self, ids):
+    def prefill_block(self, ids, logits=True):
         """Up to tp() tokens through the current entry's p<rows> entry points, all committed. Returns the last token's
-        logits."""
+        logits; logits=False skips the output head and returns None."""
         n, p0 = len(ids), self.pos
         if not self.fit(p0 + n):
             raise ValueError(f"{p0 + n} positions exceed the largest context {self.ladder[-1]}")
@@ -549,6 +550,8 @@ class CoreAIQwen:
 
         async def go():
             y = await self._run_chunks(entry, d, d["x"][0])
+            if not logits:
+                return None
             hx = self.inp["hx"][1]
             hx[:] = 0
             hx[0, :, 0, 0] = y.numpy()[0, :, 0, n - 1]
@@ -562,7 +565,7 @@ class CoreAIQwen:
         self.hi = max(self.hi, self.pos)
         self.stats["calls"] += 1
         self._prefill = True
-        return out["logits"].numpy()[0]
+        return out["logits"].numpy()[0] if logits else None
 
     def _features(self, n):
         taps = {}
@@ -580,27 +583,31 @@ class CoreAIQwen:
     def features_prefill(self, n):
         return self._features(n)
 
-    def feed(self, ids, on_features=None):
+    def feed(self, ids, on_features=None, logits=True):
         """Prompt tokens from any position: prefill calls of the current entry's size (tp() rows) while more than T
         remain, then T-token calls. A block that would cross into the next context entry moves there first and takes
-        that entry's size (TPS_LONG=32: a 64-row block at the end of the 64K entry becomes 32 rows in the 96K entry)."""
-        logits, i = None, 0
+        that entry's size (TPS_LONG=32: a 64-row block at the end of the 64K entry becomes 32 rows in the 96K entry).
+        Returns the last token's logits. Only the last block runs the output head (the earlier blocks' logits are
+        never read: one head call, about 6 ms on M6, saved per prefill block); logits=False skips it there too and
+        returns None (a prompt fed in slices: only the final slice's logits are used)."""
+        out, i = None, 0
         while i < len(ids):
             r = len(ids) - i
             if r > self.T and self.fit(self.pos + min(r, self.tp() or 64)) and self.has_prefill():
                 blk = ids[i:i + min(r, self.tp())]
                 p0 = self.pos
-                logits = self.prefill_block(blk)
+                out = self.prefill_block(blk, logits=logits and i + len(blk) == len(ids))
                 if on_features and getattr(on_features, "wants", lambda a, n: True)(p0, len(blk)):
                     on_features(self.features_prefill(len(blk)), np.arange(p0, p0 + len(blk)))
             else:
                 blk = ids[i:i + self.T]
-                logits = self.call(blk)[len(blk) - 1]
+                lg = self.call(blk, logits=logits and i + len(blk) == len(ids))
+                out = None if lg is None else lg[len(blk) - 1]
                 if on_features and getattr(on_features, "wants", lambda a, n: True)(self.pos, len(blk)):
                     on_features(self.features(len(blk)), np.arange(self.pos, self.pos + len(blk)))
                 self.accept(len(blk))
             i += len(blk)
-        return logits
+        return out
 
 
 class CoreAIQwenBridge(CoreAIQwen):
@@ -855,7 +862,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         if shrink and self.ctx != self.ladder[0]:
             self.resize(self.ladder[0])
 
-    def call(self, ids):
+    def call(self, ids, logits=True):
         T, n, p0 = self.T, len(ids), self.pos
         assert 0 < n <= T
         if not self.fit(p0 + n):
@@ -866,12 +873,12 @@ class CoreAIQwenBridge(CoreAIQwen):
         xw[0, :, 0, :n] = self.emb[ids].T
         self._common(d, p0, n, T)
         entry = f"v8_{self.ctx // 1024}k"
-        self._plan(entry)[2].run()
+        self._plan(entry)[2 if logits else 0].run()   # chunks + head, or the chunks only
         self._flip()
         self._last = entry
         self.stats["calls"] += 1
         self._n, self._prefill = n, False
-        return np.array(self.logits[:n])
+        return np.array(self.logits[:n]) if logits else None
 
     def accept(self, k: int):
         assert 0 <= k <= self._n
@@ -881,7 +888,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.pending, self.pos = k, self.pos + k
         self.hi = max(self.hi, self.pos)
 
-    def prefill_block(self, ids):
+    def prefill_block(self, ids, logits=True):
         n, p0 = len(ids), self.pos
         if not self.fit(p0 + n):
             raise ValueError(f"{p0 + n} positions exceed the largest context {self.ladder[-1]}")
@@ -903,10 +910,11 @@ class CoreAIQwenBridge(CoreAIQwen):
         chunks, head, _ = self._plan(entry)
         chunks.run()
         self._flip()
-        hx = self.inp["hx"][1]
-        hx[:] = 0
-        hx[0, :, 0, 0] = self.chunks[-1]["ow"][entry]["y"][0, :, 0, n - 1]
-        head.run()
+        if logits:  # the head (about 6 ms on M6) only when the caller reads this block's logits
+            hx = self.inp["hx"][1]
+            hx[:] = 0
+            hx[0, :, 0, 0] = self.chunks[-1]["ow"][entry]["y"][0, :, 0, n - 1]
+            head.run()
         for i, ch in enumerate(self.chunks):
             self._append(i, ch["ow"][entry], ch, p0, n)
         self._last = entry
@@ -914,7 +922,7 @@ class CoreAIQwenBridge(CoreAIQwen):
         self.hi = max(self.hi, self.pos)
         self.stats["calls"] += 1
         self._prefill = True
-        return np.array(self.logits[0])
+        return np.array(self.logits[0]) if logits else None
 
     def _features(self, n):
         taps = {}
