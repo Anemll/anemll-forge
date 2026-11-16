@@ -23,7 +23,7 @@ the `anemll-forge-v02` working tree they import from).
 | `pipe/engine/a8_cpu.c` | A8 CPU (NEON) weight expander | same |
 | `pipe/prep_engine.py`, `prep_kv8.py`, `prep_ffn.py`, `merge_manifests.py`, `ref_layers.py` | GPU tables (zero-copy into the compiled HWX) and the float32 reference | `C/v8_work/pipe` |
 | `pipe/v8_a8.py`, `prep_a8.py`, `prep_a8att.py`, `prep_a8out.py` | A8 driver (runtime-INT8 FFN on the ANE) and its preps | `C/v8_work/pipe` |
-| `pipe/unit/` | unit checks, profilers, A/B and sweep scripts, server bench (`srv_bench.py`, `srv_matrix.sh`) | `C/v8_work/pipe/unit` |
+| `pipe/unit/` | unit checks, profilers, A/B and sweep scripts, server bench (`srv_bench.py`, `srv_matrix.sh`), server-log prefill paths (`srv_log_prefill.py`), the offline prefill / snapshot check (`shortfix_check.py`) | `C/v8_work/pipe/unit` |
 | `v8/build_seg2_96.sh` | base KV8 segmented target build (coreai_seg2) | `SSD/coreai_seg_logs` |
 | `v8/build_shared2_all.sh`, `build_shared2_one.sh`, `build_shared_chunk.py`, `chunkmlp.py`, `build_v8_ffn.py`, `build_v8_mix.py` | the shared-weight V8 build (v8_shared2) | `C/v8_work/v8` |
 | `v8/build_shared_all.sh`, `build_shared_probe.sh`, `build_ffn.py`, `build_ffn2_probe.py`, `v8_handoff_probe.py` | earlier builds and probes (v8_shared, FFN-only, handoff) | same |
@@ -69,7 +69,8 @@ source backups (every later variant is an env switch in the final `gpu_v8.swift`
    `PREP_NO_FFN=1 EXPORT_DIR=<export> MODEL=<checkpoint> <builder python> pipe/prep_engine.py SSD/v8_shared2 0 64 pipe/w_shared2r 2048`,
    then `EXPORT_DIR=<export> <builder python> pipe/prep_kv8.py pipe/w_shared2r/manifest.json pipe/w_shared2r/manifest_best.json`
    (int8 k / v weights for I8KV; the server uses `manifest_best.json`).
-4. GPU engine: `cd pipe/engine && swiftc -O -emit-library -module-name gpuv8 -o libgpu_v8_srv2.dylib gpu_v8.swift -framework Metal -framework Accelerate`.
+4. GPU engine: `cd pipe/engine && swiftc -O -emit-library -module-name gpuv8 -o libgpu_v8_srv3.dylib gpu_v8.swift -framework Metal -framework Accelerate`
+   (the server's default; srv2 is the same engine without `patch_fillfrom.py`).
    `kernels.metal` is compiled at load (Metal 4.1). A8 CPU expander: `clang -O3 -shared -o liba8cpu.dylib a8_cpu.c`.
 5. Drafter (once): `forge.py compile --build SSD/v8_shared2 --draft <model>/drafter/all3/dflash2_lut4_gptq_nohead.aimodel`.
 

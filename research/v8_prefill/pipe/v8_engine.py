@@ -70,6 +70,12 @@ class V8Prefill:
         g.v8_reset.restype = None
         if hasattr(g, "v8_kv8_v16_fill"):
             g.v8_kv8_v16_fill.restype, g.v8_kv8_v16_fill.argtypes = C_.c_double, [C_.c_int32]
+        self.fill_from = hasattr(g, "v8_kv8_v16_fill_from")   # patch_fillfrom.py: only the rows the GPU copy lacks
+        if self.fill_from:
+            g.v8_kv8_v16_fill_from.restype, g.v8_kv8_v16_fill_from.argtypes = C_.c_double, [C_.c_int32, C_.c_int32]
+            g.v8_v16_ptr.restype, g.v8_v16_ptr.argtypes = C_.c_void_p, [C_.c_int32]
+        self.v16_ok = 0   # K8V16: the GPU's fp16 V copy matches the ANE cache for rows [0, v16_ok)
+        self.lmax, self.fill_check = lmax, os.environ.get("V8_FILL_CHECK", "0") == "1"
         g.v8_state_out.restype = C_.c_double
         g.v8_state_out.argtypes = [C_.c_int32] + [C_.POINTER(C_.c_int32)] * 4 + [C_.c_int32, C_.c_int32]
         g.v8_state_in.restype, g.v8_state_in.argtypes = C_.c_double, [C_.c_int32] + [C_.POINTER(C_.c_int32)] * 3
@@ -165,6 +171,37 @@ class V8Prefill:
         bounds = self.KC.seg_starts(self.mb.kv_seg, self.mb.cap(self.mb.ladder[-1]))[1:]
         return not any(p0 < b < p0 + n_pad for b in bounds)
 
+    def rewind(self, pos):
+        """The bridge's KV rows from pos on are about to be rewritten (a restore to pos, or a cold start at 0): the
+        GPU's fp16 V copy is valid below pos at most."""
+        self.v16_ok = min(self.v16_ok, pos)
+
+    def _check_v16(self, upto, f0):
+        """V8_FILL_CHECK=1: the GPU's fp16 V copy against the ANE's INT8 V for rows [0, upto): every row of the last
+        8192 and of [f0 - 512, upto), a sample below. Error in units of the row's INT8 scale: 0 for converted rows,
+        <= 0.5 (+ fp16 rounding) for the GPU's own fp16 rows, far more for a stale row. Returns the max."""
+        mb = self.mb
+        starts = self.KC.seg_starts(mb.kv_seg, mb.cap(mb.ctx))
+        rng = np.random.default_rng(upto)
+        rows = set(range(max(0, upto - 8192), upto)) | set(range(max(0, f0 - 512), upto))
+        rows |= set(int(r) for r in rng.integers(0, max(1, upto), 2048) if r < upto)
+        rows = np.array(sorted(rows))
+        worst = 0.0
+        for Lk in self.att:
+            ci, j = self._where(Lk)
+            p = self.g.v8_v16_ptr(Lk)
+            assert p, f"no fp16 V copy for layer {Lk}"
+            vc = np.ctypeslib.as_array((C_.c_uint16 * (4 * self.lmax * 256)).from_address(p)).view(np.float16).reshape(4, self.lmax, 256)
+            for gi in range(len(starts) - 1):
+                sel = rows[(rows >= starts[gi]) & (rows < starts[gi + 1])]
+                if not len(sel):
+                    continue
+                v8 = mb.kv[ci][f"v{j}_{gi}"][1][:, sel - starts[gi], :].astype(np.float32)
+                vs = mb.kv[ci][f"vs{j}_{gi}"][1][:, sel - starts[gi]].astype(np.float32)
+                e = np.abs(vc[:, sel, :].astype(np.float32) - v8 * vs[:, :, None]) / np.maximum(vs[:, :, None], 1e-8)
+                worst = max(worst, float(e.max()))
+        return worst
+
     def sync_from_bridge(self):
         """The bridge's DeltaNet states -> the GPU, so run() continues from the bridge's position (KV8: the KV is shared)."""
         mb = self.mb
@@ -245,9 +282,21 @@ class V8Prefill:
         if self.kv8:
             self._register_segments()
         t_f = time.perf_counter()
-        if self.k8v16 and p0 > 0:   # the GPU's fp16 V copy of every row behind the run, from the ANE's INT8 cache
-            assert g.v8_kv8_v16_fill(p0) >= 0, "K8V16 fill failed"
+        f0 = 0
+        if self.k8v16 and p0 > 0:   # the GPU's fp16 V copy of the rows behind the run, from the ANE's INT8 cache
+            if self.fill_from:      # only the rows written since the copy was last valid (decode, bridge blocks)
+                f0 = min(self.v16_ok, p0) // TP * TP
+                assert g.v8_kv8_v16_fill_from(f0, p0) >= 0, "K8V16 fill failed"
+            else:
+                assert g.v8_kv8_v16_fill(p0) >= 0, "K8V16 fill failed"
+            self.v16_ok = p0
         t_f = time.perf_counter() - t_f
+        if self.k8v16 and p0 > 0 and self.fill_check and self.fill_from:
+            tc = time.perf_counter()
+            e = self._check_v16(p0, f0)
+            self.log(f"v8: fill check rows [0, {p0}) (filled from {f0}): max error {e:.3f} x scale "
+                     f"({'OK' if e < 0.75 else 'STALE ROWS'}, {1e3 * (time.perf_counter() - tc):.0f} ms)")
+            assert e < 0.75, f"K8V16 fill check failed: {e:.3f}"
         emb = mb.emb
         blocks = [ids[i:i + TP] for i in range(0, n_pad, TP)]
         nb = len(blocks)
@@ -388,6 +437,7 @@ class V8Prefill:
         t1 = time.perf_counter()
         self._handover(p0, n)
         self.gpu_pos = p0 + n
+        self.v16_ok = p0 + n   # the run's own fp16 V rows (its pad rows beyond p0 + n are not valid)
         pend_snaps = sorted(snap_at)
         for k in range((n + TP - 1) // TP):
             while pend_snaps and pend_snaps[0] <= p0 + k * TP:   # every feature before the snapshot position is in
@@ -401,5 +451,5 @@ class V8Prefill:
         self.hplan.run()
         logits = np.array(self.hout["logits"].np[0], np.float32)
         return {"tokens": n, "padded": n_pad - n, "seconds": t1 - t0, "post_s": time.perf_counter() - t1,
-                "setup_s": t0 - t_in, "fill_s": t_f,
+                "setup_s": t0 - t_in, "fill_s": t_f, "fill_rows": (p0 - f0) if self.k8v16 and p0 > 0 else 0,
                 "tok_s": n / (t1 - t0), "logits": logits}

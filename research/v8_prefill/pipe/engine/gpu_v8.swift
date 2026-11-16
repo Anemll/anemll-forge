@@ -935,6 +935,38 @@ public func v8_state_in(_ n: Int32, _ lay: UnsafePointer<Int32>, _ hc: UnsafePoi
     return cb.error != nil ? -2 : (cb.gpuEndTime - cb.gpuStartTime) * 1e3
 }
 
+// ---- patch_fillfrom.py: the fill from a row (the rows below are the GPU's own, still valid) ----
+/// Every attention layer's Vc rows [from, upto) from its registered ANE segments (from rounded down to 64). GPU ms.
+@_cdecl("v8_kv8_v16_fill_from")
+public func v8_kv8_v16_fill_from(_ from: Int32, _ upto: Int32) -> Double {
+    guard K8V16 else { return -1 }
+    let f0 = max(0, Int(from) / 64 * 64), u = Int(upto)
+    if f0 >= u { return 0 }
+    let cb = q.makeCommandBuffer()!, ce = cb.makeComputeCommandEncoder()!
+    for l in layers where l.m.kind != "gdn" {
+        guard let vc = l.Vc else { return -2 }
+        for g in l.segs where g.start < u && g.start + g.rows > f0 {
+            let r0 = max(f0, g.start) - g.start, n = min(g.start + g.rows, u) - g.start - r0   // segment-local rows
+            if n <= 0 { continue }
+            var prm = SIMD4<UInt32>(UInt32(Lmax), UInt32(g.start + r0), g.vh, g.vr), sh = g.sh
+            ce.setComputePipelineState(pso("kv8_v_to_v16"))
+            ce.setBuffer(g.v, offset: r0 * Int(g.vr), index: 0); ce.setBuffer(g.vs, offset: r0 * 2, index: 1)
+            ce.setBuffer(vc, offset: 0, index: 2)
+            ce.setBytes(&prm, length: 16, index: 3); ce.setBytes(&sh, length: 4, index: 4)
+            ce.dispatchThreads(sz(256, n, 4), threadsPerThreadgroup: sz(256))
+        }
+    }
+    ce.endEncoding(); cb.commit(); cb.waitUntilCompleted()
+    return cb.error != nil ? -3 : (cb.gpuEndTime - cb.gpuStartTime) * 1e3
+}
+
+/// Layer i's fp16 V copy (4 x Lmax x 256 half, shared storage), nil without one.
+@_cdecl("v8_v16_ptr")
+public func v8_v16_ptr(_ i: Int32) -> UnsafeMutableRawPointer? {
+    guard Int(i) >= 0 && Int(i) < layers.count, let vc = layers[Int(i)].Vc else { return nil }
+    return vc.contents()
+}
+
 // ---- K8V16 (patch_k8v16.py): the GPU's fp16 V copy from the ANE's INT8 V (warm start) ----
 /// Every attention layer's Vc rows [0, upto) from its registered ANE segments, one command buffer. GPU ms.
 @_cdecl("v8_kv8_v16_fill")

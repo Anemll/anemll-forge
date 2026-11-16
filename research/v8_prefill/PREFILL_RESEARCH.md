@@ -189,6 +189,27 @@ unchanged.
     `--plain`.
 - **Decode** is unchanged: 110 ms per cycle at 6K, 152 at 96K (verify 135 ms), 19 to 35 tok/s depending on draft
   acceptance.
+- **A real Pi session** (53 requests, `pipe/unit/srv_log_prefill.py`): prefill 497 s against decode 4231 s.
+  - Compaction took 49% of the prefill: summary prompts are cold, and the compacted context is prefilled again.
+  - Prompt mismatches took 26%: 6 restores to the last header re-prefilled 47.6K tokens. Three were the same text
+    tokenized differently, one was a character the server had streamed as U+FFFD, and two were client edits.
+  - Short follow-ups (29 requests, 13 to 329 tokens) were only 3.5% (0.3 to 0.6 s each). They still lost 20 to 35%,
+    on an extra T-row call for the header snapshot, two alignment blocks where one does, V8 dropped after the
+    alignment, and nearly empty last pairs.
+- **Fixes (16 Nov, afternoon):**
+  - an exact 'gen' snapshot at the prompt's end, plus decode snapshots every 256 tokens;
+  - alignment blocks of any 1 to 64 rows;
+  - V8 decided on the rest after the alignment;
+  - one T-row call for a last pair with 8 real rows or fewer;
+  - an incremental K8V16 fill (`v8_kv8_v16_fill_from`);
+  - keeping the model's own tokens where the prompt's text matches them;
+  - UTF-8 hold-back in streaming.
+  - Measured: +63 tokens 0.3 s in one block; an edited answer restored 117 tokens back instead of about 630. Details
+    are in `pipe/V8_SERVER.md`.
+- **Bug found then:** a summary request (another system prompt) rewrites the KV rows under the main conversation's
+  'system' snapshot. The V8 cold run did not replace that snapshot, so the next main request paired the main system
+  prompt's DeltaNet state with the summary's KV rows. Snapshots that are not a prefix of the KV cache's tokens are now
+  dropped.
 
 ## Lessons that carry over
 
@@ -238,4 +259,5 @@ unchanged.
 | A8 | `pipe/v8_a8.py`, `prep_a8*.py`, `w8a8/a8_*.py`, `a8probe/*.sh`, `a8probe/results*.json` | 6K +10.6%, 16K +7.6% |
 | KV8 / K8V16 | `pipe/engine/patch_kv8b.py`, `patch_k8v16.py`, `pipe/unit/attn_kv8_prof.py`, `results/k8v16_65536.json` | lossless, K8V16 = fp16 speed |
 | server | `pipe/v8_server.py`, `v8_engine.py`, `pipe/unit/srv_bench.py`, `srv_matrix.sh`, `results/srv_matrix.jsonl` | table above |
+| short prefills, prompt cache | `pipe/engine/patch_fillfrom.py`, `pipe/unit/shortfix_check.py`, `srv_log_prefill.py` (log: `SSD/coreai_seg_logs/v8_server_8765_pre_shortfix.log`) | `pipe/V8_SERVER.md` |
 | splash | `splash132/serve.sh`, `bench.py`, `long_bench.sh`, `results/splash132_*.jsonl` | 2K 500, 96K 288 |
