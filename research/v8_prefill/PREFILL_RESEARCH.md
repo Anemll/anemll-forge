@@ -206,6 +206,10 @@ unchanged.
   - UTF-8 hold-back in streaming.
   - Measured: +63 tokens 0.3 s in one block; an edited answer restored 117 tokens back instead of about 630. Details
     are in `pipe/V8_SERVER.md`.
+- **Evening:** the host-side speedups from Greg Martin's fork (head-free prefill blocks, faster sampling and
+  detokenizing, the drafter's FP16 top-k, a 1 ms draft gap) took the decode cycle from 122 to 120.5 ms with the same
+  tokens per verify. A 'sysk' snapshot keeps the system prompt's KV rows across Pi's summary request: the next prompt
+  restores 8.4K tokens in 17 ms instead of prefilling them cold (about 13 s).
 - **Bug found then:** a summary request (another system prompt) rewrites the KV rows under the main conversation's
   'system' snapshot. The V8 cold run did not replace that snapshot, so the next main request paired the main system
   prompt's DeltaNet state with the summary's KV rows. Snapshots that are not a prefix of the KV cache's tokens are now

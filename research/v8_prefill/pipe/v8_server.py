@@ -15,16 +15,27 @@ env V8_ALIGN=64|128 (continuation start alignment), V8_REST_MIN (128: V8 after a
 of at least this), V8_TAIL_T (8: a last pair with this many real rows or fewer -> one T-row bridge call), V8_DEC_SNAP (256:
 decode snapshot interval, 0 off), V8_DEC_KEEP (3), V8_TEXT_MATCH (1: keep the state's own tokens where the prompt's text
 equals the state's), V8_FILL_CHECK (1: check the GPU's fp16 V copy against the ANE cache before every warm run)."""
-import argparse, bisect, codecs, itertools, os, sys, time
+import argparse, bisect, codecs, inspect, itertools, os, re, sys, time
 from pathlib import Path
 
-V02 = Path("/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02")
+V02 = Path(os.environ.get("V8_V02", "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02"))   # the release tree
 PIPE = Path(__file__).resolve().parent
 sys.path.insert(0, str(V02 / "scripts"))
 sys.path.insert(0, str(PIPE))
 import numpy as np  # noqa: E402
 
 import qwen38_server as S  # noqa: E402
+import qwen38_kv_cache as KC  # noqa: E402
+# the ported head-free prefill blocks (gregcmartin/anemll-forge-speedup 8410a33): logits only where they are read
+FEED_LOGITS_KW = "logits" in inspect.signature(S.Engine._feed).parameters
+
+
+def _no_logits(fn):
+    """{'logits': False} when fn takes it (the ported head-free blocks), else {}."""
+    try:
+        return {"logits": False} if "logits" in inspect.signature(fn).parameters else {}
+    except (TypeError, ValueError):
+        return {}
 
 A2 = 128   # V8 granularity: a pair of 64-token blocks
 V8_ALIGN = int(os.environ.get("V8_ALIGN", "64"))   # V8 starts on this alignment (64: unless the span crosses a KV segment)
@@ -135,22 +146,27 @@ class V8Engine(S.Engine):
 
     # ---- decode: UTF-8 hold-back, decode snapshots, snapshot validity ----
     def generate(self, *args, **kwargs):
-        orig = self.tok.decode
+        # the release server with the ported IncrementalDetokenizer holds an incomplete character back itself (a
+        # decode that drops the trailing U+FFFD would break its hold-back); else a decode that does
+        patch = not hasattr(S, "IncrementalDetokenizer")
+        if patch:
+            orig = self.tok.decode
 
-        def dec(ids, *a_, **k_):   # a character split across tokens is not streamed until its last byte is in
-            s_ = orig(ids, *a_, **k_)
-            if s_.endswith("�") and len(ids) and self._utf8_open(ids):
-                s_ = s_[:-1]
-            return s_
-        self.tok.decode = dec
+            def dec(ids, *a_, **k_):   # a character split across tokens is not streamed until its last byte is in
+                s_ = orig(ids, *a_, **k_)
+                if s_.endswith("�") and len(ids) and self._utf8_open(ids):
+                    s_ = s_[:-1]
+                return s_
+            self.tok.decode = dec
         self._dec_n, self._dec_ms = 0, 0.0
         try:
             return super().generate(*args, **kwargs)
         finally:
-            try:
-                del self.tok.decode
-            except AttributeError:
-                pass
+            if patch:
+                try:
+                    del self.tok.decode
+                except AttributeError:
+                    pass
             self._prune()
             if self._dec_n:
                 S.log(f"decode snapshots: {self._dec_n} taken ({self._dec_ms:.0f} ms); kept: {', '.join(sorted(self.snaps))}")
@@ -173,11 +189,88 @@ class V8Engine(S.Engine):
         conversation, a summary request, a different continuation) are dropped: restoring one would pair its
         DeltaNet state with another prompt's KV rows."""
         f = self.fed
-        bad = [k for k, s_ in self.snaps.items() if not (len(s_["ids"]) <= len(f) and f[:len(s_["ids"])] == s_["ids"])]
+        bad = [k for k, s_ in self.snaps.items() if "kv" not in s_   # 'sysk' carries its own KV rows
+               and not (len(s_["ids"]) <= len(f) and f[:len(s_["ids"])] == s_["ids"])]
         for k in bad:
             del self.snaps[k]
         if bad:
             S.log(f"snapshots dropped (their KV rows were rewritten): {', '.join(sorted(bad))}")
+
+    # ---- the 'system' snapshot across a prompt that rewrites its KV rows (a summary request) ----
+    def _kv_rows(self, n, put=None):
+        """KV rows [0, n) of every attention layer's segments: a copy {(chunk, name): array} (put None), or written
+        back from one. {} without a segmented KV history (nothing is kept then)."""
+        m = self.model
+        if not getattr(m, "kv_seg", 0) or not hasattr(m, "kv"):
+            return {}
+        starts = KC.seg_starts(m.kv_seg, m.cap(m.ctx))
+        out = {}
+        for ci, d in enumerate(m.kv):
+            for name, val in d.items():
+                mm = re.fullmatch(r"(k|v|ks|vs)(\d+)_(\d+)", name)
+                if not mm or int(mm[3]) + 1 >= len(starts) or starts[int(mm[3])] >= n:
+                    continue
+                s0, s1 = starts[int(mm[3])], starts[int(mm[3]) + 1]
+                a_ = val[1]
+                ax = [i for i, L in enumerate(a_.shape) if L == s1 - s0]
+                assert len(ax) == 1, (name, a_.shape, s1 - s0)
+                sl = tuple(slice(0, min(n, s1) - s0) if i == ax[0] else slice(None) for i in range(a_.ndim))
+                if put is None:
+                    out[(ci, name)] = np.array(a_[sl])
+                else:
+                    a_[sl] = put[(ci, name)]
+        return out
+
+    def _save_sysk(self, ids):
+        """Before a prompt that does not start with the 'system' snapshot's tokens rewrites the KV rows under it (Pi's
+        summary request, another conversation), keep it as 'sysk' with a copy of those rows (about 33 KB per token):
+        the conversation's next prompt restores it instead of a cold prefill. One is kept; its restore frees the copy."""
+        s_ = self.snaps.get("system")
+        if s_ is None or "kv" in s_:
+            return
+        ns = len(s_["ids"])
+        if len(ids) >= ns and ids[:ns] == s_["ids"]:
+            return
+        k_ = self.snaps.get("sysk")
+        if k_ is not None and k_["ids"] == s_["ids"]:
+            return
+        t = time.perf_counter()
+        kv = self._kv_rows(ns)
+        if not kv:
+            return
+        self.snaps["sysk"] = {**s_, "kv": kv}
+        mb_ = sum(a_.nbytes for a_ in kv.values()) / 2 ** 20
+        S.log(f"snapshot 'system' ({ns} tok) kept as 'sysk' with its KV rows ({mb_:.0f} MB, "
+              f"{1e3 * (time.perf_counter() - t):.0f} ms): this prompt rewrites them")
+
+    def _restore(self, snap):
+        kv = snap.get("kv")
+        if kv is None:
+            return super()._restore(snap)
+        n_ = len(snap["ids"])
+        try:   # its rows come back from the copy, whatever the cache kept: first a context entry that holds them (a
+            # summary request since may have shrunk the cache below them)
+            if not self.model.fit(n_):
+                raise ValueError(f"{n_} rows exceed the largest context")
+            self.model.hi = max(self.model.hi, n_)
+            super()._restore(snap)
+        except Exception as e:  # noqa: BLE001  nothing restored: start cold (prefill then reuses 0 tokens)
+            S.log(f"snapshot 'sysk' not restored ({type(e).__name__}: {str(e)[:120]}): cold start")
+            self.snaps.pop("sysk", None)
+            self.model.reset()
+            if self.drafter is not None:
+                self.drafter.reset()
+            self.fed = []
+            if self.v8 is not None:
+                self.v8.rewind(0)
+            return
+        t = time.perf_counter()
+        self._kv_rows(n_, put=kv)
+        if self.v8 is not None:
+            self.v8.rewind(0)   # the GPU's fp16 V copy of those rows is another prompt's
+        self.snaps.pop("sysk", None)
+        self.snaps["system"] = {k_: v_ for k_, v_ in snap.items() if k_ != "kv"}
+        S.log(f"snapshot 'sysk': KV rows [0, {len(snap['ids'])}) written back in {1e3 * (time.perf_counter() - t):.0f} ms")
 
     # ---- prefill ----
     def _feed_blocks(self, ids_, ingest):
@@ -190,11 +283,11 @@ class V8Engine(S.Engine):
             if not m.fit(m.pos + min(r, m.tp() or 64)):
                 raise ValueError(f"{m.pos + r} positions exceed the largest context")
             if not m.has_prefill():   # no prefill entry here: the release feed (may leave rows pending)
-                logits = self._feed(ids_[k:], ingest)
+                logits = self._feed(ids_[k:], ingest, **({"logits": False} if FEED_LOGITS_KW else {}))
                 break
             take = min(r, m.tp())
             p0 = m.pos
-            logits = m.prefill_block(ids_[k:k + take])
+            logits = m.prefill_block(ids_[k:k + take], **_no_logits(m.prefill_block))
             if on_f is not None and getattr(on_f, "wants", lambda a_, n_: True)(p0, take):
                 on_f(m.features_prefill(take), np.arange(p0, p0 + take))
             k += take
@@ -266,6 +359,7 @@ class V8Engine(S.Engine):
         best = max((s_ for s_ in self.snaps.values()
                     if len(ids) > len(s_["ids"]) and ids[:len(s_["ids"])] == s_["ids"]),
                    key=lambda s_: len(s_["ids"]), default=None)
+        self._save_sysk(ids)   # before anything rewrites the KV rows under the 'system' snapshot
         cold = False
         if n and len(ids) > n and ids[:n] == self.fed and (best is None or n >= len(best["ids"])):
             reused, how = n, "continue (model state is a prefix of the prompt)"
@@ -338,7 +432,7 @@ class V8Engine(S.Engine):
                 continue
             while cut > i:
                 j = min(cut, i + progress.slice) if progress.slice else cut
-                logits = self._feed(ids[i:j], ingest)
+                logits = self._feed(ids[i:j], ingest, **({"logits": j == len(ids)} if FEED_LOGITS_KW else {}))
                 self.fed.extend(ids[i:j])
                 i = j
                 progress.update(i)

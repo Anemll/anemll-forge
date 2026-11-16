@@ -21,32 +21,75 @@ class FakeModel:
     T = 8
 
     def __init__(self):
-        self.pos, self.pending, self.ctx, self.calls = 0, 0, 98304, []
+        self.pos, self.pending, self.ctx, self.calls, self.hi = 0, 0, 8192, [], 0
+        self.ladder = [8192, 16384, 32768, 65536, 98304]
         self.state = []           # the tokens the DeltaNet state has consumed (path-faithful)
-        self.kv = {}              # KV row -> token last written there
+        self.kv_seg = [8192, 8192, 16384, 32768, 32768]
+        self.starts = [0] + [sum(self.kv_seg[:i + 1]) for i in range(len(self.kv_seg))]
+        # one chunk, one attention layer: k (2, 4, rows) dim-major, v (2, rows, 4), ks / vs (2, rows); a row holds
+        # the token written there in every element
+        self.kv = [{}]
+        for g, L in enumerate(self.kv_seg):
+            for nm, shp in (("k", (2, 4, L)), ("v", (2, L, 4)), ("ks", (2, L)), ("vs", (2, L))):
+                self.kv[0][f"{nm}0_{g}"] = (None, np.full(shp, -1, np.int64))
+
+    def cap(self, ctx):
+        return ctx
+
+    def _resize(self, ctx):
+        """The bridge's resize: rows kept below min(hi, cap); a shrink drops the segments above the new context (a
+        later growth binds fresh ones)."""
+        self.ctx, self.hi = ctx, min(self.hi, ctx)
+        for g, s0 in enumerate(self.starts[:-1]):
+            if s0 >= ctx:
+                for nm in ("k", "v", "ks", "vs"):
+                    self.kv[0][f"{nm}0_{g}"][1][:] = -1
+
+    def restorable(self, snap):
+        return snap["pos"] <= min(self.hi, self.cap(self.ctx))
+
+    def row(self, p):
+        """The token in KV row p (None when the four arrays disagree)."""
+        g = max(i for i, s0 in enumerate(self.starts[:-1]) if s0 <= p)
+        r, d = p - self.starts[g], self.kv[0]
+        vals = {int(d[f"k0_{g}"][1][0, 0, r]), int(d[f"v0_{g}"][1][1, r, 3]), int(d[f"ks0_{g}"][1][1, r]),
+                int(d[f"vs0_{g}"][1][0, r])}
+        return vals.pop() if len(vals) == 1 else None
 
     def tp(self, ctx=None):
         return 64
 
     def fit(self, need):
-        return need <= 98304
+        if need <= self.ctx:
+            return True
+        nxt = next((c for c in self.ladder if c >= need), None)
+        if nxt is None:
+            return False
+        self._resize(nxt)
+        return True
 
     def has_prefill(self):
         return True
 
     def _write(self, ids):
+        d = self.kv[0]
         for k, t in enumerate(ids):
-            self.kv[self.pos + k] = t
+            p = self.pos + k
+            g = max(i for i, s0 in enumerate(self.starts[:-1]) if s0 <= p)
+            r = p - self.starts[g]
+            d[f"k0_{g}"][1][:, :, r] = t; d[f"v0_{g}"][1][:, r, :] = t
+            d[f"ks0_{g}"][1][:, r] = t; d[f"vs0_{g}"][1][:, r] = t
+        self.hi = max(self.hi, self.pos + len(ids))
 
     def prefill_block(self, ids):
-        assert 0 < len(ids) <= 64
+        assert 0 < len(ids) <= 64 and self.fit(self.pos + len(ids))
         self.calls.append(("blk", self.pos, len(ids)))
         self._write(ids)
         self.state += ids; self.pos += len(ids); self.pending = 0
         return np.zeros(4, np.float32)
 
     def call(self, ids):
-        assert 0 < len(ids) <= self.T
+        assert 0 < len(ids) <= self.T and self.fit(self.pos + len(ids))
         self.calls.append(("T", self.pos, len(ids)))
         self._write(ids)
         self._n = list(ids)
@@ -79,10 +122,17 @@ class FakeModel:
         return {"pos": self.pos, "pending": self.pending, "ctx": self.ctx, "states": list(self.state)}
 
     def restore(self, snap):
+        if not self.restorable(snap):
+            raise ValueError(f"snapshot at {snap['pos']} needs KV rows no longer cached (rows kept {self.hi}, ctx {self.ctx})")
         self.pos, self.pending, self.state = snap["pos"], snap["pending"], list(snap["states"])
+        tgt = next(c for c in self.ladder if c >= self.pos)
+        if tgt < self.ctx:
+            self._resize(tgt)
 
     def reset(self, shrink=True):
         self.pos, self.pending, self.state = 0, 0, []
+        if shrink and self.ctx != self.ladder[0]:
+            self._resize(self.ladder[0])
 
 
 class FakeV8:
@@ -112,6 +162,7 @@ class FakeV8:
         assert p0 == 0 or self.gpu_pos == p0, (self.gpu_pos, p0)
         fill = (p0 - min(self.v16_ok, p0) // 64 * 64) if p0 else 0
         m = self.m
+        assert m.fit(p0 + -(-n // 128) * 128 + 64), "context too small"
         base = list(m.state) if p0 else []
         for sp in snap_at:
             assert (sp - p0) % 128 == 0 and p0 < sp < p0 + n
@@ -119,8 +170,9 @@ class FakeV8:
         m.pos = p0
         m._write(ids)
         n_pad = -(-n // 128) * 128
-        for k in range(n, n_pad):   # pad rows written too
-            m.kv[p0 + k] = -1
+        m.pos = p0 + n
+        m._write([-1] * (n_pad - n))   # pad rows written too
+        m.pos = p0
         m.state = base + list(ids); m.pos = p0 + n; m.pending = 0
         self.gpu_pos = self.v16_ok = p0 + n
         self.runs.append((p0, n, fill))
@@ -149,7 +201,11 @@ def check(e, ids, label):
     assert m.state == list(ids), f"{label}: model consumed {len(m.state)} tokens, not the prompt's {len(ids)}"
     for k, s_ in e.snaps.items():
         assert s_["states"] == s_["ids"], f"{label}: snapshot {k} state != its tokens"
-        assert all(m.kv.get(p) == t for p, t in enumerate(s_["ids"])), f"{label}: snapshot {k} KV rows rewritten"
+        if "kv" in s_:   # 'sysk': its own copy of the rows holds its tokens
+            ks = [a_ for (ci, name), a_ in s_["kv"].items() if name.startswith("ks")]
+            assert list(np.concatenate([a_[0] for a_ in ks])[:len(s_["ids"])]) == s_["ids"], f"{label}: {k} copy"
+            continue
+        assert all(m.row(p) == t for p, t in enumerate(s_["ids"])), f"{label}: snapshot {k} KV rows rewritten"
 
 
 def request(e, ids, label):
@@ -239,8 +295,8 @@ def main():
     assert runs and runs[0][2] <= 500 + 64 + 128, runs
     ok += 1
 
-    # 6. summary request (other system prompt, cold) -> the main 'system' snapshot is dropped, the next main prompt
-    #    goes cold instead of pairing the old DeltaNet state with the summary's KV rows
+    # 6. summary request (other system prompt, cold) -> the main 'system' snapshot is not restored over the
+    #    summary's KV rows: it is kept as 'sysk' with its own rows and the next main prompt restores those
     e = make_engine(tok)
     sysp = word(5922)
     main_p = sysp + hdr + word(9000) + gen_hdr
@@ -250,7 +306,7 @@ def main():
     request(e, summ, "summary")
     main2 = sysp + hdr + word(4000) + gen_hdr
     calls, runs = request(e, main2, "main after summary")
-    assert runs and runs[0][0] == 0, f"not cold: {runs}"
+    assert runs and runs[0][0] >= 5888 and all(e.model.row(p) == t for p, t in enumerate(main2)), runs
     ok += 1
 
     # 7. decode snapshots: divergence inside the last answer restores the latest decode snapshot before it
@@ -284,6 +340,38 @@ def main():
     S.Engine.render = lambda self, m, t, k: self.tok.encode(prompt_text, add_special_tokens=False)
     new = e.render(None, None, {})
     assert new[:len(e.fed)] == e.fed and b"".join(e._tb(t) for t in new) == prompt_text.encode(), "text match"
+    ok += 1
+
+    # 10. compaction: the 'system' snapshot survives the summary requests as 'sysk' (KV rows copied) and the main
+    #     conversation's next prompt restores it, its KV rows written back, instead of a cold prefill
+    e = make_engine(tok)
+    sysp = word(5922)
+    main_p = sysp + hdr + word(9000) + gen_hdr
+    request(e, main_p, "main")
+    ns = len(e.snaps["system"]["ids"])
+    decode(e, word(300))
+    request(e, word(65) + hdr + word(9000) + gen_hdr, "summary 1")
+    assert "sysk" in e.snaps and "system" not in e.snaps, sorted(e.snaps)
+    assert any(e.model.row(p) != t for p, t in enumerate(sysp[:ns])), "the summary did not rewrite the system rows"
+    request(e, word(60) + hdr + word(2500) + gen_hdr, "summary 2 (short)")
+    assert "sysk" in e.snaps
+    main2 = sysp + hdr + word(4000) + gen_hdr
+    calls, runs = request(e, main2, "main after compaction")
+    assert runs and runs[0][0] >= ns and runs[0][2] == runs[0][0], f"not restored / V copy not refilled: {runs}"
+    assert "sysk" not in e.snaps and "kv" not in e.snaps["system"], sorted(e.snaps)
+    assert all(e.model.row(p) == t for p, t in enumerate(main2)), "KV rows after the restore"
+    ok += 1
+
+    # 11. the same with a system prompt longer than the smallest context entry (8.4K in the live check): the short
+    #     summary shrinks the cache to 8K, the restore must grow it before the rows come back
+    e = make_engine(tok)
+    sysp = word(9000)
+    request(e, sysp + hdr + word(500) + gen_hdr, "main 9K system")
+    request(e, word(60) + hdr + word(2500) + gen_hdr, "short summary")
+    assert "sysk" in e.snaps and e.model.ctx == 8192, (sorted(e.snaps), e.model.ctx)
+    main2 = sysp + hdr + word(300) + gen_hdr
+    calls, runs = request(e, main2, "main after the short summary")
+    assert runs and runs[0][0] >= 8960 and all(e.model.row(p) == t for p, t in enumerate(main2)), runs
     ok += 1
 
     # 9. UTF-8 hold-back: U+21D4 as three byte tokens, the release delta logic streams it whole

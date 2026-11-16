@@ -7,9 +7,11 @@ attention) on the GPU, plus an OpenAI-compatible server built on it. Cold prefil
 - [PREFILL_RESEARCH.md](PREFILL_RESEARCH.md): what was tried, what was kept or rejected and why, numbers, lessons.
 - [pipe/V8_SERVER.md](pipe/V8_SERVER.md): the server (run, options, request flow, results, KV8 findings).
 
-The research scripts are committed as they ran: they use absolute paths on the M6 (below). Commit 1 of this branch
-(`Segmented KV8 history`) holds the builder and runtime changes they need (`coreai/`, `scripts/` of this checkout =
-the `anemll-forge-v02` working tree they import from).
+The research scripts are committed as they ran: they use absolute paths on the M6 (below). The release-code
+commits of this branch hold the builder and runtime changes they need (`coreai/`, `scripts/` of this checkout = the
+`anemll-forge-v02` working tree they import from; `V8_V02=<tree>` points the server at another one):
+`Segmented KV8 history` (KV_SEG), the host-side speedups taken over from Greg Martin's anemll-forge-speedup fork
+(credited in that commit), and the `kv_seg` class default.
 
 ## Layout
 

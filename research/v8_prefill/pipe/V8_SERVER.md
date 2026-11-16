@@ -35,6 +35,9 @@ Options (defaults are the best measured):
 | `V8_DEC_KEEP` env | 3 | decode snapshots kept (the latest; about 97 MB each) |
 | `V8_TEXT_MATCH` env | 1 | keep the state's own tokens where the prompt's text equals the state's |
 | `V8_FILL_CHECK` env | 0 | 1: before every warm run, check the GPU's fp16 V copy against the ANE cache (validation only) |
+| `V8_V02` env | anemll-forge-v02 | the release tree imported (`scripts/qwen38_server.py`, the bridge, the drafter) |
+| `NGRAM_DRAFT` env | 0 | prompt-lookup drafts (release server `--ngram-draft`), off until the greedy divergence is explained |
+| `DRAFT_GAP_MS` env | 1 on M6 | minimum gap between a target verify and the next drafter call |
 
 ## How a request runs
 
@@ -53,6 +56,10 @@ Options (defaults are the best measured):
    - 'dec0..2' every 256 decoded tokens (the latest 3), so a client edit inside the answer restores close to it.
    - After every prefill and every decode, snapshots that are not a prefix of the tokens now in the KV cache are
      dropped (their KV rows were rewritten by another conversation, a summary request or another continuation).
+   - 'sysk': before a prompt that does not start with the 'system' snapshot's tokens rewrites the rows under it
+     (Pi's summary request), that snapshot is kept with a copy of its KV rows (about 33 KB per token: 266 MB for
+     8.4K tokens, 13 to 28 ms). The conversation's next prompt restores it: the context entry grows to hold the
+     rows, they are written back (5 to 17 ms), the GPU's V copy is refilled from row 0, the copy is freed.
 4. The drafter's context gets the tap features V8 captures (layers 5, 19, 33, 47, 61), windowed.
 5. Continuation (a restored snapshot or the state after decoding): the bridge feeds prefill blocks of any 1 to 64
    rows up to one of the next 64- or 128-aligned points (fewest blocks + pairs; a 64 start only when the span crosses
@@ -154,6 +161,27 @@ near its end restored 'dec2' 117 tokens back (0.4 s; before: about 630 tokens fr
 the text match and the UTF-8 hold-back. Logs: `coreai_seg_logs/v8_server_8765_pre_shortfix.log` (the session),
 `v8_server_shortfix_check.log`.
 
+## Host speedups and the summary-proof system snapshot (16 Nov, evening)
+
+The release tree the server imports (`anemll-forge-v02`, = `scripts/` of the `v8-gpu-ane-prefill` branch) now has
+the host-side speedups from Greg Martin's fork (gregcmartin/anemll-forge-speedup, 8410a33 and ada23b3): head-free
+prefill blocks, FP16 top-k / FP32-widened argmax in sampling, an incremental detokenizer (also holds a split UTF-8
+character back; the V8 wrapper's own hold-back is used only without it), the drafter's FP16 top-k and lazily
+written context, a 1 ms draft gap on M6; prompt-lookup drafts are ported but off. The V8 wrapper skips the head on
+its alignment blocks too.
+
+Measured against the same server before (20K cold + follow-ups of 50 / 300 / 2600 / 40, greedy, thinking off): decode
+cycle 122 -> 120.5 ms (draft 14.5-15.1 -> 13.0-13.4 ms, sampling 0.9-1.3 -> 0.2-0.3 ms, verify unchanged at 106 ms:
+no stalls from the 1 ms gap), the same tokens per verify in all 5 turns, bridge blocks about 5 ms faster. With
+Pi's sampling (temperature 1, top_k 20) the sampling phase was 3 to 6.6 ms per cycle before.
+
+'sysk', live (an 8.4K-token system prompt, then a 2.7K summary prompt with another system prompt, then the main
+system prompt again): restored at 8433 with 26 new tokens in 0.2 s (cold: about 13 s), the same 24 greedy tokens as
+the in-memory restore; a 628-token follow-up after it ran on V8 with the V copy refilled from row 0 (fill check
+0.061 x scale: fp16 rounding of converted rows). The first live test found that a short summary shrinks the cache
+to the 8K entry, below an 8.4K system prompt: the restore now grows the context first, and falls back to a cold
+start if it cannot restore. Logs: `coreai_seg_logs/v8_server_speedup_check1.log`, `v8_server_speedup_check2.log`.
+
 ## Files
 
 - `v8_server.py`, `v8_server.sh`, `v8_server_plain.sh`, `srv_stop.sh`
@@ -162,7 +190,7 @@ the text match and the UTF-8 hold-back. Logs: `coreai_seg_logs/v8_server_8765_pr
   `patch_k8v16.py`, `patch_fillfrom.py` (each keeps `*.pre_<name>.*` backups)
 - `unit/srv_bench.py` (cold + follow-up turns), `unit/srv_matrix.sh` (config x length matrix), `unit/srv_summ.py`,
   `unit/attn_kv8_prof.py` (attention core per call), `unit/state_check.py`, `unit/shortfix_check.py` (prefill /
-  snapshot / text-match logic, offline), `unit/srv_log_prefill.py` (per-request prefill paths from a server log)
+  snapshot / sysk / text-match logic over a fake bridge, offline; `V8_V02=<tree>` checks another release tree), `unit/srv_log_prefill.py` (per-request prefill paths from a server log)
 - results: `coreai_seg_logs/srv_matrix.jsonl`, `coreai_seg_logs/k8v16_65536.{log,json}`
 
 ## Open items
