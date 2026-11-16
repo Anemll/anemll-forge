@@ -617,6 +617,8 @@ class CoreAIQwenBridge(CoreAIQwen):
     views the current set), per-chunk per-entry outputs (y, k/v_new, taps; chunk k's y is chunk k+1's x), head logits.
     Bindings are built once per (entry, parity) and rebuilt after a KV resize."""
 
+    kv_seg = 0   # contiguous KV history unless the manifest has kv_seg (set in __init__)
+
     def __init__(self, ctx=None, ladder=None, root: Path = COREAI_DIR, log=print, kv_cache_dtype="auto",
                  extra_packages=()):
         """extra_packages: (label, path, estimated cold seconds) of other packages the caller loads next (the
