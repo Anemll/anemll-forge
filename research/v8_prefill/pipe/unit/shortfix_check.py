@@ -192,6 +192,8 @@ def make_engine(tok):
     e._tbc = {}
     e._dec_last, e._dec_slot, e._dec_n, e._dec_ms = 0, -1, 0, 0.0
     e.text_match = True
+    e._tm_memo = None
+    e._ab_init("")
     return e
 
 
@@ -340,6 +342,43 @@ def main():
     S.Engine.render = lambda self, m, t, k: self.tok.encode(prompt_text, add_special_tokens=False)
     new = e.render(None, None, {})
     assert new[:len(e.fed)] == e.fed and b"".join(e._tb(t) for t in new) == prompt_text.encode(), "text match"
+    ok += 1
+
+    # 12. the text-match memo: the next prompt (the conversation grown) maps the same stretch without the general path
+    assert e._tm_memo is not None
+    reply = "ok, done.\n</think>\n\nAll set.<|im_end|>\n"
+    e.fed = new + tok.encode(reply, add_special_tokens=False)       # what the model "generated" after it
+    prompt2 = prompt_text + reply + "<|im_start|>user\nnext<|im_end|>\n<|im_start|>assistant\n<think>\n"
+    S.Engine.render = lambda self, m, t, k: self.tok.encode(prompt2, add_special_tokens=False)
+    logged = []
+    log0, S.log = S.log, lambda m_: (logged.append(m_), log0(m_))
+    try:
+        new2 = e.render(None, None, {})
+    finally:
+        S.log = log0
+    assert new2[:len(e.fed)] == e.fed and b"".join(e._tb(t) for t in new2) == prompt2.encode(), "memo text match"
+    assert any("(memo" in m_ for m_ in logged), f"memo not used: {logged}"
+    ok += 1
+
+    # 13. decode A/B: arms rotate, set the draft gap, and an eager arm writes the drafter's context at once
+    class FakeDrafter:
+        def __init__(self):
+            self.flags = []
+
+        def add_context(self, feats, positions, flush=True):
+            self.flags.append(flush)
+
+        def flush(self):
+            pass
+    e = make_engine(tok)
+    e.drafter = FakeDrafter()
+    e._ab_init("g1l,g3e")
+    seen_ = []
+    for _ in range(4):
+        arm = e._ab_next()
+        e.drafter.add_context(None, None, flush=False)
+        seen_.append((arm, round(S.DRAFT_GAP * 1e3, 3), e.drafter.flags[-1]))
+    assert seen_ == [("g1l", 1.0, False), ("g3e", 3.0, True), ("g1l", 1.0, False), ("g3e", 3.0, True)], seen_
     ok += 1
 
     # 10. compaction: the 'system' snapshot survives the summary requests as 'sysk' (KV rows copied) and the main

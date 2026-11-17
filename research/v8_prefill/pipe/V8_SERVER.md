@@ -38,6 +38,7 @@ Options (defaults are the best measured):
 | `V8_V02` env | anemll-forge-v02 | the release tree imported (`scripts/qwen38_server.py`, the bridge, the drafter) |
 | `NGRAM_DRAFT` env | 0 | prompt-lookup drafts (release server `--ngram-draft`), off until the greedy divergence is explained |
 | `DRAFT_GAP_MS` env | 1 on M6 | minimum gap between a target verify and the next drafter call |
+| `V8_AB` env | off | decode A/B over requests, e.g. `g1l,g3l,g3e` (draft gap ms, drafter context lazy / eager); `unit/srv_ab_summ.py` |
 
 ## How a request runs
 
@@ -181,6 +182,26 @@ the in-memory restore; a 628-token follow-up after it ran on V8 with the V copy 
 0.061 x scale: fp16 rounding of converted rows). The first live test found that a short summary shrinks the cache
 to the 8K entry, below an 8.4K system prompt: the restore now grows the context first, and falls back to a cold
 start if it cannot restore. Logs: `coreai_seg_logs/v8_server_speedup_check1.log`, `v8_server_speedup_check2.log`.
+
+In a Pi session (17:14 to 18:03): Pi compacted at 65K; the summary request kept 'sysk' (5888 tokens, 185 MB, 33 ms),
+the compacted context restored it (rows written back in 37 ms) and prefilled 14,262 tokens instead of 20,150 (10 to
+12 s saved). The text match (one re-tokenized spot in the first answer, every follow-up) now uses a memo of the
+stretch where the release tokens and the state's cover the same text: 0.3 ms per request (the general path: about
+25 ms at 65K, on top of the release tokenizer's 28 ms).
+
+Decode A/B (`V8_AB=g1l,g3l,g3e`, interleaved over the session's requests, 64K entry, by verify cycles):
+
+| arm | requests | ms/cycle | draft | verify | sample |
+|---|---|---|---|---|---|
+| g1l (1 ms gap, lazy context: the default) | 5 | 142.8 | 13.7 | 127.4 | 0.87 |
+| g3l (3 ms gap, lazy) | 6 | 144.3 | 15.9 | 127.1 | 0.71 |
+| g3e (3 ms gap, eager: before the port) | 6 | 144.1 | 15.4 | 126.9 | 0.86 |
+
+The 1 ms gap saves about 2 ms per cycle at 32K and 64K with the verify unchanged; lazy and eager context are the same.
+The verify rose from about 121 ms (earlier sessions) to 125 to 127 ms in every arm: not the port but the machine. A
+visible Chrome tab (the WebGL page under test) and Screen Sharing kept the GPU about 66% busy with the server idle; on
+the M6 the GPU's load takes ANE speed (the shared power budget), and the V8 prefill's GPU work and K8V16 fills waited
+too (fills 65 to 368 ms instead of 31 to 58 ms, a cold 45K summary at 387 tok/s). Benchmarks need that GPU idle.
 
 ## Files
 

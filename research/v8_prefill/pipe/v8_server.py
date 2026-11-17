@@ -72,6 +72,8 @@ class V8Engine(S.Engine):
         self._added = {i: t.content for i, t in self.tok.added_tokens_decoder.items()}
         self._tbc = {}
         self._dec_last, self._dec_slot, self._dec_n, self._dec_ms = 0, -1, 0, 0.0
+        self._tm_memo = None
+        self._ab_init(os.environ.get("V8_AB", ""))
         probe = "<|im_start|>user\nprobe: café ⇔ 你好 \U0001f600 <tool_call>\n</tool_call><|im_end|>\n"
         pid = self.tok.encode(probe, add_special_tokens=False)
         self.text_match = TEXT_MATCH and b"".join(self._tb(t) for t in pid) == probe.encode() and \
@@ -112,6 +114,16 @@ class V8Engine(S.Engine):
         if not self.text_match or not n or (len(ids) > n and ids[:n] == f):
             return ids
         t0 = time.perf_counter()
+        ids0 = ids   # the release tokens (the memo maps a prefix of these)
+        memo = self._tm_memo
+        if memo is not None:   # a stretch where the release tokens and the state's cover the same text (last match)
+            c_, s_ = memo
+            if len(ids) >= len(c_) and n >= len(s_) and ids[:len(c_)] == c_ and f[:len(s_)] == s_:
+                ids = s_ + ids[len(c_):]       # the same text, the state's tokens for that stretch
+                if len(ids) > n and ids[:n] == f:
+                    S.log(f"[cache] text match (memo, {len(s_)} state tokens): the state's tokens kept for {n} of {n}; "
+                          f"prompt -> {len(ids)} tok ({1e3 * (time.perf_counter() - t0):.1f} ms)")
+                    return ids
         j = next((i for i, (a_, b_) in enumerate(zip(ids, f)) if a_ != b_), min(len(ids), n))
         try:
             pb = b"".join(self._tb(t) for t in ids)
@@ -137,12 +149,44 @@ class V8Engine(S.Engine):
                     [t for t in new if t in self._added] != [t for t in ids if t in self._added]:
                 S.log(f"[cache] text match rejected (bytes or special tokens differ); token match {j} of {n}")
                 return ids
+            # the memo: the longest release-token / state-token prefixes ending on the same byte (<= s0)
+            offc = list(itertools.accumulate(len(self._tb(t)) for t in ids0))
+            com = sorted(set(off[:k]) & set(offc))
+            val = com[bisect.bisect_right(com, s0) - 1] if com and com[0] <= s0 else 0
+            if val:
+                kk, jj = bisect.bisect_left(off, val) + 1, bisect.bisect_left(offc, val) + 1
+                if [t for t in f[:kk] if t in self._added] == [t for t in ids0[:jj] if t in self._added]:
+                    self._tm_memo = (list(ids0[:jj]), list(f[:kk]))
         except Exception as e:  # noqa: BLE001  the release rendering stands
             S.log(f"[cache] text match failed ({type(e).__name__}: {str(e)[:100]})")
             return ids
         S.log(f"[cache] text match: the state's tokens kept for {k} of {n} (token match stopped at {j}); prompt "
               f"{len(ids)} -> {len(new)} tok ({1e3 * (time.perf_counter() - t0):.0f} ms)")
         return new
+
+    # ---- decode A/B (V8_AB=g1l,g3l,g3e): request i takes arm i % len; g<ms> = the draft gap, l / e = the drafter's
+    #      context written lazily (before the next draft: the ported default) or eagerly (right after the verify) ----
+    def _ab_init(self, spec):
+        self._ab = [a_ for a_ in spec.split(",") if a_]
+        assert all(re.fullmatch(r"g\d+(\.\d+)?[le]", a_) for a_ in self._ab), self._ab
+        self._ab_i, self._ab_eager = 0, False
+        if self._ab and self.drafter is not None and hasattr(self.drafter, "flush"):
+            add0 = self.drafter.add_context
+
+            def add_context(feats, positions, flush=True):
+                return add0(feats, positions, flush=flush or self._ab_eager)
+            self.drafter.add_context = add_context
+        if self._ab:
+            S.log(f"[ab] decode A/B over requests: {', '.join(self._ab)}")
+
+    def _ab_next(self):
+        if not self._ab:
+            return None
+        arm = self._ab[self._ab_i % len(self._ab)]
+        self._ab_i += 1
+        S.DRAFT_GAP, self._ab_eager = float(arm[1:-1]) / 1e3, arm[-1] == "e"
+        S.log(f"[ab] arm {arm}: draft gap {arm[1:-1]} ms, drafter context {'eager' if self._ab_eager else 'lazy'}")
+        return arm
 
     # ---- decode: UTF-8 hold-back, decode snapshots, snapshot validity ----
     def generate(self, *args, **kwargs):
@@ -159,6 +203,7 @@ class V8Engine(S.Engine):
                 return s_
             self.tok.decode = dec
         self._dec_n, self._dec_ms = 0, 0.0
+        self._ab_next()
         try:
             return super().generate(*args, **kwargs)
         finally:
