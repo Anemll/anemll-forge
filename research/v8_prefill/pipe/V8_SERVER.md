@@ -73,6 +73,25 @@ Options (defaults are the best measured):
 
 ## Results (M6, macOS 27.3, speculative decode on)
 
+Current (16 Nov evening, with every change below: 96K context, greedy, thinking off, the GPU otherwise idle;
+`unit/cmp_bench.py`: a unique salt per cold prompt, then one follow-up turn of the answer + 300 new tokens; client
+time to the first streamed token):
+
+| prompt | cold prefill | follow-up | decode cycle | tokens per verify (cold / follow-up) | decode tok/s (cold / follow-up) |
+|---|---|---|---|---|---|
+| 2K | 586 tok/s, 3.6 s | 1.04 s | 108 ms | 3.66 / 6.40 | 34.4 / 61.0 |
+| 8K | 658 tok/s, 12.5 s | 1.15 s | 112 ms | 2.72 / 7.31 | 24.6 / 67.2 |
+| 16K | 620 tok/s, 26.5 s | 1.90 s | 120 ms | 2.42 / 4.20 | 20.4 / 35.5 |
+| 32K | 541 tok/s, 61 s | 1.75 s | 134 ms | 2.56 / 3.77 | 19.3 / 28.7 |
+| 64K | 420 tok/s, 156 s | 2.36 s | 153 ms | 2.78 / 3.10 | 18.5 / 20.7 |
+| 95K | 347 tok/s, 274 s | 2.92 s | 155 ms | 2.81 / 7.76 | 18.9 / 53.7 |
+
+At 2K the run itself does 655 tok/s: about 0.4 s per request is fixed (setup, the drafter's context after the run,
+HTTP and template), and 17 pairs leave a pipeline fill / drain of about one pair. Results:
+`coreai_seg_logs/cmp_v8_96k.jsonl`.
+
+Earlier (16 Nov morning, the configuration matrix):
+
 Cold prefill, server-side tok/s (whole request, includes handover and drafter context):
 
 | prompt | K8V16 (default) | KV8 | fp16 KV (ctx 32K) | bridge only |

@@ -1,8 +1,23 @@
 # V8 GPU + ANE prefill (research, M6, 13 to 16 Nov 2026)
 
 Qwen3.8-27B (release 0.2, vq3pA) prefill on the M6 with every FFN on the Neural Engine and every mixer (DeltaNet and
-attention) on the GPU, plus an OpenAI-compatible server built on it. Cold prefill 634 tok/s at 2K, 663 to 700 at 6K,
-350 at 95K (ANE-only: about 300 / 180; splash 1.3.2 on the same machine: 500 / 288).
+attention) on the GPU, plus an OpenAI-compatible server built on it.
+
+The server (16 Nov evening: 96K context, DFlash2 all3 drafter, greedy, thinking off, the GPU otherwise idle;
+`pipe/unit/cmp_bench.py`, times to the first streamed token at the client):
+
+| prompt | cold prefill | follow-up (about 320 new tokens) | decode cycle | decode, cold turn |
+|---|---|---|---|---|
+| 2K | 586 tok/s (3.6 s) | 1.04 s | 108 ms | 34.4 tok/s |
+| 8K | 658 tok/s (12.5 s) | 1.15 s | 112 ms | 24.6 tok/s |
+| 16K | 620 tok/s (26.5 s) | 1.90 s | 120 ms | 20.4 tok/s |
+| 32K | 541 tok/s (61 s) | 1.75 s | 134 ms | 19.3 tok/s |
+| 64K | 420 tok/s (156 s) | 2.36 s | 153 ms | 18.5 tok/s |
+| 95K | 347 tok/s (274 s) | 2.92 s | 155 ms | 18.9 tok/s |
+
+The ANE-only target build of the same model prefills about 300 tok/s at 2K to 8K and 180 at 96K. Decode speed is the
+cycle time over the accepted draft tokens: 2.4 to 3.7 per cycle on these cold turns, up to 7.8 when the answer
+repeats earlier text (follow-ups: 20 to 67 tok/s).
 
 - [PREFILL_RESEARCH.md](PREFILL_RESEARCH.md): what was tried, what was kept or rejected and why, numbers, lessons.
 - [pipe/V8_SERVER.md](pipe/V8_SERVER.md): the server (run, options, request flow, results, KV8 findings).
@@ -35,9 +50,9 @@ commits of this branch hold the builder and runtime changes they need (`coreai/`
 | `prototypes/hybrid_*.py`, `gpu_ane_*.py`, `w8a8_mlp_probe.py`, `capture_hidden.py` | V1 hybrid and earlier probes | same |
 | `prototypes/kv_slice_probe*.py`, `view_resize_check.py`, `e2e_seg_check.py`, `e2e_server_check.py`, `hwx_share_check.py` | KV segment / view probes and checks behind commit 1 | same |
 | `a8probe/` | A8 and long-context run scripts, A8 probe results (json) | `SSD/a8probe` |
-| `splash132/` | splash 1.3.2 serve and bench scripts (comparison) | `C/v8_work/splash132` |
+| `splash132/` | splash 1.3.2 serve and bench scripts, `cmp_96k.sh` (the same requests on V8 and splash) | `C/v8_work/splash132` |
 | `tools/swap_watchdog.sh` | swap guard used by every long job | `SSD/tools` |
-| `results/` | server matrix, K8V16 64K run, splash runs | `SSD/coreai_seg_logs` |
+| `results/` | server matrix, K8V16 64K run, splash runs, `cmp_{v8,splash}_96k.jsonl` | `SSD/coreai_seg_logs` |
 
 Absolute paths in the scripts:
 

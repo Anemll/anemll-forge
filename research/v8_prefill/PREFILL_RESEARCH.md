@@ -20,6 +20,34 @@ Server-side tok/s for a whole cold request (handover and drafter context include
 are 3 to 4% lower; on that basis V8 leads splash by 21% at 2K, about 35% at 6K to 8K, 30% at 16K, 25% at 32K and
 20 to 23% at 64K to 95K. Splash runs a different 3-bit model (unsloth UD-IQ3_XXS GGUF), so quality was not compared.
 
+### The same requests at the same 96K context (16 Nov evening)
+
+`splash132/cmp_96k.sh`: `pipe/unit/cmp_bench.py` on the V8 server, then on splash 1.3.2 served with
+`--max-context 96K` (its earlier runs: 256K), one server at a time, the GPU otherwise idle. The same documents and
+instructions (a random 12-character salt per cold prompt, 1 token of difference), 2 min idle before each cold prompt,
+256 tokens greedy with thinking off, one follow-up turn (each model's own answer + 300 new tokens), both with a DFlash2
+drafter. Client time to the first streamed token.
+
+| prompt | cold prefill V8 | splash | V8 lead | follow-up V8 | splash | decode cycle V8 | splash |
+|---|---|---|---|---|---|---|---|
+| 2K | 586 tok/s | 476 | +23% | 1.04 s | 1.48 s | 108 ms | 116 ms |
+| 8K | 658 | 480 | +37% | 1.15 s | 1.58 s | 112 ms | 119 ms |
+| 16K | 620 | 454 | +37% | 1.90 s | 1.73 s | 120 ms | 122 ms |
+| 32K | 541 | 404 | +34% | 1.75 s | 2.09 s | 134 ms | 131 ms |
+| 64K | 420 | 329 | +28% | 2.36 s | 2.71 s | 153 ms | 141 ms |
+| 95K | 347 | 283 | +23% | 2.92 s | 3.34 s | 155 ms | 148 ms |
+
+- Prefill: V8 leads at every length. Splash at 96K context ran within 1 to 5% of its 256K-context runs.
+- Follow-ups: both servers keep the prompt cache (splash reported 95,040 of 95,630 tokens cached); V8 is faster at 5
+  of 6 lengths.
+- Decode: V8's verify cycle is cheaper to 16K, the same at 32K and 5 to 8% dearer from 64K (the ANE verify carries
+  the long attention). Acceptance is close on cold turns (V8 2.4 to 3.7 tokens per cycle, splash 2.6 to 4.4) and
+  follows the text on follow-ups. Cold-turn decode is within 10% to 32K; at 64K / 95K splash decodes 22.6 / 20.4 tok/s
+  against 18.5 / 18.9.
+- End to end, a 95K cold prompt + 256 tokens: V8 287 s, splash 348 s.
+- One run per point; different weights (the answers and their acceptance differ). Results:
+  `results/cmp_v8_96k.jsonl`, `results/cmp_splash_96k.jsonl`.
+
 ## How we measured
 
 - **Prefill only**: driver timing from the first block to the last logits (`prototypes/v8_prefill.py --mode v8`).
@@ -238,6 +266,43 @@ unchanged.
   score matrix (about 190 MB per call) is most of it.
 - **96K decode: bound by the ANE verify step** (135 of 152 ms).
 
+## Decode: where the verify time goes, and GPU attention for it (16 Nov, night)
+
+The decode cycle is the drafter call (13 to 16 ms) + the target's 8-row verify on the ANE (85 to 90%) + about 1 ms of
+host work. The verify costs about 90 ms without attention + about 0.5 ms per 1K rows of its context entry, whatever
+the position (static shapes: the attention runs over the whole entry's KV, 32 KB per position for 16 layers): 94 ms
+in the 8K entry, 106 in 32K, 120 in 64K, 138 in 96K. A 65.6K prompt is past the 64K entry's 65,472 rows, so it decodes
+in the 96K entry: 153 ms per cycle at 65.6K, 155 at 95K (splash's GPU attention follows the actual length: 141 / 148).
+
+Two levers:
+- **Intermediate entries** (48K, 80K): save 0.5 ms per 1K of overshoot, at most 8 ms per cycle (5%) just past a
+  boundary, nothing at the top of an entry. An entry has to end on a KV segment boundary, and the 96K entry already
+  binds 5 segments per attention layer (the binding count limit: about 51 per function).
+- **Attention on the GPU over the actual length** (the ANE verify split around the 16 attention layers): with a kernel
+  at the read floor (the GPU streams 148 GB/s here; 32 KB per position) plus about 6 ms of handoffs per verify
+  (16 GPU round trips at 0.14 ms + the extra ANE calls), the projection was 5 to 23 ms per cycle saved from 16K.
+
+The standalone test (`pipe/unit/decode_attn_bench.swift`, `decode_attn_flash.swift`, `decode_attn_flash2.swift`:
+synthetic KV in the ANE cache layout, 16 layers, 48 query vectors per KV head padded to 64, checked against a CPU
+reference to 0.02%) did not get there:
+
+| kernel | 96K, 16 layers | per 1K keys |
+|---|---|---|
+| the engine's prefill attention core, one 64-row tile per head | 82.7 ms | 0.86 ms |
+| flash decoding, online softmax per 64-key sub-tile | 100 ms | 1.04 ms |
+| flash decoding, two passes per chunk (scores in a cache scratch) | 92.7 ms | 0.97 ms |
+| flash decoding, scores and P in threadgroup memory | 89.4 ms | 0.93 ms |
+| the ANE today (96K entry) | about 48 ms | 0.5 ms per 1K of entry |
+| the read floor (3.2 GB at 148 GB/s) | about 21 ms | 0.22 ms |
+
+All of them stay near 35 GB/s: latency, not bandwidth or compute. A threadgroup walks its keys strictly in sequence
+(a small int8 QK matmul, softmax, rescale, a small PV matmul, barriers), the prefill kernels get their parallelism from
+row tiles (decode has one: the value product ran on 8 threadgroups), and the 64 x 256 fp32 accumulator per threadgroup
+probably limits occupancy (not measured). Getting to about 0.3 ms per 1K needs a tuned kernel (the head dimension
+split over threadgroups, double-buffered K / V loads, 128 to 256 keys per matmul), then the split build and the engine
+work; parked. Larger key tiles made the prefill kernels slower (more score traffic), and INT8 V was not faster than
+the fp16 copy in any of them.
+
 ## Open levers
 
 - **A8 in the server for 6K to 16K** (+6 to 10%). It needs the memory work to fit at 64K+.
@@ -245,7 +310,9 @@ unchanged.
   - DeltaNet q / k / v / z projections on the ANE (estimated about 520 tok/s at 64K);
   - attention with the scores kept on chip, or fp8 P (small probabilities may underflow);
   - finer ANE context rungs.
-- **GPU attention for the decode verify** at 96K. This needs an ANE build split around the attention layers.
+- **Decode at long context:** intermediate context entries (48K / 80K, needs room for one more KV segment), or GPU
+  attention for the verify (needs a tuned flash-decoding kernel first: the standalone test above reached 0.93 ms per
+  1K keys, the ANE does 0.5 ms per 1K of entry).
 - **V8 continuation at any position**, which saves one bridge block (0.2-0.45 s) on some follow-ups.
 - **1000 tok/s** needs about 53 TFLOPS effective (53 GFLOP per token). That means the ANE's INT8 rate for the FFN
   and more of the GPU's work moved to the ANE, under the shared power budget.
@@ -265,3 +332,4 @@ unchanged.
 | server | `pipe/v8_server.py`, `v8_engine.py`, `pipe/unit/srv_bench.py`, `srv_matrix.sh`, `results/srv_matrix.jsonl` | table above |
 | short prefills, prompt cache | `pipe/engine/patch_fillfrom.py`, `pipe/unit/shortfix_check.py`, `srv_log_prefill.py` (log: `SSD/coreai_seg_logs/v8_server_8765_pre_shortfix.log`) | `pipe/V8_SERVER.md` |
 | splash | `splash132/serve.sh`, `bench.py`, `long_bench.sh`, `results/splash132_*.jsonl` | 2K 500, 96K 288 |
+| V8 vs splash, 96K context | `splash132/cmp_96k.sh`, `pipe/unit/cmp_bench.py`, `results/cmp_{v8,splash}_96k.jsonl` | table above |
