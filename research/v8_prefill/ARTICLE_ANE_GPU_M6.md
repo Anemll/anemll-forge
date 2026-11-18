@@ -66,8 +66,6 @@ run within run noise (576 to 668 tok/s at 2K to 16K, 429 at 64K, 358 at 95K):
 
 - **Prefill:** the hybrid leads splash 1.3.2 by 37% to 23%   at every length and roughly doubles the Neural Engine alone.
 - **Follow-up turns** (the cold prompt, the model's own answer, then 300 new tokens): faster at five of six lengths.
-  Our server continues from its saved state and prefills only the new text; splash 1.3.2 caches the prompt it was sent
-  and prefills its own previous answer again.
 - **Decode:** the cycle (one draft plus one verification) is faster up to 16K and about the same as splash 1.3.2 from 32K.
   Before the decode work described below, it was 5 to 8% slower than splash 1.3.2 from 64K.
 - **End to end**, a 95K cold prompt plus 256 generated tokens: 278 s on the hybrid, 348 s on splash 1.3.2.
@@ -130,15 +128,9 @@ the drafter and the verification on the Neural Engine plus about 1 ms on the hos
 
 **In a real coding agent.** We ran the same Pi coding-agent prompts on both servers (the hybrid and splash 1.3.2), with the same sampling and the
 same thinking budget. A hidden test suite of 1,373 checks graded a cron-expression library that both models wrote:
-both scored 1,373 of 1,373. Decode speed was within 6% (31.8 against 33.7 tokens per second). The hybrid spent 22 s on
-prefill over the whole session against 133 s for splash 1.3.2, because splash 1.3.2 prefilled its own previous answer
-on every turn. Each run took as long as the model's behavior made it (how many tests it wrote, how many debugging turns it
+both scored 1,373 of 1,373. Decode speed was within 6% (31.8 against 33.7 tokens per second). Each run took as long as the model's behavior made it (how many tests it wrote, how many debugging turns it
 needed), which varies from run to run. A single-turn probe showed no difference in how much either model thinks or
 writes per answer.
-
-![Total prefill time in the coding-agent session: hybrid 22 s, splash 1.3.2 133 s](img/07-follow-up-state-reuse.png)
-
-*The graded cron-library session against splash 1.3.2 (incoai's GPU+ANE engine): the same result, decode within 6%, and a sixth of the prefill time.*
 
 ## How we optimized prefill
 
@@ -205,11 +197,36 @@ decode can continue from a prefill without copying anything. The first version l
 probability and a value scale went subnormal in FP16 (about 1% error), fixed by rescaling. The server default keeps
 INT8 keys and an FP16 copy of the values on the GPU (3.2 GB at 96K) for a faster value product.
 
-**7. The ceiling we hit: a shared power budget.** The two units slow each other down. The GPU's attention call at 60K
-takes 18.7 ms alone and 27 ms (+44%) while the Neural Engine works; the FFN slows 3 to 20% under GPU load. It is not
-memory bandwidth: a weight-light, compute-heavy Neural Engine program causes the same slowdown, and a 153 GB/s GPU
-memory stream costs the Neural Engine only 7%. The matrix units appear to share a power or clock budget, so per-unit
-speeds do not add up. The best prefill-only run reached 745 tokens per second at 2K, short of the 1000 we hoped for.
+**7. The ceiling we hit: the two units slow each other down.** Running both at once costs each some speed: the GPU's
+attention call at 60K takes 18.7 ms alone and 27 ms (+44%) while the Neural Engine works, and the Neural Engine's FFN
+slows 3 to 20% under GPU load. The cause is matrix work on both sides, not memory traffic. Under three kinds of GPU
+load the Neural Engine slowed 3% (plain arithmetic), 7% (a 153 GB/s memory stream) and 20% (our INT8 DeltaNet matrix
+loop); in the other direction, a Neural Engine program with few weights but heavy compute slowed the GPU as much as
+the weight-heavy FFN, and the GPU slows only once the Neural Engine is more than about 50% busy. Our best explanation
+is a shared power or clock limit on the two matrix engines (the power controller lowering one unit's clock when the
+other draws more), so their separate peak speeds do not add up. It is a hypothesis: we did not record power or clocks,
+and contention in the shared system cache for matrix work would fit the same tests. Sampling GPU frequency and Neural
+Engine power (`powermetrics`) while both units work would settle it.
+
+This is also part of why the split pays off. The mixers are only partly matrix work (the DeltaNet recurrence is a
+serial chain, plus norms, convolutions, gates and the softmax), so while the Neural Engine runs the matrix-heavy FFNs,
+the GPU's matrix units are not fully loaded and the budget has room for both. At long context the GPU's attention,
+which is mostly matrix work, takes over, and the units slow each other more. That reading comes from these stress
+tests; we have not measured how much of the mixers' time is matrix work. It is also separate from heat: thermal drift
+under minutes of sustained load costs 5 to 10% and goes away after 5 minutes idle (we compare only interleaved runs),
+while this coupling is larger, appears as soon as both units work and depends on the kind of work.
+
+What we did about it: we did not remove the ceiling, we designed around it.
+
+- **A split that suits it:** the matrix-heavy FFNs on the Neural Engine, the partly-matrix mixers on the GPU.
+- **Less GPU time per layer:** the fused INT8 kernels of step 5 (a DeltaNet layer from 2.59 to 1.97 ms per 128 rows).
+- **Every offload judged on the pair, end to end and interleaved, not on each unit's own timing.** That rejected moves
+  the per-unit arithmetic favored: DeltaNet mixers on the Neural Engine (+2 to 3% at 64K and above, worse below),
+  attention projections on the Neural Engine at short context (they help only where the GPU is the bottleneck, and
+  cost 9% at 2K), and runtime-INT8 FFN waves sized for the Neural Engine alone.
+
+What remains is the ceiling itself: the best prefill-only run reached 745 tokens per second at 2K, short of the 1,000
+we hoped for. The levers left are in "What is next".
 
 ![GPU attention at 60K: 18.7 ms alone, 27.0 ms while the Neural Engine is active](img/08-shared-performance-ceiling.png)
 

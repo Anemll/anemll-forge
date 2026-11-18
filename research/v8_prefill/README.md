@@ -102,7 +102,7 @@ commits of this branch hold the builder and runtime changes they need (`coreai/`
 | `v8/build_dec_att*`, `build_dec_split_probe*`, `build_sync_bridge*` | decode probes: ANE partial attention by key range (rejected), split probes | same |
 | `pipe/unit/dec*`, `decode_*.swift`, `gpu_wake_lat.swift`, `bw/`, `DECODE_GPU_ATTENTION.md` | decode checks, kernel tests, bandwidth tests and the decode write-up | `C/v8_work/pipe/unit` |
 | `bench/cron/`, `bench/verbosity/` | Pi coding comparison: the cron prompt and hidden grader, the single-turn verbosity probe | `C/v8_work/bench` |
-| `ARTICLE_ANE_GPU_M6.md`, `img/` | the human-readable article on this work and its 13 slides (1920 px PNG) | |
+| `ARTICLE_ANE_GPU_M6.md`, `img/` | the human-readable article on this work and its 12 slides (1920 px PNG) | |
 | `w8a8/` | ANE INT8 program builders / probes: V7 W8A8, A8 FFN shape and real probes, A8 attention, LUT split | `C/v8_work/w8a8` |
 | `prototypes/v8_prefill.py` | the standalone V8 driver (all research runs: ref, v8, handover, kv8, attproj, sweeps) | `C/claude_full96_prep/freeze_kv_slice_v1` |
 | `prototypes/hybrid_*.py`, `gpu_ane_*.py`, `w8a8_mlp_probe.py`, `capture_hidden.py` | V1 hybrid and earlier probes | same |

@@ -237,7 +237,8 @@ IOSurfaces, used zero-copy.
 - **Not bandwidth.** A weight-light, compute-heavy ANE program and the weight-heavy FFN loop cause the same slowdown.
   A 153 GB/s GPU memory stream costs the ANE only 7% and ALU FMA 3%, but the int8 DeltaNet loop costs 20%.
   In V8 the GPU slows only once the ANE is busier than about 50%.
-- **The conclusion:** a shared power or clock budget for the matrix units. Moving work to an idle unit buys less than
+- **The likely cause:** a shared power or clock limit on the matrix units (not measured: no power or clock samples yet;
+  shared system-cache contention for matrix work would fit the same tests). Moving work to an idle unit buys less than
   the arithmetic says. ANE prefix chunks at long context, ANE mixers and the A8 wave size all hit this.
 - **Core AI's own GPU path** cannot be the V8 GPU side: `ffn2_L0` took 89.5 ms there (our Metal 4.6), the DeltaNet mix
   took 438 ms, and the 593 MB chunk took 118 s to load and expanded its weights into memory.
