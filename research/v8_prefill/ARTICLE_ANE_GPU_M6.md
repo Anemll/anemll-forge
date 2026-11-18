@@ -346,10 +346,15 @@ Everything is on the ANEMLL Forge research branch `v8-gpu-ane-prefill`, in
 | Point Pi at it | [main README, section 5](../../README.md#5-apply-the-pi-configuration-patches) (provider `ane-qwen38`, port 8765) |
 | Measure | `pipe/unit/cmp_bench.py` and `splash132/cmp_96k.sh` (the 96K table), `bench/cron/` (the coding prompt and its hidden grader) |
 
-**Today's limits.** The GPU tables are built from the release export, which is not public yet, and the research
-scripts use the development machine's absolute paths (listed in the [research README](README.md)). A portable kit is
-the next step: a launcher that takes the download folder, the tables shipped with a check against the local compile,
-and a Pi configuration entry. Until then, reproducing the hybrid needs that export.
+**Today's limits.** Every input is public, but the path is not yet push-button. The GPU tables are built on your Mac
+from your own compiled Neural Engine programs (which is why SIP must be off), the HWX parser of
+[freedomtan/coreml_to_ane_hwx](https://github.com/freedomtan/coreml_to_ane_hwx) and the public release 0.2 export in
+[anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI): the matrices in `export/release_vq3pA_mixh_s600_k1_mat/` (byte-identical to the files this build was made from)
+and the small tensors in `model/`. What is missing: the research scripts use the development machine's absolute paths
+(listed in the [research README](README.md)), the table step needs the builder environment (torch and the Core AI
+Python tools), and the path has not been tested on another machine. A portable kit is the next step: a launcher that
+takes the download folder, our tables shipped with a check against the local compile (so a matching compile skips the
+rebuild), and a Pi configuration entry.
 
 ## Lessons that carry over
 

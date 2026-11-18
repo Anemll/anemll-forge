@@ -21,7 +21,7 @@ tags:
 
 > **Research work, not a release.** This repository is an experimental research build. It needs System Integrity
 > Protection disabled and a one-time root permission (see [Status](#status)), runs only on an M6 with macOS 27.3, and
-> cannot yet be reproduced on another machine without our release export. For the supported release use
+> is not yet push-button to reproduce (the scripts carry the development machine's paths; see Status). For the supported release use
 > [anemll/anemll-forge-qwen3.8-27B-192K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-192K).
 
 **Start here:**
@@ -73,8 +73,9 @@ This is a research preview, not a release:
 - The GPU engine's tables are generated on each machine after its first compile, from that machine's compiled Neural
   Engine programs: `prep_engine.py` and `prep_kv8.py` read them with the `hwx_parsing` tool of
   [freedomtan/coreml_to_ane_hwx](https://github.com/freedomtan/coreml_to_ane_hwx) (BSD-3-Clause, built with `make`)
-  and also read the release export, which is not part of this repository yet. Until a portable table kit is added,
-  running the hybrid on another machine needs that export.
+  and also read the public release 0.2 export, [anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI): `export/release_vq3pA_mixh_s600_k1_mat/` (the same files this
+  build was made from) and the small tensors in `model/`. The table step needs the builder environment (torch and the
+  Core AI Python tools); a portable table kit, with our tables and a check against the local compile, is the next step.
 - **M6 only** (FP8 attention), 32 GB of memory, macOS 27.3.
 
 ## Measured (M6, 32 GB, macOS 27.3)
@@ -133,7 +134,7 @@ Disk: about 14 GB to download, plus Core AI's compile cache and the system's com
 ## Limitations
 
 - Research preview: SIP off and a root permission are required, the included scripts use the development machine's
-  paths, and the GPU-table step needs the release export (see Status).
+  paths, and the GPU-table step needs the public release export and the builder environment (see Status).
 - Quality: the weights and their quantization are those of release 0.2 (KL and perplexity measured there, up to 64K).
   The hybrid prefill computes the same model on the GPU and the Neural Engine; its logits differ from the
   Neural-Engine-only path by a small, length-dependent KL (last-token KL 0.010 at 2K, 0.058 at 64K). SPLIT+GPU's

@@ -70,7 +70,8 @@ stand in the way:
    the whole Mac: keep this to a dedicated research machine.
 
 The GPU tables point into those compiled files, so they are rebuilt after every recompile (a macOS update or a cache
-purge; Build chain, step 3). Building them needs the release export and the HWX parser, and they match only this
+purge; Build chain, step 3). Building them needs the public release 0.2 export ([anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI): `export/release_vq3pA_mixh_s600_k1_mat/` and `model/` for the
+small tensors, byte-identical to ours) and the HWX parser, and they match only this
 compiler's output (M6, macOS 27.3 build 26C5035r): other chips and macOS builds are untested.
 
 The research scripts are committed as they ran: they use absolute paths on the M6 (below). The release-code
