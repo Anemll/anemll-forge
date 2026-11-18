@@ -2,6 +2,7 @@
 Neural Engine with no runtime weight expansion? One real layer's FFN (gate / up 5120 -> 17408, tanh SiLU, the seed_mid
 rotation, down 17408 -> 5120), compile-time weights only:
   lut16    production: palettized FP16 conv weights (qwen38_coreai_build QConv, exact palettization pass)
+  lut16s   lut16 in the split shape of lut8a8s (17 output blocks of 1024, K split): the FP16 baseline for it
   lut8w    weights: coreai::lut_to_dense(3-bit indices, INT8 palette) -> constexpr_blockwise_shift_scale (palette
            scale), then the per-row scale after the conv as in production; activations FP16
   lut8a8   lut8w weights + every activation operand of the three matmuls as per-token INT8: absmax -> quantize ->
@@ -26,7 +27,7 @@ ROOT = Path("/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge")
 EX = "/Users/anemll/Models/vq27b/export/release_vq3pA_mixh_s600_k1_mat/"
 PARSER = "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/hwx/src/hwx_dump/hwx_parsing"
 HID, INTER, NB, BW, KW = 5120, 17408, 17, 1024, 2560
-VARIANTS = ("lut16", "lut8w", "lut8a8", "lut8a8s")
+VARIANTS = ("lut16", "lut16s", "lut8w", "lut8a8", "lut8a8s")
 ROWS = (128, 1024)
 UNIT = 1 / 128
 
@@ -68,13 +69,14 @@ def build(a):
                 idx = idx[:, cols[0]:cols[1]]
             ps = float(np.abs(lut).max()) / 127.0
             l8 = np.clip(np.rint(lut / ps), -127, 127).astype(np.int8)
-            self.register_buffer("idx", torch.from_numpy(np.ascontiguousarray(idx)).view(idx.shape[0], idx.shape[1], 1, 1))
-            self.register_buffer("lut8", torch.from_numpy(l8).view(1, 1, 1, 1, l8.shape[0], cd))
+            # names matter: coreai_torch's sub-byte pass finds lut_to_dense operands by "indices" / "lut" in their names
+            self.register_buffer("indices", torch.from_numpy(np.ascontiguousarray(idx)).view(idx.shape[0], idx.shape[1], 1, 1))
+            self.register_buffer("lut", torch.from_numpy(l8).view(1, 1, 1, 1, l8.shape[0], cd))
             self.register_buffer("ps", torch.tensor(ps, dtype=f16).view(1, 1, 1, 1))
             self.register_buffer("scale", torch.from_numpy(sc.astype(np.float16)).view(1, -1, 1, 1))
 
         def weight(self):
-            w8 = torch.ops.coreai.lut_to_dense(self.idx, self.lut8, 0)          # (Cout, Cin, 1, 1) int8
+            w8 = torch.ops.coreai.lut_to_dense(self.indices, self.lut, 0)       # (Cout, Cin, 1, 1) int8
             return torch.ops.coreai.constexpr_blockwise_shift_scale(w8, self.ps, None, None, torch.int8)
 
         def forward(self, x):
@@ -96,10 +98,39 @@ def build(a):
             d = torch.ops.coreai.dequantize(q, self.unit, zero_point=self.zero, output_dtype=f16)
             return d, peak * (128.0 / 127.0)
 
-    def qconv(m):
+    def qconv(m, rows=None, cols=None, tag=""):   # a production QConv on an index-row / column slice of matrix m
         lut, idx, sc = W[m]["lut"].astype(np.float16), W[m]["idx"].astype(np.uint8), W[m]["scale"].astype(np.float16).reshape(-1)
-        k = "%d/mlp.%s_proj.weight" % (L, m)
+        cd = lut.shape[1]
+        if rows is not None:
+            idx, sc = idx[rows[0] // cd:rows[1] // cd], sc[rows[0]:rows[1]]
+        if cols is not None:
+            idx = idx[:, cols[0]:cols[1]]
+        k = "%d/mlp.%s_proj%s.weight" % (L, m, tag)
         return B.QConv({k + "/lut": lut, k + "/idx": np.ascontiguousarray(idx), k + "/scale": np.ascontiguousarray(sc)}, k)
+
+    class Split16(nn.Module):
+        """lut16 in the split shape (the lut_split_probe 'split' form): the FP16 baseline for lut8a8s."""
+
+        def __init__(self):
+            super().__init__()
+            kp = [(0, KW), (KW, HID)]
+            self.kp = kp
+            self.g = nn.ModuleList([nn.ModuleList([qconv("gate", (j * BW, (j + 1) * BW), c, "_b%dk%d" % (j, i)) for i, c in enumerate(kp)]) for j in range(NB)])
+            self.u = nn.ModuleList([nn.ModuleList([qconv("up", (j * BW, (j + 1) * BW), c, "_b%dk%d" % (j, i)) for i, c in enumerate(kp)]) for j in range(NB)])
+            self.d = nn.ModuleList([qconv("down", None, (j * BW, (j + 1) * BW), "_k%d" % j) for j in range(NB)])
+            rw = rot.conv.weight.detach()
+            for j in range(NB):
+                self.register_buffer("r%d" % j, rw[j * BW:(j + 1) * BW].clone())
+
+        def forward(self, h):
+            hs = [h[:, c0:c1] for c0, c1 in self.kp]
+            y = None
+            for j in range(NB):
+                g = sum(self.g[j][i](hs[i]) for i in range(len(hs)))
+                u = sum(self.u[j][i](hs[i]) for i in range(len(hs)))
+                p = self.d[j](F.conv2d(silu(g) * u, getattr(self, "r%d" % j)))
+                y = p if y is None else y + p
+            return y
 
     class Lut16(nn.Module):
         def __init__(self):
@@ -152,7 +183,7 @@ def build(a):
 
     a.out.mkdir(parents=True, exist_ok=True)
     np.save(a.out / ("rot_L%d.npy" % L), rot.conv.weight.detach().view(INTER, BW).numpy())   # block b = rows b*1024..+1024
-    make = {"lut16": Lut16, "lut8w": lambda: Full8(False), "lut8a8": lambda: Full8(True), "lut8a8s": Split8}
+    make = {"lut16": Lut16, "lut16s": Split16, "lut8w": lambda: Full8(False), "lut8a8": lambda: Full8(True), "lut8a8s": Split8}
     for v in VARIANTS:
         dst = a.out / ("lut8_%s_L%d.aimodel" % (v, L))
         if dst.exists():
