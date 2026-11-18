@@ -19,6 +19,21 @@ tags:
 
 # ANEMLL Forge · Qwen3.8-27B · hybrid Neural Engine + GPU build, 96K context (research preview)
 
+> **Research work, not a release.** This repository is an experimental research build. It needs System Integrity
+> Protection disabled and a one-time root permission (see [Status](#status)), runs only on an M6 with macOS 27.3, and
+> cannot yet be reproduced on another machine without our release export. For the supported release use
+> [anemll/anemll-forge-qwen3.8-27B-192K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-192K).
+
+**Start here:**
+
+- **Article:** [One model, two accelerators](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/ARTICLE_ANE_GPU_M6.md): why, results against splash 1.3.2, how
+  prefill and decode were optimized, the decisions and the research environment restrictions.
+- **Research branch:** [`v8-gpu-ane-prefill`, research/v8_prefill](https://github.com/Anemll/anemll-forge/tree/v8-gpu-ane-prefill/research/v8_prefill): code, notes, benchmarks and every result.
+- **Deployment:** [the research README](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md): [requirements (root and SIP)](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#requirements-root-and-sip),
+  [build chain](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#build-chain) (compile, GPU tables, GPU libraries) and [run](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#run).
+- **Research notes:** [PREFILL_RESEARCH.md](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/PREFILL_RESEARCH.md) (what was tried, kept and rejected) and
+  [DECODE_GPU_ATTENTION.md](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/pipe/unit/DECODE_GPU_ATTENTION.md) (the decode split).
+
 **Research build that runs one large dense model on the M6's Apple Neural Engine and GPU at the same time.** It carries
 the **release 0.2 weights** of [anemll/anemll-forge-qwen3.8-27B](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B)
 with a context of up to **98,304 tokens (96K)**, rebuilt for the hybrid schedule (research name V8):
@@ -98,9 +113,10 @@ A comparison with splash 1.3.2 on the same Mac, the decisions behind the design 
 hf download anemll/anemll-forge-qwen3.8-27B-V8-96K --local-dir ~/Models/anemll-forge-qwen3.8-27B-V8-96K
 ```
 
-Download the whole repository: the server needs every folder below. Then follow the
-[Build chain](code/anemll-forge/research/v8_prefill/README.md#build-chain) (compile, GPU tables, GPU libraries) and
-[Run](code/anemll-forge/research/v8_prefill/README.md#run) steps.
+Download the whole repository: the server needs every folder below. Then follow the deployment steps of the research
+README: [requirements (root and SIP)](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#requirements-root-and-sip),
+[build chain](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#build-chain) (compile, GPU tables, GPU libraries) and [run](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#run) (the same
+file is in this repository at `code/anemll-forge/research/v8_prefill/README.md`).
 
 ## Files
 
