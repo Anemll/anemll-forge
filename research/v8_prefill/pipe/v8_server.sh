@@ -5,7 +5,7 @@
 L=/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs; P=/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe
 B=/Users/anemll/Models/anemll-forge-qwen3.8-27B-192K; PORT=${PORT:-8767}
 lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $PORT in use"; exit 1; }
-[ -s $L/v8_server.log ] && mv $L/v8_server.log $L/v8_server.prev.log   # the previous run's log is kept once
+[ -s $L/v8_server.log ] && mv $L/v8_server.log $L/v8_server.$(date -r $L/v8_server.log +%Y%m%d-%H%M%S).log   # every previous log kept, timestamped
 env MODEL=$B/model SILU=tanh MLP_SILU=tanh GDN_SQ=16 GDN_SV=64 MLP_DS=1 MLP_DS_DYN=0 V3_KV_IN=1 V3_PREFILL=0 \
     EMBED_NPY=$B/model/embed_tokens_fp16.npy RUNTIME=coreai DRAFTER=$B/drafter/all3 COREAI_DRAFTER_COMPUTE=ane \
     MPSGRAPH_ANE_BONDED_COMPILE_MODE=2 \

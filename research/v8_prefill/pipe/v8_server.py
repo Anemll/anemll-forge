@@ -67,6 +67,10 @@ class V8Engine(S.Engine):
                             streams=v.v8_streams, kv8=bool(v.v8_kv8), k8v16=bool(v.v8_k8v16), attproj_from=v.v8_attproj_from,
                             lmax=max(self.model.ladder), log=S.log)
         S.log(f"v8: prefill engine ready in {time.time() - t:.0f}s (V8 for new spans >= {self.v8min} tokens)")
+        self.dec8 = None
+        if v.v8_dec8:   # the decode-verify split (an 8-layer dec8 build): ANE parts around a GPU attention
+            from dec_split import DecSplit
+            self.dec8 = DecSplit(self.model, Path(a.model_dir), log=S.log).install()
         # token bytes (byte-level BPE): the text match and the decode's UTF-8 hold-back
         self._bd = {c: b for b, c in _bytes_to_unicode().items()}
         self._added = {i: t.content for i, t in self.tok.added_tokens_decoder.items()}
@@ -213,6 +217,11 @@ class V8Engine(S.Engine):
                 except AttributeError:
                     pass
             self._prune()
+            if self.dec8 is not None and self.dec8.stats["steps"]:
+                st = self.dec8.stats
+                S.log(f"dec8: {st['steps']} split verify steps, {st['wall_ms'] / st['steps']:.1f} ms each "
+                      f"(GPU attention {st['gpu_ms'] / st['steps']:.1f} ms)")
+                st.update(steps=0, wall_ms=0.0, gpu_ms=0.0)
             if self._dec_n:
                 S.log(f"decode snapshots: {self._dec_n} taken ({self._dec_ms:.0f} ms); kept: {', '.join(sorted(self.snaps))}")
 
@@ -505,6 +514,8 @@ def main():
     p.add_argument("--v8-streams", type=int, default=8)
     p.add_argument("--v8-dylib", default="libgpu_v8_srv3.dylib")
     p.add_argument("--v8-gpu-manifest", type=Path, default=PIPE / "w_shared2r/manifest_best.json")
+    p.add_argument("--v8-dec8", type=int, default=0, help="1: decode verify split (an 8-layer dec8 build, "
+                   "v8/build_dec8_chunk.py): ANE parts around a GPU attention where it is faster (env V8_DEC8)")
     v, rest = p.parse_known_args()
     sys.argv = [sys.argv[0]] + rest
     sys.stdout, sys.stderr = S.SurvivingStream(sys.stdout), S.SurvivingStream(sys.stderr)
@@ -523,6 +534,9 @@ def main():
            "files": [c["file"] for c in man["chunks"]] + [man["head"]["file"]] + ([a.draft] if a.draft else [])}
     aid = J.attempt(dev, pkg, functions=["all"], request={"compute": "ane"})
     t0 = time.time()
+    if v.v8_dec8:
+        from dec_split import patch_runtime
+        patch_runtime()   # one Model per 8-layer package, the entries through the manifest's aliases
     try:
         engine = V8Engine(a, v)
     except Exception as e:  # noqa: BLE001
