@@ -1,9 +1,15 @@
-# GPU attention for the decode verify (16 Nov 2026)
+# GPU attention for the decode verify (16 to 17 Nov 2026)
+
+**Status (17 Nov): served.** The tuned kernel and the 8-layer split build (`v8_dec8`) run in the server as SPLIT+GPU,
+in the 96K entry (past 64K tokens): decode cycle 153 -> 141 ms at 64K and 155 -> 149 ms at 95K, the same as splash
+1.3.2. The ANE and GPU calls are still ordered by the CPU (ComputeStream still does not order them on macOS 27.3); the
+fused `dvba` calls and the kernel work made that pay. See "The 8-layer build, served" below; the 16 Nov answer is kept
+as it was written.
 
 Question: can the 8-row decode verify run its 16 attention layers on the GPU (INT8 KV, flash decoding) while the ANE
 keeps everything else, and is that faster than the ANE verify with its own attention?
 
-Short answer: the kernel is fast and accurate. With the CPU between every ANE and GPU call, the split only wins at the
+Short answer (16 Nov): the kernel is fast and accurate. With the CPU between every ANE and GPU call, the split only wins at the
 96K entry (-2% to -8% per verify step) and loses below it. If ANE and GPU work were ordered without the CPU, it would
 win -10% to -20% from 49K keys up. On macOS 27.3 the Core AI ComputeStream does not order mixed ANE / GPU work, so
 that path is not available. Parked.

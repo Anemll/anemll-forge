@@ -311,7 +311,9 @@ KL divergence is the current distributional-fidelity evaluation; it does not est
 ### Hybrid Neural Engine + GPU (experimental, M6)
 
 Research only, not part of the release: branch `v8-gpu-ane-prefill`, code and notes in
-[research/v8_prefill](research/v8_prefill/README.md) (research name V8 there, unrelated to the INT8 V cache above). The
+[research/v8_prefill](research/v8_prefill/README.md) (research name V8 there, unrelated to the INT8 V cache above).
+Read the article [One model, two accelerators](research/v8_prefill/ARTICLE_ANE_GPU_M6.md) for the full story; the build
+is on Hugging Face as [anemll/anemll-forge-qwen3.8-27B-V8-96K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K). The
 hybrid runs one model on the Neural Engine and the GPU at the same time: every FFN stays on the Neural Engine, and the
 GPU runs the token mixers (DeltaNet and attention) from the same weights in memory.
 
