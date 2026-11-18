@@ -1,4 +1,4 @@
-# GPU + ANE prefill on the M6: what we tried (13 to 16 Nov 2026)
+# GPU + ANE prefill on the M6: what we tried (13 to 17 Nov 2026)
 
 Goal: faster prefill for Qwen3.8-27B (release 0.2, vq3pA: 3-bit VQ MLP, LUT mixers) on the M6 32 GB by using the GPU
 and the Neural Engine together, ideally 700 to 1000 tok/s. The model has 64 layers: 48 DeltaNet (Gated DeltaNet
@@ -17,8 +17,8 @@ Final state: the V8 schedule (all FFN on the ANE, all mixers on the GPU) in an O
 | 95K | 348 to 352 | 180 | 288 |
 
 Server-side tok/s for a whole cold request (handover and drafter context included). Client time-to-first-token figures
-are 3 to 4% lower; on that basis V8 leads splash by 21% at 2K, about 35% at 6K to 8K, 30% at 16K, 25% at 32K and
-20 to 23% at 64K to 95K. Splash runs a different 3-bit model (unsloth UD-IQ3_XXS GGUF), so quality was not compared.
+are 3 to 4% lower; on that basis V8 leads splash 1.3.2 by 21% at 2K, about 35% at 6K to 8K, 30% at 16K, 25% at 32K and
+20 to 23% at 64K to 95K. Splash 1.3.2 runs a different 3-bit model (unsloth UD-IQ3_XXS GGUF), so quality was not compared.
 
 ### The same requests at the same 96K context (16 Nov evening)
 
@@ -28,25 +28,98 @@ instructions (a random 12-character salt per cold prompt, 1 token of difference)
 256 tokens greedy with thinking off, one follow-up turn (each model's own answer + 300 new tokens), both with a DFlash2
 drafter. Client time to the first streamed token.
 
-| prompt | cold prefill V8 | splash | V8 lead | follow-up V8 | splash | decode cycle V8 | splash |
-|---|---|---|---|---|---|---|---|
-| 2K | 586 tok/s | 476 | +23% | 1.04 s | 1.48 s | 108 ms | 116 ms |
-| 8K | 658 | 480 | +37% | 1.15 s | 1.58 s | 112 ms | 119 ms |
-| 16K | 620 | 454 | +37% | 1.90 s | 1.73 s | 120 ms | 122 ms |
-| 32K | 541 | 404 | +34% | 1.75 s | 2.09 s | 134 ms | 131 ms |
-| 64K | 420 | 329 | +28% | 2.36 s | 2.71 s | 153 ms | 141 ms |
-| 95K | 347 | 283 | +23% | 2.92 s | 3.34 s | 155 ms | 148 ms |
+| prompt | cold prefill, tok/s: V8 | splash 1.3.2 | V8 lead | follow-up, time to first token: V8 | splash 1.3.2 | decode cycle: V8 | V8 + SPLIT+GPU | splash 1.3.2 |
+|---|---|---|---|---|---|---|---|---|
+| 2K | 586 tok/s | 476 | +23% | 1.04 s | 1.48 s | 108 ms | 107 ms | 116 ms |
+| 8K | 658 | 480 | +37% | 1.15 s | 1.58 s | 112 ms | 111 ms | 119 ms |
+| 16K | 620 | 454 | +37% | 1.90 s | 1.73 s | 120 ms | 119 ms | 122 ms |
+| 32K | 541 | 404 | +34% | 1.75 s | 2.09 s | 134 ms | 133 ms | 131 ms |
+| 64K | 420 | 329 | +28% | 2.36 s | 2.71 s | 153 ms | **141 ms** | 141 ms |
+| 95K | 347 | 283 | +23% | 2.92 s | 3.34 s | 155 ms | **149 ms** | 148 ms |
 
-- Prefill: V8 leads at every length. Splash at 96K context ran within 1 to 5% of its 256K-context runs.
+- **Cold prefill**: prompt tokens divided by the client's time to the first streamed token of a new conversation.
+- **Follow-up**: the second turn of the same conversation (the cold prompt, the model's own 256-token answer, then 300
+  new tokens). Time from sending the request to its first streamed token at the client, which is mostly the
+  prefill of the text not yet in the server's cache. V8 continues from its saved state and prefills only the new text
+  (about 320 tokens with the chat template); splash 1.3.2 caches the prompt it was sent, not what it generated, so it
+  also prefills its own previous answer (95,040 of 95,630 tokens cached at 95K: 590 tokens prefilled).
+- **Decode cycle**: milliseconds per speculative cycle (the DFlash2 drafter proposes tokens, the target verifies them
+  in one call); decode tok/s = accepted tokens per cycle / cycle time.
+- **SPLIT+GPU** (17 Nov, `pipe/v8_server_dec8.sh`, `pipe/dec_split.py`): a decode-only change. In each verification
+  step only the attention over the KV history of the 16 full-attention layers (QK, softmax, PV over the INT8 K/V
+  cache) runs on the GPU; everything else stays on the Neural Engine (the 48 DeltaNet layers, every FFN and every
+  projection). Per 8-layer package the Neural Engine runs part A (up to the attention layer's q / k / v projections,
+  `dva`), the GPU the attention, the Neural Engine part B of that layer fused with part A of the next (`dvba`), the
+  GPU the next attention, the Neural Engine the rest (`dvb`). The Neural Engine parts bind no KV cache and no mask, so
+  one program serves every context length. It is on only in the 96K context entry, that is past 64K tokens
+  (`V8_DEC8=auto`; the 64K row has 65.6K tokens, so it already runs there): in that entry the Neural Engine's own
+  attention is the most expensive (122 ms per verification step against 85 ms in the 16K entry) and the split is 5 to
+  8% faster. In the 16K and 32K entries it is 8 to 17% slower and in the 64K entry about even (-1.3% to +2.5%),
+  because each Neural Engine / GPU hand-over costs about 0.65 ms, four per package. Running the attention on both
+  units, split by key range, gave about 1 ms per step and was rejected (`pipe/unit/DECODE_GPU_ATTENTION.md`).
+
+- Prefill: V8 leads at every length. Splash 1.3.2 at 96K context ran within 1 to 5% of its 256K-context runs.
 - Follow-ups: both servers keep the prompt cache (splash reported 95,040 of 95,630 tokens cached); V8 is faster at 5
   of 6 lengths.
-- Decode: V8's verify cycle is cheaper to 16K, the same at 32K and 5 to 8% dearer from 64K (the ANE verify carries
-  the long attention). Acceptance is close on cold turns (V8 2.4 to 3.7 tokens per cycle, splash 2.6 to 4.4) and
-  follows the text on follow-ups. Cold-turn decode is within 10% to 32K; at 64K / 95K splash decodes 22.6 / 20.4 tok/s
-  against 18.5 / 18.9.
-- End to end, a 95K cold prompt + 256 tokens: V8 287 s, splash 348 s.
+- Decode: with the Neural Engine verify alone (16 Nov), V8's cycle is cheaper to 16K, the same at 32K and 5 to 8%
+  dearer from 64K (the ANE verify carries the long attention). SPLIT+GPU (above) closes that gap:
+  141 ms at 64K and 149 ms at 95K against splash 1.3.2's 141 and 148. Below the 96K entry it is off and the cycle is unchanged
+  (the 1 ms differences are run noise). Acceptance is close on cold turns (V8 2.4 to 3.7 tokens per cycle, splash 2.6
+  to 4.4) and follows the text on follow-ups. Cold-turn decode is within 10% to 32K; at 64K / 95K splash decodes
+  22.6 / 20.4 tok/s against 18.5 / 18.9 before SPLIT+GPU and 20.6 / 20.4 with it.
+- End to end, a 95K cold prompt + 256 tokens: V8 287 s (278 s with SPLIT+GPU), splash 1.3.2 348 s.
+- The 17 Nov rerun with SPLIT+GPU gave the same prefill within run noise (576 to 668 tok/s at 2K to 16K, 548 at 32K,
+  429 at 64K, 358 at 95K) and follow-ups of 1.1 to 1.7 s to 32K and 2.55 s at 95K; the 64K follow-up took 3.31 s
+  against 2.36 s (one run, not investigated).
 - One run per point; different weights (the answers and their acceptance differ). Results:
-  `results/cmp_v8_96k.jsonl`, `results/cmp_splash_96k.jsonl`.
+  `results/cmp_v8_96k.jsonl`, `results/cmp_v8dec8_96k.jsonl` (SPLIT+GPU), `results/cmp_splash_96k.jsonl`.
+- **Splash 1.3.2 on its GPU alone** (`--disable-ane`, 17 Nov, the same requests, `splash132/cmp_96k_gpu.sh`,
+  `results/cmp_splash_gpu_96k.jsonl`): cold prefill 319 / 317 / 306 / 282 / 244 / 217 tok/s at 2K / 8K / 16K / 32K /
+  64K / 95K. Its Neural Engine split adds 1.49 / 1.51 / 1.48 / 1.43 / 1.35 / 1.31 times; V8 adds 1.83 / 2.08 / 2.02 /
+  1.92 / 1.72 / 1.60 times over the same baseline. Splash's GPU alone matches our ANE-only build up to 16K and leads it
+  at long context (244 against 216 at 64K, 217 against 180 at 95K). Its decode barely changes without the split
+  (within 10%): the split only takes prefill chunks of 512 rows or more. Why splash gains less: its Neural Engine takes
+  76% of each FFN's channels inside each layer and waits while the GPU runs the mixers (busy about 42% of each
+  2,048-row chunk, 13 Nov), while V8 pipelines prompt blocks so both units stay busy; its GPU also computes the other
+  24% of each FFN and stages the Neural Engine's INT8 weights. With kernel tuning these explain the gap, but their
+  shares are not isolated (no matched phase profiles or scheduling ablations yet, and the quantizations differ).
+
+### Pi coding sessions against splash 1.3.2 (17 Nov)
+
+The same Pi coding-agent prompt on each server, one server at a time: V8 with SPLIT+GPU (`pipe/v8_server_dec8.sh`,
+port 8765) and splash 1.3.2 (`splash132/serve_pi.sh`, port 8000, DFlash2 drafter). Both at 96K context, thinking on
+with effort medium, Pi compaction reserve 32,768 / keep 8,192, and the same sampling (neither request sets it, and both
+servers then use temperature 1.0, top_p 0.95, top_k 20, no penalties). Both servers render the same 6,761-token first
+prompt. Our server closes thinking at 6,144 tokens for effort medium with Qwen's budget phrase; splash has no cap
+unless `SPLASH_THINKING_TOKEN_BUDGET` is set, so the second splash cron run used 6,144 and the same phrase
+(`SPLASH_THINKING_END_TEXT`). The cron library is graded by a hidden test suite (`bench/cron/grade.mjs`, 1,373 checks:
+`nextRuns` against a day-by-day scan of the whole 4,000-day window over 600 random expressions, fixed edge cases, 47
+invalid expressions, argument errors and a 100 ms limit; prompt in `bench/cron/PROMPT.md`).
+
+| task | server | wall | turns | output tokens (thinking) | prefill total | decode | result |
+|---|---|---|---|---|---|---|---|
+| Tetris in HTML, "test and fix" | V8 | 4.0 min | 10 | 8,259 (1,585) | 3 s | 34.8 tok/s | playable; the O piece shifts when rotated, Left/Right work while paused |
+| | splash 1.3.2, no cap | 52.9 min | 66 | 69,655 (35,472) | 450 s | 29.9 tok/s | every piece after the second is the same type (`spawn()` never advances `next`) |
+| Cron library, hidden grader | V8 | 10:17 | 12 | 18,877 (8,991) | 22 s | 31.8 tok/s | 1373 / 1373 |
+| | splash 1.3.2, no cap | 22:25 | 12 | 38,389 (24,771) | 137 s | 31.8 tok/s | 1373 / 1373 |
+| | splash 1.3.2, cap 6,144 | 16:56 | 27 | 29,746 (15,151) | 133 s | 33.7 tok/s | 1373 / 1373 |
+
+- **Decode speed is a tie.** On the same first prompt (the capped cron pair) V8 wrote 8,265 tokens at 29.7 tok/s
+  (3.3 tokens per 112 ms cycle) and splash 8,271 at 31.5 tok/s (3.8 per about 121 ms): V8's cycle is shorter, splash
+  accepts more per cycle. Over the cron runs the two stay within 6% of each other; in Tetris V8 averaged 34.8 against
+  29.9 tok/s, but splash's context grew to 64K against V8's 15K.
+- **Prefill in agent loops favors V8.** V8 keeps the generated tokens in its state and prefills only each new tool
+  result (0.2 to 1.6 s for most turns, 5.5 s for a 2.3K-token test log); splash caches the prompt it was sent and prefills its own previous answer again on
+  every turn (20 s after an 8K-token answer, 65 s after a 24K-token one): 133 to 137 s per cron run against 22 s.
+- **The time gaps come from the amount of work.** In the capped cron pair the first turns were the same size; splash's
+  model then wrote twice the tests (76 against 34), needed 16 debugging turns against 7 and kept checking after its
+  tests passed. Without the cap its first turn thought 21,780 tokens (V8: capped at 6,144) for the same 1373 / 1373.
+  Splash's Tetris run also lost 4.6 min to a Pi compaction at 64K (a cold 48K-token prefill plus the summary) and
+  4 min to two Chrome AppleScript timeouts. Tetris never reached the thinking cap on either server.
+- **No per-response verbosity difference.** Single-turn probe (`bench/verbosity/`: 20 short coding prompts sent to the
+  API directly, 14 paired samples completed in the time box): thinking median 904 (splash) against 900 (V8) tokens,
+  answers 706 against 678; splash was longer on 7 of 14 and 6 of 14 (sign test p = 1.0 and 0.79).
+- One run per cell at temperature 1.0 on two different 3-bit quantizations; only the cron task has a grader.
 
 ## How we measured
 
@@ -92,7 +165,8 @@ the ANE, 28 layers on the GPU ("9/28"). Driver `prototypes/hybrid_prefill.py`, l
 
 A per-layer comparative-advantage model gave the split. Per token per layer, the ANE LUT FFN costs 23.2 us against
 36.3 on the GPU (1.56x better on the ANE), while the mixers cost about the same on both. The GPU mixes layer L of
-block k once block k-1 has finished layer L and block k has finished the FFN of layer L-1. Buffers are the ANE's
+block k once the GPU has mixed layer L for every earlier block and block k has finished the FFN of layer L-1 (an
+earlier block's FFN of layer L is not needed: it feeds only that block's next layer). Buffers are the ANE's
 IOSurfaces, used zero-copy.
 
 - **First prototype was slower than V1** (2K 470, 8K 445, 32K 363). Fixes:
@@ -215,8 +289,8 @@ unchanged.
   - A bridge feed that ended with a short call left pending rows, so V8 silently never ran on some follow-ups.
   - Speculative greedy outputs are not an equality test, because drafter state changes the verify grouping. Use
     `--plain`.
-- **Decode** is unchanged: 110 ms per cycle at 6K, 152 at 96K (verify 135 ms), 19 to 35 tok/s depending on draft
-  acceptance.
+- **Decode** is unchanged by the V8 prefill: 110 ms per cycle at 6K, 152 at 96K (verify 135 ms), 19 to 35 tok/s
+  depending on draft acceptance. SPLIT+GPU (17 Nov) brings 64K and 95K to 141 and 149 ms.
 - **A real Pi session** (53 requests, `pipe/unit/srv_log_prefill.py`): prefill 497 s against decode 4231 s.
   - Compaction took 49% of the prefill: summary prompts are cold, and the compacted context is prefilled again.
   - Prompt mismatches took 26%: 6 restores to the last header re-prefilled 47.6K tokens. Three were the same text
@@ -264,15 +338,20 @@ unchanged.
   the ceiling for these programs is about 735-750 tok/s at 2K.
 - **32K and up: GPU-bound on attention.** At 30K a call is pv 3.09 ms, qk 2.27 ms and softmax 1.96 ms. The two-pass
   score matrix (about 190 MB per call) is most of it.
-- **96K decode: bound by the ANE verify step** (135 of 152 ms).
+- **Decode past 64K:** before SPLIT+GPU, bound by the ANE verify step (135 of 152 ms at 96K). With it, 141 ms per
+  cycle at 64K and 149 at 95K; the GPU attention runs at about 90 to 100 GB/s in the server (127 back to back), held
+  back by its cold start after each ANE call.
 
 ## Decode: where the verify time goes, and GPU attention for it (16 Nov, night)
+
+**Superseded on 17 Nov:** the tuned kernel and the split build are served as SPLIT+GPU (see the 96K table above and
+[pipe/unit/DECODE_GPU_ATTENTION.md](pipe/unit/DECODE_GPU_ATTENTION.md)). This section is the 16 Nov analysis.
 
 The decode cycle is the drafter call (13 to 16 ms) + the target's 8-row verify on the ANE (85 to 90%) + about 1 ms of
 host work. The verify costs about 90 ms without attention + about 0.5 ms per 1K rows of its context entry, whatever
 the position (static shapes: the attention runs over the whole entry's KV, 32 KB per position for 16 layers): 94 ms
 in the 8K entry, 106 in 32K, 120 in 64K, 138 in 96K. A 65.6K prompt is past the 64K entry's 65,472 rows, so it decodes
-in the 96K entry: 153 ms per cycle at 65.6K, 155 at 95K (splash's GPU attention follows the actual length: 141 / 148).
+in the 96K entry: 153 ms per cycle at 65.6K, 155 at 95K (splash 1.3.2's GPU attention follows the actual length: 141 / 148).
 
 Two levers:
 - **Intermediate entries** (48K, 80K): save 0.5 ms per 1K of overshoot, at most 8 ms per cycle (5%) just past a
@@ -310,9 +389,9 @@ the fp16 copy in any of them.
   - DeltaNet q / k / v / z projections on the ANE (estimated about 520 tok/s at 64K);
   - attention with the scores kept on chip, or fp8 P (small probabilities may underflow);
   - finer ANE context rungs.
-- **Decode at long context:** intermediate context entries (48K / 80K, needs room for one more KV segment), or GPU
-  attention for the verify (needs a tuned flash-decoding kernel first: the standalone test above reached 0.93 ms per
-  1K keys, the ANE does 0.5 ms per 1K of entry).
+- **Decode at long context:** GPU attention for the verify is done (SPLIT+GPU, 17 Nov: 64K and 95K now tie splash 1.3.2).
+  Left: the GPU's cold start after each ANE call (the kernel reaches 127 GB/s back to back, about 90 to 100 in the
+  server), splash 1.3.2's higher acceptance per cycle, and serving 128K (no ANE recompile needed for the split).
 - **V8 continuation at any position**, which saves one bridge block (0.2-0.45 s) on some follow-ups.
 - **1000 tok/s** needs about 53 TFLOPS effective (53 GFLOP per token). That means the ANE's INT8 rate for the FFN
   and more of the GPU's work moved to the ANE, under the shared power budget.
@@ -331,5 +410,7 @@ the fp16 copy in any of them.
 | KV8 / K8V16 | `pipe/engine/patch_kv8b.py`, `patch_k8v16.py`, `pipe/unit/attn_kv8_prof.py`, `results/k8v16_65536.json` | lossless, K8V16 = fp16 speed |
 | server | `pipe/v8_server.py`, `v8_engine.py`, `pipe/unit/srv_bench.py`, `srv_matrix.sh`, `results/srv_matrix.jsonl` | table above |
 | short prefills, prompt cache | `pipe/engine/patch_fillfrom.py`, `pipe/unit/shortfix_check.py`, `srv_log_prefill.py` (log: `SSD/coreai_seg_logs/v8_server_8765_pre_shortfix.log`) | `pipe/V8_SERVER.md` |
-| splash | `splash132/serve.sh`, `bench.py`, `long_bench.sh`, `results/splash132_*.jsonl` | 2K 500, 96K 288 |
-| V8 vs splash, 96K context | `splash132/cmp_96k.sh`, `pipe/unit/cmp_bench.py`, `results/cmp_{v8,splash}_96k.jsonl` | table above |
+| splash 1.3.2 | `splash132/serve.sh`, `bench.py`, `long_bench.sh`, `results/splash132_*.jsonl`; GPU only: `splash132/cmp_96k_gpu.sh`, `results/cmp_splash_gpu_96k.jsonl` | 2K 500, 96K 288; GPU only 319 / 217 |
+| V8 vs splash 1.3.2, 96K context | `splash132/cmp_96k.sh`, `pipe/unit/cmp_bench.py`, `results/cmp_{v8,splash}_96k.jsonl` | table above |
+| SPLIT+GPU decode | `v8/build_dec8_*`, `dec8_srv_manifest.py`, `pipe/dec_split.py`, `pipe/engine/dec_gpu.swift`, `dec_kernels.metal`, `pipe/unit/DECODE_GPU_ATTENTION.md`, `results/cmp_v8dec8_96k.jsonl` | 64K 141 ms, 95K 149 ms per cycle |
+| Pi coding sessions | `splash132/serve_pi.sh`, `bench/cron/` (prompt, hidden grader), `bench/verbosity/` | both 1373 / 1373; prefill 22 s vs 133 s |

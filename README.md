@@ -308,6 +308,35 @@ KL divergence is the current distributional-fidelity evaluation; it does not est
 - [Experiment guide](docs/EXPERIMENTS.md) and [M3U pipeline archive](pipelines/m3u/README.md)
 - [Release checklist](docs/RELEASE.md) and [validation records](docs/VALIDATION.md)
 
+### Hybrid Neural Engine + GPU (experimental, M6)
+
+Research only, not part of the release: branch `v8-gpu-ane-prefill`, code and notes in
+[research/v8_prefill](research/v8_prefill/README.md) (research name V8 there, unrelated to the INT8 V cache above). The
+hybrid runs one model on the Neural Engine and the GPU at the same time: every FFN stays on the Neural Engine, and the
+GPU runs the token mixers (DeltaNet and attention) from the same weights in memory.
+
+- **Prefill** is the main gain, about twice the Neural Engine alone. On a 96K server: 590 to 660 tok/s at 2K to 16K,
+  540 at 32K, 420 at 64K and 350 at 95K, against about 300 at 2K to 8K and 180 at 96K for the Neural Engine alone.
+- **Decode** gets faster at long context. Each verification step moves the attention over the KV history to the GPU,
+  between two Neural Engine calls whose programs are the same for every context length: the decode cycle drops from
+  153 to 141 ms at 64K (8% faster) and from 155 to 149 ms at 95K (4%). Up to 32K, where the Neural Engine's attention
+  is already short, decode is unchanged.
+
+**Why it needs SIP off and root.** Core AI is not designed to run one model on the Neural Engine and the GPU at the
+same time: it gives the GPU no way to use the weights the Neural Engine already holds. Apple may support this in the
+future; for research, the hybrid works around it, and the GPU reads those weights directly instead of keeping a
+second copy. Core AI packages carry no compiled Neural Engine program: macOS's ANE compiler service (`aned`)
+compiles each package on the Mac at first load and keeps the result, `model.hwx`, in
+`/Library/Caches/com.apple.aned/<macOS build>/ModelAssetsCache/`. The hybrid maps the weight segments of those files
+(10.8 GiB for its eight packages) read-only into Metal buffers and decodes the Neural Engine's palettized layout in its
+own kernels; a GPU copy would need another 10.8 GiB on a 32 GB Mac. That directory belongs to root with mode 700, so a
+normal user cannot open it: one `sudo chmod +a` grants your user read access (an inherited ACL; nothing is written to
+the cache). The cache also has macOS's `datavault` flag, which System Integrity Protection enforces even against root,
+so SIP must be disabled (from macOS Recovery), which lowers the security of the whole Mac: use a dedicated research
+machine. The GPU tables point into the compiled files and match only the M6 compiler's output, so they
+are rebuilt after every recompile (a macOS update or a cache purge), and other chips are not supported. Commands and
+details: [Requirements: root and SIP](research/v8_prefill/README.md#requirements-root-and-sip).
+
 ## Contributing
 
 Bug reports, documentation improvements, reproducible experiments, and focused pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, benchmark reporting, and handling sensitive trace data.

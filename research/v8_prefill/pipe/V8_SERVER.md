@@ -1,13 +1,16 @@
-# V8 prefill server (16 Nov 2026)
+# V8 prefill server (16 to 17 Nov 2026)
 
 OpenAI-compatible Qwen3.8-27B server on the M6 with the V8 GPU + ANE prefill. It is the anemll-forge-v02 release
 server (`scripts/qwen38_server.py`: Core AI target, DFlash2 all3 drafter, prompt-cache snapshots) with only
-`Engine.prefill` replaced. Decoding is the release path, unchanged.
+`Engine.prefill` replaced. Decoding is the release path; since 17 Nov the served script (`v8_server_dec8.sh`) adds
+SPLIT+GPU: past 64K, the verify's attention over the KV history runs on the GPU between Neural Engine calls
+(`dec_split.py`, write-up in `unit/DECODE_GPU_ATTENTION.md`).
 
 ## Run
 
 ```
-v8_work/pipe/v8_server.sh [v8_server.py options]      # port 8767 (PORT=...), ctx 98304 (CTX=...)
+PORT=8765 v8_work/pipe/v8_server_dec8.sh [options]   # served since 17 Nov: SPLIT+GPU, build v8_dec8, tables w_dec8
+v8_work/pipe/v8_server.sh [v8_server.py options]      # port 8767 (PORT=...), ctx 98304 (CTX=...), v8_shared2, no split
 v8_work/pipe/srv_stop.sh                              # stops whatever listens on $PORT (default 8767)
 ```
 
@@ -19,6 +22,9 @@ v8_work/pipe/srv_stop.sh                              # stops whatever listens o
 - Log `/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs/v8_server.log`, swap watchdog +1536 MB, the load is
   journaled (deploy_journal).
 - `v8_server_plain.sh`: the same with `--plain` (no drafter; deterministic greedy, used for equality checks).
+- `v8_server_dec8.sh`: as `v8_server.sh` plus `--v8-dec8 1`, `--model-dir SSD/v8_dec8` (8 packages of 8 layers: the
+  target and V8 entries plus the split entries `dva` / `dvba` / `dvb`) and `--v8-gpu-manifest pipe/w_dec8/manifest_best.json`;
+  decode attention from `engine/libdec_gpu.dylib`. Both scripts keep every previous log as `v8_server.<time>.log`.
 
 Options (defaults are the best measured):
 
@@ -28,6 +34,10 @@ Options (defaults are the best measured):
 | `--v8-kv8` | 1 | GPU attention reads and writes the ANE's INT8 KV cache (no KV copy, warm continuation) |
 | `--v8-k8v16` | 1 | with KV8: the GPU also keeps an fp16 copy of V for its PV (+32 KB/token, 3.2 GB at 96K) |
 | `--v8-attproj-from` | off | attention projections on the ANE from this position (no clear gain, see below) |
+| `--v8-dec8` | 0 | 1: SPLIT+GPU decode (needs the v8_dec8 build; `v8_server_dec8.sh` sets it) |
+| `V8_DEC8` env | auto | auto: split in the 96K entry only (past 64K tokens); on: always; off |
+| `V8_DEC8_MID` env | 0 | with auto, also split in the 64K entry up to this many keys (measured about even there) |
+| `DEC_ATTN` env | dec_attn_r4 | decode attention kernel (`dec_attn`: the previous one, 3.3% slower) |
 | `V8_ALIGN` env | 64 | continuation start alignment (64 or 128) |
 | `V8_REST_MIN` env | 128 | V8 after an alignment only when at least this many tokens are left (else all on the bridge) |
 | `V8_TAIL_T` env | 8 | a last pair with this many real rows or fewer: one T-row bridge call instead of a padded pair |
@@ -120,8 +130,11 @@ Follow-up turns (new tokens = the previous answer + the new user text), prefill 
 | 95K + 423 | | 2.46 (2.91 with 128-aligned starts) |
 | 95K + 1223 | | 6.97 (bridge 12 rows 0.42 s, sync 6 ms, V fill 57 ms, V8 6.4 s) |
 
-Decode: unchanged by V8 (ms/cycle about 110 at 6K, 128 at 32K, 152 at 96K; 19 to 35 tok/s depending on draft
-acceptance). A request past the context returns HTTP 400 and the server keeps running.
+Decode: unchanged by the V8 prefill (ms/cycle about 110 at 6K, 128 at 32K, 152 at 96K; 19 to 35 tok/s depending on
+draft acceptance). SPLIT+GPU (17 Nov, the same `cmp_bench.py` requests, `cmp_v8dec8_96k.jsonl`): decode cycle 107 /
+111 / 119 / 133 / 141 / 149 ms at 2K / 8K / 16K / 32K / 64K / 95K (splash 1.3.2: 116 / 119 / 122 / 131 / 141 / 148), cold-turn
+decode 20.6 tok/s at 64K and 20.4 at 95K; prefill unchanged within run noise; the 64K follow-up took 3.31 s against
+2.36 s (one run, not investigated). A request past the context returns HTTP 400 and the server keeps running.
 
 ## KV8 findings
 
@@ -224,7 +237,9 @@ too (fills 65 to 368 ms instead of 31 to 58 ms, a cold 45K summary at 387 tok/s)
 
 ## Files
 
-- `v8_server.py`, `v8_server.sh`, `v8_server_plain.sh`, `srv_stop.sh`
+- `v8_server.py`, `v8_server.sh`, `v8_server_plain.sh`, `v8_server_dec8.sh`, `srv_stop.sh`
+- `dec_split.py` (SPLIT+GPU: runtime patch to load each 8-layer package once, the split verify, KV sync to the GPU),
+  `engine/dec_gpu.swift`, `engine/dec_kernels.metal`; checks `unit/dec8_srv_check.py`, `unit/dec8_real_check.py`
 - `v8_engine.py` (V8Prefill: run, snapshots, handover, sync, K8V16 fill, can_start)
 - `engine/gpu_v8.swift`, `engine/kernels.metal`, patches `patch_nv.py`, `patch_srv.py`, `patch_state_gpu.py`,
   `patch_k8v16.py`, `patch_fillfrom.py` (each keeps `*.pre_<name>.*` backups)
@@ -236,8 +251,9 @@ too (fills 65 to 368 ms instead of 31 to 58 ms, a cold 45K summary at 387 tok/s)
 ## Open items
 
 - A8 (runtime INT8 FFN on the ANE) is not in the server: +6% at 16K in the driver, slower at 64K+.
-- Decode at 96K is verify-bound on the ANE (135 ms of 152 ms per cycle); GPU attention for the verify would need a
-  new ANE build split around the attention layers.
+- Decode past 64K: done with SPLIT+GPU (141 / 149 ms per cycle at 64K / 95K, the same as splash 1.3.2). Left: the GPU's cold
+  start after each ANE call (about 10 ms per step at 95K), splash 1.3.2's higher acceptance per cycle, and serving 128K
+  (the split needs no ANE recompile there; the KV cache, the V8 prefill and the server limit stop at 96K).
 - A bridge prefill block costs 0.2 to 0.45 s whatever its rows (one is needed after decoding: pending rows);
   V8 at any 64-unaligned position would save one block on some follow-ups (tile n rounded up, masked).
 - Short follow-ups are now one bridge block (0.24 s at 13K, 0.37 s at 50K) plus a T-row call only when the rest
