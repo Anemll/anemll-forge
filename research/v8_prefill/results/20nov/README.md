@@ -52,6 +52,29 @@ Plan: `PLAN.md` (Anemll, 19 Nov 22:32). Status line: `/tmp/m6_yolo_status.txt`. 
   - **What would make it pay:** an adapter 2-3x cheaper per pass, or drafting that overlaps the verify.
 - **Memory:** DFlash2 measured 0.84 GB wired (+0.25 GB selector file pages); the LUT6 adapter alone 3.7 GB wired.
 
+**Batch D (11:45-15:20; sections D1-D4):**
+- **D1, the 09:02 forge exit:** forge's own swap watchdog (`watchdog_v8_server.log`: swap 1071 -> 3173 MB > its +1536
+  MB limit) while the C3 replay held 17.6 GB of GPU memory next to forge's 19 GB wired. Contention only. Forge alone,
+  cold Pi-shaped prefills of 7,009 / 7,009 / 6,213 tokens: 675 tok/s, swap flat at 846.75 MB. Fix in the tooling:
+  `jsp_replay.py` refuses to start while 8765 serves.
+- **D2, LUT4 (Hadamard + GPTQ) adapter on the ANE, quiet:** 22.2 ms per pass at 8K, 36.9 ms at 32K (16 rows; LUT6
+  27.2 / 44.8); 2.55 GB wired for the 8K build (LUT6 3.67). J0-R0 acceptance at LUT4 6.07 / 8.53 / 6.59 (bf16 6.12 /
+  8.59 / 6.64). Jet Flash serial: 8K J0-R0 43.1 / 59.6 / 46.4 tok/s vs DFlash2 56.5 / 67.8 / 54.7 (-12 to -24%), 32K
+  -22 to -32%, J3-R3 -33 to -46%.
+- **D3, the same adapter on the GPU** (Metal LUT4 kernels, 7 designs): best 38.2 ms per pass without attention (59
+  GB/s of 155 GB/s raw read), 39.9-51.3 ms with it (ANE 22.2 / 36.9). Even at the GPU's read-bandwidth floor
+  (projected) Jet Flash stays 7-34% below DFlash2: the 102-125 ms 16-row verify is most of the round.
+- **D4, cheap exact tree conv: found.** `TREE_FORM=corrx0` (the served conv + one channel-major matmul with D = ctap -
+  a constant chain shift) is bit-identical to the chain entry under chain masks at +4.5% per group (A8's corr +11.2%).
+  A8's inexactness was the ANE's one-hot gather, not the decay matmul.
+  - **Identity:** full build `v8_dec8tx`; every cycle through the tree entry with chain trees: 45 / 45 replies
+    byte-identical to the served chain (2K-96K).
+  - **Control:** the chain itself with only a different cycle split keeps 20 / 45. So branched tree8 (23 / 45) cannot
+    be token-identical to the chain, and diverges no more than a split change does.
+  - **Cost and gain:** tree verify x1.024-1.039; like for like +0.9 to +3.5% tok/s (chat +9%).
+  - **Not made the default:** needs a decision on the identity criterion.
+- **Served at the end:** forge on 8765 (15:11, pid 50586, `v8_server_dec8_qk.sh`), smoke byte-identical.
+
 **Batch C, Jet Flash estimates (08:40-11:45; sections C1-C5):**
 - **C1, hybrid split** (adapter attention on the GPU's `dec_attn_r4`, projections and MLPs on the ANE at LUT6, 16
   rows): one 12-block adapter pass sums to 30.7-32.4 ms at 8K (all on the ANE: 27.2 measured), 35.6-42.1 at 32K
@@ -872,3 +895,45 @@ rounding. No blend is needed.
 Two build pitfalls, both fixed: a shift built by in-place indexing inside forward traces as ops the ANE does not run
 (the first probe's corrd / corrx / corrx2 packages, and the first full corrx package 0, ran off the ANE or failed to
 compile: "MLIR MPS to ANEC conversion failed"); built from numpy it is a constant.
+
+**Full build** (`TREE_FORM=corrx0 build_dec8t_all.sh` -> `v8_dec8tx`, 13:10-14:29, forge down; 9.9 GB on the SSD, GPU
+tables `pipe/w_dec8tx`, 8 HWX referenced, none missing). Package 0 checked with `tree_entry_check.py`: `g0` 12 / 12,
+`g1` 13 / 13 outputs bit-identical between the tree and the chain entries (A8's v8_dec8tc: pend1 / pend2 differed).
+
+**Benches** (`run_arm.sh` with `pipe/v8_server_tree.sh` on v8_dec8tx, realistic_v1 9 prompts x 2K-96K, greedy, 320
+tokens; banner checked: `tree=policy=<arm> tree=topc=<n> v8=qk=attn_qk8isk_tg dec8=libdec_gpu_tree.dylib`; compared
+with `bench/compare.py` against `chain_v1`; `d4/compare_*.txt`):
+
+| arm | what changes | identical to chain_v1 (2K / 8K / 32K / 64K / 96K) | tok/verify | ms / cycle |
+|---|---|---|---|---|
+| served chain (`chain_v1`) | | | 4.567 / 5.086 / 5.164 / 5.040 / 4.722 | 110 / 108 / 121 / 136 / 144 |
+| `d4_cap3` (control) | chain entries only, at most 3 drafts accepted per cycle | 3 / 2 / 3 / 5 / 7 of 9 (**20 / 45**) | 3.224 / 3.386 / 3.427 / 3.374 / 3.197 | 109 / 109 / 120 / 135 / 142 |
+| `d4_topc1` | every cycle through the corrx0 tree entry, the tree = the chain | **9 / 9 at every rung (45 / 45)** | identical to the chain | 112 / 112 / 124 / 139 / 146 |
+| `d4_branched` | tree8 as it would serve (tree entry when the tree branches) | 3 / 3 / 4 / 5 / 8 of 9 (23 / 45) | 4.862 / 5.512 / 5.522 / 5.275 / 4.980 | 112 / 111 / 123 / 139 / 145 |
+
+- **The tree entry is exact end to end:** 45 of 45 replies byte-identical when the tree is the chain, the 96K split
+  path (tdva / tdvba + the GPU tree mask) included. A8's exact build: 3-8 of 9 per rung.
+- **The chain itself is not split-invariant** (`d4_cap3`): the same served chain entries with only a different cycle
+  split (3 drafts per cycle at most) keep 20 of 45 replies. The DeltaNet block solve and the pending tape depend on
+  which tokens share a verify call, and fp16 near-ties flip. A branched tree changes the split, so **no tree form can
+  be token-identical to the chain**. The branched arm's 23 / 45 is the control's level: the remaining divergence is the
+  split, not the tree numerics.
+- **Cost:** the tree verify, from the branched run's server lines, costs x1.038 / 1.039 / 1.037 / 1.033 / 1.024 of
+  the chain verify per cycle (98.5 vs 94.9 ms at 2K, ..., 132.0 vs 128.9 at 96K). 19 Nov's inexact form: x1.033-1.050;
+  A8's exact form: x1.096.
+- **Like for like** (offline on the chain's own texts, `pipe/unit/power/tree_dyn2.py` with 8=1.034;
+  `d4/sim_corrx0_8_1_034.*`): tree8 when branched +3.5 / +1.4 / +1.9 / +0.9 / +1.1% tok/s at 2K / 8K / 32K / 64K /
+  96K; chat +9.0%, code +0.4%, math +0.7% (A7 with the inexact form: +3.0 / +1.0 / +1.5 / +0.5 / +0.6%).
+- The bench's own tok/s (+8.4 / +11.1 / +4.8 / +2.0 / +4.3%) is on different texts, not like for like.
+
+**Served state:** unchanged. Tree8 stays behind the flag. Making it the default needs a decision: the plan's
+"token-identical to the chain" cannot be met by any tree (the chain fails it against itself under a different split);
+what corrx0 does meet is "bit-identical to the chain whenever the split is the same". Launch:
+`BUILD=/Volumes/SSD4TB/anemll-forge-research/v8_dec8tx GM=pipe/w_dec8tx/manifest_best.json PORT=8765 pipe/v8_server_tree.sh`.
+Forge restored at 15:11 (pid 50586, `v8_server_dec8_qk.sh`, build v8_dec8): `bench/final_served3` banner matched,
+humaneval 1 / mt-bench 2 byte-identical to 08:34's (sha 1681b92d273f64ad / 3b060108f4af10b0).
+
+**Disk:** v8_dec8tx is kept (9.9 GB on the SSD; Core AI entry about 10.7 GB + aned's programs on the internal disk). With
+v8_dec8t (19 Nov ctap form) and v8_dec8tc (A8 corr form) also kept, three tree builds sit on the internal disk; the two
+older ones are superseded by v8_dec8tx (not deleted: needs Anemll's OK). Internal disk free after the build: 30 GB.
+The D-batch scratch builds are deleted.
