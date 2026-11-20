@@ -4,7 +4,46 @@ Plan: `PLAN.md` (Anemll, 19 Nov 22:32). Status line: `/tmp/m6_yolo_status.txt`. 
 
 ## Summary (number-first)
 
-(written at the end)
+**Phase A, tree verify. Built, served behind a flag (`pipe/v8_server_tree.sh`, `TREE=1`); not the default.**
+- **Realistic set, served chain** (code / math / chat at 2K-96K, `bench/chain_v1`): 41.0 / 46.0 / 44.1 / 38.4 /
+  34.0 tok/s, 4.57 / 5.09 / 5.16 / 5.04 / 4.72 tok/verify, so 3.6-4.2 accepted drafts per cycle. The ~4 accepted target
+  is already met at 8K-64K. Code 7.1 and math 6.5 tok/verify sit near DFlash2's 7-draft cap; chat is at 2.4.
+- **Served tree8** (dynamic top-7 tree in the 8 rows; the tree entry only when the tree is not the chain):
+  - **Bench:** +8.6 / +10.7 / +6.3 / +1.1 / +3.5% tok/s at 2K / 8K / 32K / 64K / 96K. Only 22 of 45 replies were
+    token-identical to the chain, so this is not like for like.
+  - **Like for like** (offline on the chain's own texts, measured tree verify cost x1.033-1.050): +0.5 to +3.0% by rung;
+    chat +8%, code / math +0.3 / +0.6%.
+- **Why it is not the default:**
+  - **Not token-identical:** the tree entry's conv taps differ from the served conv by rel 1.8e-3 per group and flip
+    near-ties. The same flips happen with chain-shaped trees run through the tree entry.
+  - **The exact conv form costs too much:** it is bit-identical in the probe, but costs x1.096 per tree verify, which
+    projects to about break-even (build and identity check: A8).
+- **16 / 32 rows on the ANE:**
+  - **Where the cost is:** the FFN is nearly free (+2 / +4%). The cost is the DeltaNet UT solve (+27 / +130% for 3
+    layers; block forward substitution cuts 32 rows by 40%), the tree conv taps (+0.66 / +1.58 ms per group, now the
+    largest term) and attention at long context.
+  - **What is reachable:** tree16 about +23%, tree32 about +58% per verify. A dynamic 8 / 16 / 32 policy then adds
+    about what tree8 adds (+0.4-2.9%).
+  - **What is missing:** a cheap exact tree conv. 707 distinct tree shapes occur, so fixed shapes don't work.
+
+**Phase B, JetSpec++ (JetX), by replay of our served model's own greedy streams (lossless on every trace):**
+- **JetSpec++ tokens per round vs our DFlash2 chain on the same prompts:**
+  - gsm8k 0-31: 9.50 vs 5.75 (x1.65)
+  - humaneval: 13.20 vs 7.30 (x1.81)
+  - mbpp: 10.55 vs 5.89 (x1.79)
+  - mt-bench: 4.94 vs 3.48 (x1.42)
+  - The whole B16 block is accepted in 33% of gsm8k rounds. This is the lever for more accepted tokens per cycle,
+    not wider trees.
+- **Its verify fits this target:** a 16-row CHAIN verify costs x1.085 at the 8K entry (block solve; the 16-row head
+  is free), x1.17 at 32K and x1.27 at 64K. Projected at 2K: about 72 tok/s with a 30 ms drafter, against 53.4
+  (+34%).
+- **Drafter at 4 bits:** RTN 4-bit adapter + head loses 9.3% (9.28 vs 10.23 tok/round, still x1.53 over DFlash2);
+  3 bits breaks it.
+- **Not integrated:** the drafter is 6.2B parameters (12 GB bf16; about 3.4 GB and about 28 ms per round at 4 bits on
+  the ANE, estimated). Next steps: an ANE port of the B16 head and ctxkv adapter, and a 16-row chain verify entry
+  with the block solve.
+
+**Served state at the end:** see A8 / the last ops.log lines (forge restored on 8765 in the served configuration).
 
 ## Layout
 
@@ -330,3 +369,83 @@ gsm8k traces 0-7, J3-R3, rows outcome; `jetspec/replay_q_*.json` / `.log`):
 
 Plain 4-bit RTN keeps x1.53 over our DFlash2 chain; 3 bits breaks the adapter (a calibrated or LUT quantization, as
 our target uses, may do better; not tested). So an ANE port needs the adapter at 4 bits or more: about 3.4 GB.
+
+**Projected decode at 2K per set** (DFlash2: its tok/verify / 107.7 ms, the served cycle; JetSpec++: tok/round /
+(30 ms drafter + 94.5 ms x 1.085 16-row chain verify); the 4-bit column applies the -9.3% of the 4-bit drafter):
+
+| set | DFlash2 chain tok/s | JetSpec++ bf16 drafter | JetSpec++ 4-bit drafter |
+|---|---|---|---|
+| gsm8k (0-31) | 53.4 | 71.7 (+34%) | 65.0 (+22%) |
+| humaneval (0-7) | 67.8 | 99.6 (+47%) | 90.3 (+33%) |
+| mbpp (0-7) | 54.7 | 79.6 (+46%) | 72.2 (+32%) |
+| mt-bench (1-7) | 32.3 | 37.3 (+15%) | 33.8 (+5%) |
+
+These are projections (the drafter's 30 ms is a bandwidth estimate, not measured on the M6).
+
+## A8. Exact-conv tree8 build: identity, control, branched bench (`bench/tree8c_*`, `bench/chain_v2_ctl`, `tree_exact/`)
+
+**Build** (03:32-04:47, forge down): `build_dec8t_all.sh` with `TREE_FORM=corr` -> `v8_dec8t` + `c` = `v8_dec8tc`
+(9.9 GB, GPU tables `pipe/w_dec8tc`; packages +3 MB each, Core AI entry 1.19 GB as served). Launch:
+`BUILD=.../v8_dec8tc GM=pipe/w_dec8tc/manifest_best.json PORT=8765 pipe/v8_server_tree.sh`.
+
+**Controls:**
+- **The served chain is deterministic across restarts:** `chain_v2_ctl` (served launcher, 2K + 8K) = `chain_v1` in 18
+  of 18 replies and in tok/verify; its tok/s is +4.2% / +4.6% (same texts), so run-to-run tok/s noise is about 4%.
+- **The new build's chain path is the served one:** v8_dec8tc with `TREE=0`, 2K: 9 / 9 identical (same output
+  checksum 2b08f021 as chain_v2).
+
+**Identity of the tree entries** (`TREE_POLICY=always TREE_TOPC=1`: every cycle through the tree entry, the tree
+always the chain): 3 / 9, 3 / 9, 4 / 9, 5 / 9, 8 / 9 replies identical at 2K-96K. The direct check on package 0
+(`pipe/unit/power/tree_entry_check.py`: `g*_v8_8k` and `g*_t8_8k` on the same random inputs, chain masks):
+- exact build: y, taps, conv states and the new K / V rows bit-identical; only the DeltaNet pending tapes `pend1_out`
+  / `pend2_out` differ (rel 1-3e-7). The in-block cumulative decay is a matmul with the ancestor-mask INPUT where
+  the chain entry multiplies by the constant triangle; the tiny tape differences enter the next call's commit and
+  later flip near-ties. Fix (not built: another 1.3 h build): the constant cumsum + a correction exactly 0 for
+  chain rows, as for the conv.
+- 19 Nov form (`v8_dec8t`): y rel 1.8-2.1e-3, every state output differs.
+
+**Branched bench, exact-conv build** (`tree8c_branched`):
+
+| rung | chain v1 tok/s, tok/verify | chain v2 (control) | tree8 19 Nov form | tree8 exact conv | identical (19 Nov / exact) |
+|---|---|---|---|---|---|
+| 2K | 40.99, 4.567 | 42.72, 4.567 | 44.52, 4.895 | 44.64, 5.008 | 2 / 4 of 9 |
+| 8K | 45.98, 5.086 | 48.09, 5.086 | 50.92, 5.527 | 48.29, 5.357 | 2 / 3 |
+| 32K | 44.05, 5.164 | | 46.84, 5.613 | 47.20, 5.726 | 3 / 3 |
+| 64K | 38.38, 5.040 | | 38.79, 5.257 | 38.59, 5.299 | 7 / 6 |
+| 96K | 34.03, 4.722 | | 35.21, 4.962 | 33.59, 4.885 | 8 / 7 |
+
+Chain-shaped cycles through the exact tree entries (`tree8c_topc1`) cost +7% per cycle at 2K-32K (118 / 117 / 130 ms
+against 110 / 108 / 121), so with the 4% tok/s noise and the diverging texts, the bench gains are mostly not tree
+gains; the like-for-like estimate stays A7's. **Decision:** tree8 stays behind the flag (`TREE=1`), not the default:
+it is not token-identical, and like for like it adds about 0-3%.
+
+## B7. JetSpec++ quant ladder and resident memory (`b7/`; requested 05:0x)
+
+**Resident memory, measured.** In the replay, MPS allocation after each load step (`MEM` lines, every run):
+
+| piece (bf16 in the replay) | GPU allocated | note |
+|---|---|---|
+| JetSpec++ B16 head | 3.5 GB (driver 4.3) | |
+| JetSpec++ ctxkv adapter | +9.0 GB (12.5 total; driver 12.9) | |
+| replay target: layers 62 / 63, final norm, lm_head | +4.1 GB (16.6 total; driver 17.6) | not the served target |
+| replay target embedding (2.5 GB table) | UNMEASURED | memory-mapped from the checkpoint (file pages) |
+| process RSS (CPU) | 7.3 GB peak | the head's CPU build during load; not steady state |
+
+The fake quantization below rewrites the bf16 weights in place: the resident sizes stay the bf16 ones, and the packed
+size of each quantized form is UNMEASURED.
+
+**DFlash2 drafter alone** (`pipe/unit/power/drafter_mem.py`, the served package
+`drafter/all3/dflash2_lut4_gptq_nohead.aimodel`, main.hash 7284b3cf1ef40529, Core AI bridge on the ANE; forge down,
+second run on a quiet machine, `b7/dflash2_mem2.json`):
+
+| step | process RSS / phys_footprint | system wired | free | anonymous / file-backed |
+|---|---|---|---|---|
+| before | 0.029 / 0.019 GB | 2.271 GB | 13.458 | 1.931 / 15.707 |
+| package loaded (functions not bound) | 0.034 / 0.021 | 2.271 | 13.456 | 1.932 / 15.707 |
+| draft + ctx64 bound and run twice | 0.085 / 0.069 | 3.108 (+0.837) | 13.358 | 1.934 / 14.967 |
+| + selector tables (2 x 127 MB bf16, here as copies) | 0.502 / 0.199 | 3.095 | 13.222 | 2.083 / 14.967 |
+
+So the served DFlash2 holds about 0.84 GB wired (its ANE program and weights) plus about 0.05 GB of buffers in the
+process; its selector tables add about 0.25 GB (mapped from the file in the server: file pages). It drafts through
+the target's own head, which stays. Dropping it saves about 0.84 GB wired + 0.25 GB of file pages (measured pieces;
+the served process's total was not re-measured with and without it).

@@ -343,6 +343,9 @@ def load_adapter_lowmem(path, device, dtype):
     return head
 
 
+_CHECKED = set()
+
+
 def check_only_load_target_tensors(root, names, *, file_pins=None, prefixes=()):
     """hybrid.HybridAnchorDecoder.from_checkpoint's verification read (20 Nov 2026): the reference loads the tail
     tensors (layers 62 / 63, norm, lm_head: 3.5 GB) only to check them and drops them (the decoder views the target's
@@ -351,6 +354,10 @@ def check_only_load_target_tensors(root, names, *, file_pins=None, prefixes=()):
     from safetensors import safe_open
     from jetspec.engines.jetspec_plus_plus.draft.reference.models import decoder as D
     root = Path(root).resolve(strict=True)
+    key = (str(root), tuple(names), tuple(sorted((file_pins or {}).items())), tuple(prefixes))
+    if key in _CHECKED:
+        return {}
+    _CHECKED.add(key)
 
     def checked(name):
         path = (root / name).resolve(strict=True)
@@ -445,6 +452,39 @@ def fake_quant(module, bits, group=128, skip=("embed", "lm_head", "norm")):
             w.copy_((torch.clamp(torch.round(x / sc), -qmax - 1, qmax) * sc).reshape(o, i).to(w.dtype))
             n_t += 1; n_p += w.numel()
             del x, sc
+    return n_t, n_p
+
+
+def fake_quant_spec(module, spec):
+    """spec: '<bits>' (RTN symmetric, g128), '8c' (RTN symmetric per output channel, 8 bits), 'lut<bits>' (a 2^bits-entry
+    palette per output row fit by k-means, 12 Lloyd iterations, quantile init: the ANE's LUT form). In place; returns
+    (tensors, parameters)."""
+    if spec == "8c":
+        return fake_quant(module, 8, group=10 ** 9)
+    if not spec.startswith("lut"):
+        return fake_quant(module, int(spec))
+    bits = int(spec[3:]); K = 2 ** bits
+    n_t = n_p = 0
+    with torch.no_grad():
+        for name, m in module.named_modules():
+            if not isinstance(m, nn.Linear) or any(k in name for k in ("embed", "lm_head", "norm")):
+                continue
+            w = m.weight
+            o, i = w.shape
+            step = max(1, (1 << 24) // (i * K))            # rows per chunk (distance tensor about 64 MB fp32)
+            for r0 in range(0, o, step):
+                x = w[r0:r0 + step].float()                                            # (r, i)
+                q = torch.linspace(0, 1, K + 2, device=x.device)[1:-1]
+                c = torch.quantile(x, q, dim=1).T.contiguous()                         # (r, K)
+                for _ in range(12):
+                    a = (x.unsqueeze(-1) - c.unsqueeze(1)).abs().argmin(-1)            # (r, i)
+                    sums = torch.zeros_like(c).scatter_add_(1, a, x)
+                    cnt = torch.zeros_like(c).scatter_add_(1, a, torch.ones_like(x))
+                    c = torch.where(cnt > 0, sums / cnt.clamp_min(1), c)
+                a = (x.unsqueeze(-1) - c.unsqueeze(1)).abs().argmin(-1)
+                w[r0:r0 + step].copy_(torch.gather(c, 1, a).to(w.dtype))
+                del x, c, a
+            n_t += 1; n_p += w.numel()
     return n_t, n_p
 
 
@@ -552,6 +592,7 @@ def main():
     ap.add_argument("--dataset", default="gsm8k", help="calibration entry (gsm8k, math500, ...)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--tiny", action="store_true", help="tiny random artifacts (make_tiny.py): no stop tokens")
+    ap.add_argument("--multi", default="", help="research: ds=TRACEDIR,... in one process (models loaded once); --out gets _<ds>")
     ap.add_argument("--quant", default="", help="research: fake-quantize drafter parts, e.g. adapter:4,head:4 (RTN, g128)")
     ap.add_argument("--rows", choices=["outcome", "all"], default="outcome",
                     help="outcome: draft only keyed rows that can be the true outcome (same result, see OutcomeRows)")
@@ -559,9 +600,7 @@ def main():
     dtype = torch.bfloat16
     if a.device == "mps":
         patch_cpu_scoring()
-    dirs = sorted(d for d in glob.glob(f"{a.traces}/*") if Path(d, "meta.json").exists())
-    if a.limit:
-        dirs = dirs[:a.limit]
+    jobs = [tuple(x.split("=", 1)) for x in a.multi.split(",") if x] if a.multi else [(a.dataset, a.traces)]
     t0 = time.time()
     H.load_target_tensors = check_only_load_target_tensors
     if not a.tiny:
@@ -572,30 +611,45 @@ def main():
     llm = make_llm(a.target_root, a.device, dtype, eos=set() if a.tiny else EOS)
     mem("target loaded")
     t_target = time.time() - t0
-    drafter, config, t_build = build(llm, release=a.release, schedule=a.schedule, dataset=a.dataset)
-    mem("drafter built")
     qinfo = {}
+    for ds, tdir in jobs:
+        run_one(a, llm, dtype, t_target, ds, tdir, qinfo, multi=bool(a.multi))
+
+
+def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
+    """one dataset: build the drafter (the preloaded head / adapter are reused), quantize once, replay its traces"""
+    drafter, config, t_build = build(llm, release=a.release, schedule=a.schedule, dataset=dataset)
+    mem(f"drafter built ({dataset})")
     for part in [x for x in a.quant.split(",") if x]:
-        what, bits = part.split(":")
+        what, spec = part.split(":")
+        if what in qinfo:
+            continue                       # the preloaded modules are shared: quantized once
         mod = {"adapter": drafter.driver.adapter, "head": drafter.driver.head}[what]
-        qinfo[what] = (int(bits),) + fake_quant(mod, int(bits))
-        print(f"QUANT {what}: {qinfo[what][1]} Linear weights, {qinfo[what][2] / 1e9:.2f}B parameters at {bits} bits (RTN g128)", flush=True)
-    if qinfo:
-        mem("quantized")
+        t_q = time.time()
+        qinfo[what] = (spec,) + fake_quant_spec(mod, spec)
+        kind = {"8c": "RTN per channel, 8 bits"}.get(spec, f"LUT {spec[3:]} bits per row (k-means)" if spec.startswith("lut") else f"RTN g128, {spec} bits")
+        print(f"QUANT {what}: {qinfo[what][1]} Linear weights, {qinfo[what][2] / 1e9:.2f}B parameters, {kind}, in {time.time() - t_q:.0f}s", flush=True)
+        mem(f"quantized {what}")
     rows = OutcomeRows(drafter, llm.runner) if a.rows == "outcome" else None
+    out = Path(a.out) if not multi else Path(a.out).with_name(Path(a.out).stem + f"_{dataset}.json")
     banner = dict(jetspec_src=str(SRC), jetspec_commit=os.popen(f"git -C {SRC} rev-parse HEAD").read().strip(),
-                  rows=a.rows, dataset=a.dataset,
+                  rows=a.rows, dataset=dataset, traces=str(tdir),
                   release=a.release, target_root=a.target_root, schedule=a.schedule, device=a.device,
                   dtype=str(dtype), config=config.__dict__, max_new=a.max_new, loaded_target_tensors=len(llm.model.loaded),
                   target_load_s=round(t_target, 1), drafter_build_s=round(t_build, 1), torch=torch.__version__,
-                  quant=a.quant or None)
+                  quant=a.quant or None, mps_allocated_gb=round(torch.mps.current_allocated_memory() / 1e9, 2)
+                  if torch.backends.mps.is_available() else None)
     print("BANNER " + json.dumps(banner), flush=True)
+    dirs = sorted(d for d in glob.glob(f"{tdir}/*") if Path(d, "meta.json").exists())
+    if a.limit:
+        dirs = dirs[:a.limit]
     res = []
-    if Path(a.out).exists():   # resume (20 Nov 2026): keep the traces an earlier run of the same command finished
-        old = json.loads(Path(a.out).read_text())
-        if old.get("banner", {}).get("schedule") == a.schedule and old.get("banner", {}).get("rows") == a.rows:
+    if out.exists():   # resume (20 Nov 2026): keep the traces an earlier run of the same command finished
+        old = json.loads(out.read_text())
+        ob = old.get("banner", {})
+        if ob.get("schedule") == a.schedule and ob.get("rows") == a.rows and ob.get("quant") == (a.quant or None):
             res = old.get("results", [])
-            print(f"RESUME: {len(res)} traces already in {a.out}", flush=True)
+            print(f"RESUME: {len(res)} traces already in {out}", flush=True)
     done = {r["trace"] for r in res}
     for d in dirs:
         if Path(d).name in done:
@@ -613,13 +667,13 @@ def main():
         print(f"{r['trace']}: prompt {r['prompt_len']}, {r['generated']} tokens in {r['rounds']} rounds, tau "
               f"{r['tau']:.3f}, hits {r['counts'].get('hits', 0)} / misses {r['counts'].get('misses', 0)}, "
               f"{r['seconds']:.1f} s ({r['s_per_round']:.2f} s / round), lossless {r['lossless_vs_trace']}", flush=True)
-        Path(a.out).write_text(json.dumps(dict(banner=banner, results=res), indent=1))
+        out.write_text(json.dumps(dict(banner=banner, results=res), indent=1))
     acc = [x for r in res for x in r["accept_lengths"]]
-    summary = dict(traces=len(res), rounds=len(acc), tau_pooled=sum(acc) / len(acc) if acc else None,
+    summary = dict(dataset=dataset, traces=len(res), rounds=len(acc), tau_pooled=sum(acc) / len(acc) if acc else None,
+                   tok_per_round=sum(r["generated"] for r in res) / max(1, sum(r["rounds"] for r in res)),
                    all_lossless=all(r["lossless_vs_trace"] for r in res))
     print("SUMMARY " + json.dumps(summary), flush=True)
-    Path(a.out).write_text(json.dumps(dict(banner=banner, summary=summary, results=res), indent=1))
-
+    out.write_text(json.dumps(dict(banner=banner, summary=summary, results=res), indent=1))
 
 if __name__ == "__main__":
     main()
