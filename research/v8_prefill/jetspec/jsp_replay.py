@@ -461,6 +461,32 @@ def fake_quant_spec(module, spec):
     (tensors, parameters)."""
     if spec == "8c":
         return fake_quant(module, 8, group=10 ** 9)
+    if spec.startswith("lut") and spec.endswith("f"):   # 'lut6f': the ANE build's own LUT files (JSP_LUT_DIR, quant_adapter_lut6.py)
+        d = Path(os.environ["JSP_LUT_DIR"]); n_t = n_p = 0
+        with torch.no_grad():
+            for name, m in module.named_modules():
+                if not isinstance(m, nn.Linear) or any(k in name for k in ("embed", "lm_head", "norm")):
+                    continue
+                z = np.load(d / f"{name}.weight.npz")
+                w = (torch.from_numpy(z["lut"].astype(np.float32)).reshape(-1)[torch.from_numpy(z["idx"].astype(np.int64))]
+                     * torch.from_numpy(z["scale"].astype(np.float32))[:, None])
+                assert tuple(w.shape) == tuple(m.weight.shape), name
+                m.weight.copy_(w.to(device=m.weight.device, dtype=m.weight.dtype))
+                n_t += 1; n_p += m.weight.numel()
+        return n_t, n_p
+    if spec.startswith("lut") and spec.endswith("t"):   # 'lut6t': the ANE build's form (lut_tensor.py), per tensor + channel scale
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from lut_tensor import lut_quantize, lut_dequantize
+        bits = int(spec[3:-1]); n_t = n_p = 0
+        with torch.no_grad():
+            for name, m in module.named_modules():
+                if not isinstance(m, nn.Linear) or any(k in name for k in ("embed", "lm_head", "norm")):
+                    continue
+                lut, idx, sc = lut_quantize(m.weight.detach().cpu(), bits)   # on the CPU: torch.histc fails on MPS
+                m.weight.copy_(lut_dequantize(lut, idx, sc).to(device=m.weight.device, dtype=m.weight.dtype))
+                n_t += 1; n_p += m.weight.numel()
+                del lut, idx, sc
+        return n_t, n_p
     if not spec.startswith("lut"):
         return fake_quant(module, int(spec))
     bits = int(spec[3:]); K = 2 ** bits
@@ -627,7 +653,8 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
         mod = {"adapter": drafter.driver.adapter, "head": drafter.driver.head}[what]
         t_q = time.time()
         qinfo[what] = (spec,) + fake_quant_spec(mod, spec)
-        kind = {"8c": "RTN per channel, 8 bits"}.get(spec, f"LUT {spec[3:]} bits per row (k-means)" if spec.startswith("lut") else f"RTN g128, {spec} bits")
+        kind = {"8c": "RTN per channel, 8 bits"}.get(spec, (f"LUT {spec[3:-1]} bits per tensor + channel scale (ANE form{', the ANE build files' if spec.endswith('f') else ''})" if spec.endswith(("t", "f"))
+                                                            else f"LUT {spec[3:]} bits per row (k-means)") if spec.startswith("lut") else f"RTN g128, {spec} bits")
         print(f"QUANT {what}: {qinfo[what][1]} Linear weights, {qinfo[what][2] / 1e9:.2f}B parameters, {kind}, in {time.time() - t_q:.0f}s", flush=True)
         mem(f"quantized {what}")
     rows = OutcomeRows(drafter, llm.runner) if a.rows == "outcome" else None

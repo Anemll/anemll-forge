@@ -37,15 +37,33 @@ Plan: `PLAN.md` (Anemll, 19 Nov 22:32). Status line: `/tmp/m6_yolo_status.txt`. 
   - The whole B16 block is accepted in 33% of gsm8k rounds. This is the lever for more accepted tokens per cycle,
     not wider trees.
 - **Its verify fits this target:** a 16-row CHAIN verify costs x1.085 at the 8K entry (block solve; the 16-row head
-  is free), x1.17 at 32K and x1.27 at 64K. Projected at 2K: about 72 tok/s with a 30 ms drafter, against 53.4
-  (+34%).
-- **Drafter at 4 bits:** RTN 4-bit adapter + head loses 9.3% (9.28 vs 10.23 tok/round, still x1.53 over DFlash2);
-  3 bits breaks it.
-- **Not integrated:** the drafter is 6.2B parameters (12 GB bf16; about 3.4 GB and about 28 ms per round at 4 bits on
-  the ANE, estimated). Next steps: an ANE port of the B16 head and ctxkv adapter, and a 16-row chain verify entry
-  with the block solve.
+  is free), x1.17 at 32K and x1.27 at 64K. The +34% projected earlier assumed a single 30 ms drafter pass per
+  round. The replay counters show several passes per round (B8), so that projection is withdrawn.
+- **Drafter bit width (B7):** int8 per channel and 6-bit g128 (adapter + head) are lossless (within 1%). 4-bit RTN
+  g128 loses 9%, and a per-row LUT4 on the adapter loses 7-17% (no rotation or calibration: not our pipeline). 3 bits
+  collapses.
+- **But it does not pay on this M6 as a serial ANE drafter (B8):**
+  - **Drafter cost:** the reference schedule J3-R3 runs per round about 4.5 B16-head passes, 4.5 adapter passes and
+    3.4 decoder passes. The adapter alone at LUT6 on the ANE measured 27.2 ms per pass (3.35 GB at 123 GB/s; 16
+    rows, 8K of KV) and holds 3.7 GB wired.
+  - **Projection** (8K entry, measured pieces, head / decoder passes projected; LUT6 timing; LUT6 acceptance -2..7% at J3-R3, about 0 at J0-R0): 14-45% slower than our DFlash2 at
+    every schedule. Even J0-R0, which keeps DFlash2's acceptance or beats it by up to 18%, drafts in 43 ms against
+    DFlash2's 13 ms.
+  - **What would make it pay:** an adapter 2-3x cheaper per pass, or drafting that overlaps the verify.
+- **Memory:** DFlash2 measured 0.84 GB wired (+0.25 GB selector file pages); the LUT6 adapter alone 3.7 GB wired.
 
-**Served state at the end:** see A8 / the last ops.log lines (forge restored on 8765 in the served configuration).
+**Served state at the end** (08:3x, after the JetSpec++ work as Anemll asked):
+- **Forge:** on 8765 in the served configuration (`pipe/v8_server_dec8_qk.sh`, build v8_dec8, DFlash2 chain). Smoke
+  check: banner matched, and humaneval 1 / mt-bench 2 replies byte-identical to the night's chain baseline.
+- **Tree verify:** stays opt-in. `PORT=8765 pipe/v8_server_tree.sh` (build v8_dec8t, 19 Nov conv form), or with
+  `BUILD=/Volumes/SSD4TB/anemll-forge-research/v8_dec8tc GM=pipe/w_dec8tc/manifest_best.json` (exact-conv build).
+- **Disk:** both tree builds are kept on the SSD (9.9 GB each) with their Core AI entries on the internal disk (about
+  10.7 GB each, aned's programs about the same again; internal free 53 GB). To drop one:
+  `scripts/coreai_cache_delete.py --delete <build>`, then delete the files.
+- **Kept on the SSD:** the JetSpec++ captures (`jetspec_pp/capture_*_20nov`, about 1.2 GB) and the LUT6 adapter
+  tensors (`jetspec_pp/adapter_lut6`, 4.2 GB).
+- **Deleted:** every scratch probe build (decomposition, GDN WY, chain16, the ANE adapter), Core AI entries first.
+- **Commits:** local, on `v8-gpu-ane-prefill` (not pushed).
 
 ## Layout
 
@@ -341,8 +359,8 @@ an attention + a 17,408-wide SwiGLU initialized from the target) that turn the t
 committed token into the drafter's context K / V. So per round it runs on about 9.5 new tokens, not on the 16 draft
 positions. At 4 bits on the ANE (bandwidth-bound, about 120 GB/s): adapter 2.2 GB, about 18 ms; B16 head (1.6B,
 0.8 GB), about 7 ms; anchor decoder (target layers 62 / 63 on the tap-61 feature, about 0.4 GB), about 3 ms. That is
-about 28 ms per round, the projection's 30 ms row (+34% at 2K), if 4-bit weights keep its acceptance. Memory: about
-3.4 GB more beside the served stack.
+about 28 ms per adapter pass (measured later at LUT6: 27.2 ms, B8). The schedule runs several passes per round
+(B8), so this is not the round cost. Memory: about 3.4 GB more beside the served stack (LUT6 measured: 3.7 GB wired).
 
 **Beyond gsm8k** (02:09-03:11; `make_pinned.py`: the first user turn of humaneval-t0 / mbpp-t0 / mt-bench-t0 0-7
 re-rendered in the 27b files' no-think form and tokenized with our tokenizer, the rendering checked against
@@ -383,6 +401,11 @@ our target uses, may do better; not tested). So an ANE port needs the adapter at
 | mt-bench (1-7) | 32.3 | 37.3 (+15%) | 33.8 (+5%) |
 
 These are projections (the drafter's 30 ms is a bandwidth estimate, not measured on the M6).
+
+**Correction (B8, 07:5x):** that table assumed one 30 ms drafter pass per round. The replay's own counters show
+J3-R3 running about 4.5 head + 4.5 adapter + 3.4 decoder passes per round, and the adapter pass alone measured
+27.2 ms at LUT6 on the ANE. With those, every schedule projects 14-42% slower than DFlash2 (B8). The table above
+is superseded.
 
 ## A8. Exact-conv tree8 build: identity, control, branched bench (`bench/tree8c_*`, `bench/chain_v2_ctl`, `tree_exact/`)
 
@@ -469,3 +492,89 @@ the served process's total was not re-measured with and without it).
   and vector LUTs); a rotated and calibrated 4-bit form is the open test. 4-bit RTN g128 (adapter + head, gsm8k) lost
   9.3% (B above).
 - The LUT3 run was stopped after 2 gsm8k traces (clear collapse, about 2 min per trace).
+
+## B8. JetSpec++ 6-bit / LUT6 baseline on the ANE (requested 06:4x; forge stays down per Anemll)
+
+**What runs per round (measured, replay counters).** J<m>-R<n> runs J0, then n refreshes (R: one adapter predict +
+one anchor-decoder pass each) interleaved with m more B16 head passes (J), and one final adapter predict per round.
+bf16, gsm8k / humaneval / mbpp 0-7 (`jetspec/b8_sched.sh`, `b8/b8_sched_*`, `jetspec/b8_passes.py`; every run
+lossless):
+
+| schedule | set | tok/round | head passes / round | adapter passes / round | decoder passes / round |
+|---|---|---|---|---|---|
+| J3-R3 | gsm8k | 10.23 | 4.29 | 4.29 | 3.21 |
+| J3-R3 | humaneval | 13.19 | 4.65 | 4.65 | 3.49 |
+| J3-R3 | mbpp | 10.55 | 4.80 | 4.80 | 3.60 |
+| J0-R0 | gsm8k | 6.12 | 1.01 | 1.01 | 0.00 |
+| J0-R0 | humaneval | 8.59 | 1.08 | 1.08 | 0.00 |
+| J0-R0 | mbpp | 6.64 | 1.05 | 1.05 | 0.00 |
+| J1-R0 | gsm8k | 6.98 | 2.11 | 1.06 | 0.00 |
+| J1-R0 | humaneval | 9.79 | 2.25 | 1.12 | 0.00 |
+| J1-R0 | mbpp | 7.64 | 2.13 | 1.07 | 0.00 |
+| J1-R1 | gsm8k | 8.54 | 2.16 | 2.16 | 1.08 |
+| J1-R1 | humaneval | 11.94 | 2.40 | 2.40 | 1.20 |
+| J1-R1 | mbpp | 8.72 | 2.30 | 2.30 | 1.15 |
+
+The DFlash2 chain on the same prompts: 6.08 / 7.30 / 5.89 tok/verify. So J0-R0 (one head pass + one adapter
+predict per round) already matches or beats our DFlash2 on these sets (+1% / +18% / +13%), J1-R1 adds
++40% / +64% / +48%, J3-R3 +68% / +81% / +79%, at about 1 / 2.2 / 4.5 heavy drafter passes per round.
+
+**LUT6 in the ANE build's form** (`jetspec/lut_tensor.py`, `jetspec/quant_adapter_lut6.py` ->
+`/Volumes/SSD4TB/anemll-forge-research/jetspec_pp/adapter_lut6`, 4.2 GB): every adapter matrix as one 64-entry palette
+per tensor (Lloyd on a histogram of w / max|w_row|) + a per-output-channel scale, the form `QConv` takes. 84
+matrices, weight error rel 3.97% mean (5.6% max); 6-bit g128 RTN (lossless in B7) is about 2.4%, LUT4 in this form
+about 10%. Row normalization by RMS or a Hadamard rotation first changed the error by less than 0.2 points (the
+adapter's weights are already near-Gaussian).
+
+**The adapter on the ANE at LUT6, measured** (`v8/build_jsp_adapter_ane.py`, `v8/build_jsp_adapter_all.sh`; a scratch
+latency build, deleted after): the 12 blocks built as the target builder's own attention + MLP layers (target
+attention indices 3-47, nothing of the target read) on the LUT6 files above, 3 packages of 4 blocks, 1,118 MB each
+(0.75 byte per weight: 6-bit indices), forge.py compile 1m22s, Core AI entries 1.12 GB each (no fallback). Entries:
+16 query rows (the B16 window) against an INT8 KV history, per block rms -> attention -> + -> rms -> MLP -> +. The
+16 rows' own keys / values come from the block input and the kv_norm is skipped (the real stream reads them from its
+tap's prefix): the weight traffic, which sets the time, is the real one. `tree_decomp_time.py`, median of 30
+(banner in `b8/ane/timing_8k.log`, packages sha ad831782afd41262 / ...):
+
+| piece | 8K of KV | 32K of KV |
+|---|---|---|
+| 4 blocks (one package) | 9.08 / 9.07 / 9.09 ms | the 32K entry was dropped at compile ("no procedureInfo entry"): UNMEASURED |
+| one adapter pass (12 blocks) | **27.2 ms** (3.35 GB in 27 ms: 123 GB/s, the ANE's bandwidth) | UNMEASURED |
+| resident when loaded and run (`pipe/unit/power/ane_pkg_mem.py`, `b8/ane/adapter_mem.json`) | wired +3.67 GB (2.34 -> 6.01), process +0.20 GB (KV inputs); +1.16 GB stayed wired after release | |
+
+Not built: the B16 head (1.73B parameters, a DFlash architecture the target builder does not have) and the anchor
+decoder. Their pass times below are PROJECTED from measured rates (head: its LUT6 bytes at the adapter's 123 GB/s,
+10.5 ms, + the target head on 16 rows, 4.30 ms measured; decoder: target layers 62 / 63 at 16 rows from the
+measured 16-row group, 2.75 ms, + 4.30).
+
+**Projected decode at the 8K entry** (`jetspec/b8_project.py`; serial: draft, then a 16-row chain verify at 102.5 ms;
+bf16 tok/round; DFlash2: the served 107.7 ms cycle and its tok/verify on the same prompts):
+
+| schedule | set | drafter ms / round at LUT6 on the ANE (adapter + head + decoder) | round ms | acceptance, tok/round: bf16 replay (LUT6 replay) | JetSpec++ tok/s (LUT6 timing; LUT6 acceptance where measured) | DFlash2 tok/s | vs DFlash2 |
+|---|---|---|---|---|---|---|---|
+| J0-R0 | gsm8k | 43 (28 + 15 + 0) | 146 | 6.12 (6.21) | 42.5 | 56.5 | -25% |
+| J0-R0 | humaneval | 45 (29 + 16 + 0) | 149 | 8.59 (8.53) | 57.2 | 67.8 | -16% |
+| J0-R0 | mbpp | 44 (29 + 16 + 0) | 148 | 6.64 (6.51) | 44.1 | 54.7 | -19% |
+| J1-R0 | gsm8k | 60 (29 + 31 + 0) | 163 | 6.98 | 42.7 | 56.5 | -24% |
+| J1-R0 | humaneval | 64 (31 + 33 + 0) | 167 | 9.79 | 58.5 | 67.8 | -14% |
+| J1-R0 | mbpp | 61 (29 + 32 + 0) | 164 | 7.64 | 46.6 | 54.7 | -15% |
+| J1-R1 | gsm8k | 98 (59 + 32 + 8) | 202 | 8.54 | 42.3 | 56.5 | -25% |
+| J1-R1 | humaneval | 109 (65 + 36 + 9) | 213 | 11.94 | 56.1 | 67.8 | -17% |
+| J1-R1 | mbpp | 105 (62 + 34 + 8) | 208 | 8.72 | 41.9 | 54.7 | -23% |
+| J3-R3 | gsm8k | 203 (117 + 63 + 23) | 306 | 10.23 (9.98) | 32.6 | 56.5 | -42% |
+| J3-R3 | humaneval | 220 (127 + 69 + 25) | 324 | 13.19 (12.99) | 40.1 | 67.8 | -41% |
+| J3-R3 | mbpp | 227 (131 + 71 + 26) | 331 | 10.55 (9.86) | 29.8 | 54.7 | -45% |
+
+Every row is timed at LUT6 on the ANE (the measured 27.2 ms adapter pass; no bf16 ANE timing exists, and bf16 would
+move 2.7x the bytes). The bf16 / LUT6 numbers are acceptance only, from the GPU replays. Where the LUT6 replay ran
+(J0-R0, J3-R3), tok/s uses its acceptance.
+
+**LUT6 acceptance** (adapter from the ANE build's own LUT6 files, head in the same form; `--quant adapter:lut6f,head:lut6t`,
+`b8/b8_lut6t_*`; every trace lossless): J3-R3 9.98 / 12.99 / 9.86 tok/round (bf16 10.23 / 13.19 / 10.55: -2.4 / -1.5 /
+-6.6%); J0-R0 6.21 / 8.53 / 6.51 (bf16 6.12 / 8.59 / 6.64: +1.4 / -0.7 / -2.0%).
+
+**So a serial ANE JetSpec++ is 14-45% slower than our DFlash2 chain at every schedule.** Even J0-R0 (one head + one
+adapter pass) drafts in 43-45 ms against DFlash2's 13 ms; J1-R1 would need drafting at 48 ms or less per round to
+break even (it takes 98-109). Measured end-to-end tok/s: UNMEASURED (no served JetSpec++ path: it needs the B16
+head port, the adapter's real attention and its own 12-layer context KV cache, a 16-row chain verify entry, and the
+round driver in the server). What could change it: an adapter 2-3x cheaper per pass (it is 72% of the parameters;
+at 4 bits per-row LUT loses 7-17% acceptance, B7), or drafting that overlaps the ANE verify.
