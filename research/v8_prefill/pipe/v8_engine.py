@@ -81,6 +81,13 @@ class V8Prefill:
         g.v8_state_in.restype, g.v8_state_in.argtypes = C_.c_double, [C_.c_int32] + [C_.POINTER(C_.c_int32)] * 3
         self.g = g
         log(f"v8: GPU engine {dylib}, {g.v8_init()} layers, {streams} streams, KV {'INT8 (ANE cache, KV8)' if kv8 else 'fp16 + handover'}")
+        if hasattr(g, "v8_variant"):   # the attention variant as the loaded dylib reports it (18 Nov 2026), + its hash
+            import hashlib
+            vb_ = C_.create_string_buffer(4096)
+            g.v8_variant.restype, g.v8_variant.argtypes = C_.c_int32, [C_.c_char_p, C_.c_int32]
+            vr_ = g.v8_variant(vb_, 4096)
+            log(f"v8: variant {vb_.value.decode().split(' | kernels=')[0]}{'' if vr_ >= 0 else ' | KERNEL MISSING'} | dylib "
+                f"{Path(engine_dir) / dylib} sha256 {hashlib.sha256((Path(engine_dir) / dylib).read_bytes()).hexdigest()[:16]}")
         self.wa = [g.v8_wrap(x.address, x.nbytes) for x in self.xa]
         self.wb = [g.v8_wrap(x.address, x.nbytes) for x in self.xb]
         assert min(self.wa + self.wb) >= 0

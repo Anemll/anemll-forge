@@ -1,0 +1,33 @@
+07:53:12 stopping forge on 8765
+stopping test server pid 92454 (/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python /Users/anem)
+stopped
+07:53:42 trace s_smoke 4096 (swap 745.44M)
+v8_trace rc=0
+BANNER expect F8=x qk=attn_qk8isk_tg | loaded F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P
+runtime + V8 engine loaded in 1s
+run 0: 4096 tok in 5.81s (705 tok/s), 4096 events
+07:55:09 trace g_smoke 4096 (swap 745.44M)
+v8_trace rc=0
+BANNER expect F8=x qk=attn_qk8isk_tg | loaded F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P
+BANNER v8g: DeltaNet engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_g256.dylib sha256 7a5b5d38c7813205, 48 layers, T 256 | F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=256 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg lut=lut_gemm32_i8
+runtime + V8 engine loaded in 1s
+run 0: 4096 tok in 6.29s (651 tok/s), 3328 events
+{"a": "tr_s_smoke", "b": "tr_g_smoke", "tokens": 4096, "kl_a_b": 0.0, "cos": 1.0, "argmax_same": true, "top10": 10, "bitexact": true}
+smoke OK [{'a': 'tr_s_smoke', 'b': 'tr_g_smoke', 'tokens': 4096, 'kl_a_b': 0.0, 'cos': 1.0, 'argmax_same': True, 'top10': 10, 'bitexact': True}]
+07:56:38 trace s_a 95232,32768 (swap 737.44M)
+v8_trace rc=0
+BANNER expect F8=x qk=attn_qk8isk_tg | loaded F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P
+runtime + V8 engine loaded in 1s
+run 0: 95232 tok in 239.63s (397 tok/s), 95232 events
+run 1: 32768 tok in 57.19s (573 tok/s), 32768 events
+08:03:44 trace g_a 95232,32768 (swap 737.44M)
+v8_trace rc=1
+BANNER expect F8=x qk=attn_qk8isk_tg | loaded F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P
+BANNER v8g: DeltaNet engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_g256.dylib sha256 7a5b5d38c7813205, 48 layers, T 256 | F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=256 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg lut=lut_gemm32_i8
+Traceback (most recent call last):
+    raise RuntimeError(f"v8_wait {L} failed")
+RuntimeError: v8_wait 12 failed
+g_a failed: stopping
+08:05:11 restarting forge on 8765 (v8_server_dec8_qk.sh)
+08:05:16 forge ready
+[08:05:14] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8

@@ -156,10 +156,13 @@ def build(a):
             return self.down(ad) * fa
 
     class Split8(nn.Module):
-        def __init__(self):
+        """INT8-palette FFN in the split shape; ks: K split of gate / up in two 2560-deep convs; gu / dn: per-token INT8
+        activations on the gate / up input and on the down input (FP16 where off)."""
+
+        def __init__(self, ks=True, gu=True, dn=True):
             super().__init__()
-            kp = [(0, KW), (KW, HID)]
-            self.kp = kp
+            kp = [(0, KW), (KW, HID)] if ks else [(0, HID)]
+            self.kp, self.gu, self.dn = kp, gu, dn
             self.g = nn.ModuleList([nn.ModuleList([Lut8("gate", (j * BW, (j + 1) * BW), c) for c in kp]) for j in range(NB)])
             self.u = nn.ModuleList([nn.ModuleList([Lut8("up", (j * BW, (j + 1) * BW), c) for c in kp]) for j in range(NB)])
             self.d = nn.ModuleList([Lut8("down", None, (j * BW, (j + 1) * BW)) for j in range(NB)])
@@ -170,20 +173,23 @@ def build(a):
             self.qa = nn.ModuleList([Q() for _ in range(NB)])
 
         def forward(self, h):
-            hs = [self.qh[i](h[:, c0:c1]) for i, (c0, c1) in enumerate(self.kp)]
+            hs = [self.qh[i](h[:, c0:c1]) if self.gu else (h[:, c0:c1], 1.0) for i, (c0, c1) in enumerate(self.kp)]
             y = None
             for j in range(NB):
                 g = sum(self.g[j][i](hs[i][0]) * hs[i][1] for i in range(len(hs)))
                 u = sum(self.u[j][i](hs[i][0]) * hs[i][1] for i in range(len(hs)))
                 ar = F.conv2d(silu(g) * u, getattr(self, "r%d" % j))
-                ad, fa = self.qa[j](ar)
+                ad, fa = self.qa[j](ar) if self.dn else (ar, 1.0)
                 p = self.d[j](ad) * fa
                 y = p if y is None else y + p
             return y
 
     a.out.mkdir(parents=True, exist_ok=True)
     np.save(a.out / ("rot_L%d.npy" % L), rot.conv.weight.detach().view(INTER, BW).numpy())   # block b = rows b*1024..+1024
-    make = {"lut16": Lut16, "lut16s": Split16, "lut8w": lambda: Full8(False), "lut8a8": lambda: Full8(True), "lut8a8s": Split8}
+    make = {"lut16": Lut16, "lut16s": Split16, "lut8w": lambda: Full8(False), "lut8a8": lambda: Full8(True), "lut8a8s": Split8,
+            # bisection of lut8a8s (one change each)
+            "s8w": lambda: Split8(True, False, False), "s8a8_noks": lambda: Split8(False, True, True),
+            "s8a8_gu": lambda: Split8(True, True, False), "s8a8_dn": lambda: Split8(True, False, True)}
     for v in VARIANTS:
         dst = a.out / ("lut8_%s_L%d.aimodel" % (v, L))
         if dst.exists():
@@ -210,6 +216,50 @@ def host_ref(L, h, rw):
     a = (g * 0.5 * (1 + np.tanh(g * 0.5))) * u
     ar = np.concatenate([rw[b * BW:(b + 1) * BW] @ a[b * BW:(b + 1) * BW] for b in range(NB)])   # the grouped rotation
     return dense("down") @ ar
+
+
+SIM = {"lut8w": ("full", False, False, None), "lut8a8": ("full", True, True, None), "lut8a8s": ("split", True, True, True),
+       "s8w": ("split", False, False, True), "s8a8_noks": ("split", True, True, False), "s8a8_gu": ("split", True, False, True),
+       "s8a8_dn": ("split", False, True, True)}
+
+
+_D8 = {}
+
+
+def host_sim(L, h, rw, form, gu, dn, ks):
+    """FP32 host simulation of a variant's exact INT8 recipe: INT8 palette (absmax / 127 per matrix) x row scale, per-token
+    INT8 activations (absmax over the quantized channels, round to nearest, unit 1/128 and back) where the graph has them."""
+    W, _ = layer(L)
+
+    def dense8(m):
+        if (L, m) in _D8:
+            return _D8[L, m]
+        lut, idx, sc = W[m]["lut"].astype(np.float32), W[m]["idx"], W[m]["scale"].astype(np.float32).reshape(-1)
+        ps = np.abs(lut).max() / 127.0
+        l8 = np.clip(np.rint(lut / ps), -127, 127) * ps
+        w = l8[idx].transpose(0, 2, 1).reshape(idx.shape[0] * lut.shape[1], idx.shape[1])
+        _D8[L, m] = w * sc[:, None]
+        return _D8[L, m]
+
+    def q(x):
+        peak = np.maximum(np.abs(x).max(0, keepdims=True), 2 ** -9)
+        return np.clip(np.rint(x * 127 / peak), -127, 127) * peak / 127
+    Wg, Wu, Wd = dense8("gate"), dense8("up"), dense8("down")
+    if form == "full":
+        hq = q(h) if gu else h
+        a = (lambda g: g * 0.5 * (1 + np.tanh(g * 0.5)))(Wg @ hq) * (Wu @ hq)
+        ar = np.concatenate([rw[b * BW:(b + 1) * BW] @ a[b * BW:(b + 1) * BW] for b in range(NB)])
+        return Wd @ (q(ar) if dn else ar)
+    parts = [(0, KW), (KW, HID)] if ks else [(0, HID)]
+    hs = [(q(h[c0:c1]) if gu else h[c0:c1], c0, c1) for c0, c1 in parts]
+    y = 0
+    for j in range(NB):
+        r = slice(j * BW, (j + 1) * BW)
+        g = sum(Wg[r, c0:c1] @ x for x, c0, c1 in hs)
+        u = sum(Wu[r, c0:c1] @ x for x, c0, c1 in hs)
+        ar = rw[r] @ ((g * 0.5 * (1 + np.tanh(g * 0.5))) * u)
+        y = y + Wd[:, r] @ (q(ar) if dn else ar)
+    return y
 
 
 def hwx_summary(pkg):
@@ -266,10 +316,16 @@ def time_all(a):
             tm = S.timed(plan, 20, 3)
             y = np.array(yb.np, np.float32).reshape(HID, T)
             rel = float(np.linalg.norm(y - refs[T]) / np.linalg.norm(refs[T]))
+            sim = host_sim(a.layer, hin[T].astype(np.float32), rw, *SIM[v]) if v in SIM else None
+            rel_sim = float(np.linalg.norm(y - sim) / np.linalg.norm(sim)) if sim is not None else None
+            sim_vs_fp32 = float(np.linalg.norm(sim - refs[T]) / np.linalg.norm(refs[T])) if sim is not None else None
             r = {"variant": v, "rows": T, "ms": tm["median_ms"], "tflops": 6 * HID * INTER * T / (tm["median_ms"] / 1e3) / 1e12,
-                 "us_per_token": tm["median_ms"] * 1e3 / T, "rel_vs_fp32": rel, "finite": bool(np.isfinite(y).all())}
+                 "us_per_token": tm["median_ms"] * 1e3 / T, "rel_vs_fp32": rel, "rel_vs_sim": rel_sim,
+                 "sim_vs_fp32": sim_vs_fp32, "finite": bool(np.isfinite(y).all())}
             rows.append(r)
-            print("%-8s T%-5d %8.3f ms  %5.1f TOPS  %6.2f us/tok  rel vs fp32 %.2e" % (v, T, r["ms"], r["tflops"], r["us_per_token"], rel), flush=True)
+            print("%-10s T%-5d %8.3f ms  %5.1f TOPS  %6.2f us/tok  rel vs fp32 %.2e  vs own INT8 recipe %s  (recipe vs fp32 %s)"
+                  % (v, T, r["ms"], r["tflops"], r["us_per_token"], rel, "%.2e" % rel_sim if rel_sim is not None else "-",
+                     "%.2e" % sim_vs_fp32 if sim_vs_fp32 is not None else "-"), flush=True)
         del m
         s = hwx_summary(dst)
         rows.append({"variant": v, "hwx_summary": s})
@@ -278,10 +334,14 @@ def time_all(a):
 
 
 def main():
+    global VARIANTS, ROWS
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=("build", "time")); ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--layer", type=int, default=36)
+    ap.add_argument("--variants", default=",".join(VARIANTS)); ap.add_argument("--rows", default=",".join(map(str, ROWS)))
     a = ap.parse_args()
+    VARIANTS, ROWS = tuple(a.variants.split(",")), tuple(int(x) for x in a.rows.split(","))
+    (a.out / ("lut8_a8_L%d.json" % a.layer)).exists() and a.cmd == "time" and print("note: overwriting the result json", flush=True)
     build(a) if a.cmd == "build" else time_all(a)
 
 

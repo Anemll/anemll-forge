@@ -1,0 +1,234 @@
+[qwen38-27b-ane] started 2026-11-19 08:48:08  pid 19935  listen 127.0.0.1:8765
+[qwen38-27b-ane] model dir     /Volumes/SSD4TB/anemll-forge-research/v8_dec8  (max ctx 98304; Core AI: verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [8192, 16384, 32768, 65536, 98304], KV kv8, one weight copy)
+[qwen38-27b-ane] checkpoint    /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model
+[qwen38-27b-ane] speculative   ON  drafter /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel
+[qwen38-27b-ane] thinking      default off (clients override via chat_template_kwargs.enable_thinking); context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)
+[qwen38-27b-ane] think budget  low=2048,medium=6144,xhigh=12288 tokens per reasoning_effort (request field thinking_budget overrides; then closed with Qwen's budget phrase)
+[qwen38-27b-ane] sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, min_p 0.0 / 0; max_tokens 4096
+[qwen38-27b-ane] repetition    presence_penalty 0.0 thinking / 1.5 non-thinking; DRY multiplier 0.0 base 1.75 allowed 8 tokens; loop guard 3+ periods over 1536+ tokens
+[qwen38-27b-ane] python        /Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+drafter: body-only package built beside release_u15_data600_mat, drafting for release_vq3pA_mixh_s600_k1_mat with its head
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+[08:48:09] ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+[08:48:09] model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+[08:48:09] target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8
+[08:48:09] KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+[08:48:09] KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[08:48:10] [ANE compile] all 18 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+[08:48:10] loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+[08:48:10] loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+[08:48:10] loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+[08:48:10] loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+[08:48:10] loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+[08:48:10] loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+[08:48:11] loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+[08:48:11] loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+[08:48:11] loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+[08:48:11] loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+[08:48:11] loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+[08:48:11] loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+[08:48:12] loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+[08:48:12] loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+[08:48:12] loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+[08:48:12] loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+[08:48:13] drafter: Core AI dflash2_lut4_gptq_nohead.aimodel (body only, drafting with the target's head)
+[qwen38-27b-ane] loaded batched prefill + head + DFlash2 drafter dflash2_lut4_gptq_nohead.aimodel from v8_dec8 (ctx 98304) in 4s
+[08:48:13] v8: GPU engine libgpu_v8_f8q.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+[08:48:13] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d
+[08:48:13] v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+[08:48:13] v8: prefill engine ready in 0s (V8 for new spans >= 256 tokens)
+dec_init: attention kernel dec_attn_r4
+[08:48:13] dec8: decode GPU engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_clk.dylib sha256 2b64e979a91a414f, kernels dec_kernels.metal 00f351b5edc893b7; keep-alive hold 60 ms (DEC_KA_HOLD_MS), switch /Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka
+[08:48:13] dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode auto, 64K entry up to 0 keys
+[08:48:13] v8: text-level prompt match on; decode snapshots every 256 tokens (last 3); V8 rest >= 128, tail <= 8 rows on the bridge
+[qwen38-27b-ane] serving OpenAI API on http://127.0.0.1:8765/v1 (V8 prefill, speculative ON, ctx 98304)
+[08:48:22] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[08:48:22] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[08:48:22] prefill: 15 tok in 0.3s (46 tok/s) | decoding ...
+[08:48:22] prompt 15 (cached 0, prefill 15 in 0.3s) | gen 1 in 0.1s (8.6 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 117 (draft 16.4 verify 99.5 sample 0.1 ctx 0.4 host 0.3)) | stop | ctx 16/98304 (8K entry)
+[08:48:52] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16 tok, prompt 1529 tok, first difference at 1:
+   state : '<|im_start|>user\nSay OK.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nOK'
+   prompt: '<|im_start|>system\nSession 0176b114. You are a helpful coding assistant. Follow the final task'
+[08:48:52] request: prompt 1529 tok | cache: cold (no reusable state), reused 0 | prefilling 1529 tok ...
+[08:48:52] v8: 16 ANE KV segments registered (ctx 8192)
+[08:48:55] v8: snapshot 'turn' at 1408 (cut 1522), taken during the run
+[08:48:55] v8: 1529 tok (7 pad) in 2.3s (674 tok/s) + 134 ms handover / drafter context | setup 30 ms (V fill 0 ms, 0 rows)
+[08:48:55] prefill: 1529 tok in 2.4s (628 tok/s) | decoding ...
+[08:48:59] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[08:48:59] prompt 1529 (cached 0, prefill 1529 in 2.4s) | gen 256 in 4.4s (58.5 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:8% 1:5% 2:10% 3:2% 4:2% 5:5% 6:0% 7:68%), ms/cycle 109 (draft 13.4 verify 94.7 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 1785/98304 (8K entry)
+[08:48:59] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 1785 tok, prompt 1529 tok, first difference at 1529:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:48:59] request: prompt 1529 tok | cache: restore 'turn' snapshot, reused 1408 | prefilling 121 tok ...
+[08:48:59] snapshots dropped (their KV rows were rewritten): dec0
+[08:48:59] prefill: 121 tok in 0.4s (296 tok/s) | decoding ...
+[08:49:04] prompt 1529 (cached 1408, prefill 121 in 0.4s) | gen 256 in 4.3s (59.3 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:2% 1:5% 2:10% 3:10% 4:5% 5:5% 6:0% 7:62%), ms/cycle 108 (draft 12.8 verify 93.8 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 1784/98304 (8K entry)
+[08:49:04] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 1784 tok, prompt 1529 tok, first difference at 1529:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:49:04] request: prompt 1529 tok | cache: restore 'turn' snapshot, reused 1408 | prefilling 121 tok ...
+[08:49:04] prefill: 121 tok in 0.4s (293 tok/s) | decoding ...
+[08:49:08] prompt 1529 (cached 1408, prefill 121 in 0.4s) | gen 256 in 4.3s (59.3 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:2% 1:5% 2:10% 3:10% 4:5% 5:5% 6:0% 7:62%), ms/cycle 108 (draft 12.8 verify 93.9 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 1784/98304 (8K entry)
+[08:49:08] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 1784 tok, prompt 1529 tok, first difference at 1529:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:49:08] request: prompt 1529 tok | cache: restore 'turn' snapshot, reused 1408 | prefilling 121 tok ...
+[08:49:09] prefill: 121 tok in 0.4s (291 tok/s) | decoding ...
+[08:49:13] prompt 1529 (cached 1408, prefill 121 in 0.4s) | gen 256 in 4.3s (59.3 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:2% 1:5% 2:10% 3:10% 4:5% 5:5% 6:0% 7:62%), ms/cycle 108 (draft 12.8 verify 93.9 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 1784/98304 (8K entry)
+[08:49:13] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 1784 tok, prompt 7673 tok, first difference at 5:
+   state : '<|im_start|>system\nSession 0176b114. You are a helpful coding assistant. Follow the final task after the public testing'
+   prompt: '<|im_start|>system\nSession 9077f8e1. You are a helpful coding assistant. Follow the final task after the public testing'
+[08:49:13] request: prompt 7673 tok | cache: cold (no reusable state), reused 0 | prefilling 7673 tok ...
+[08:49:25] v8: snapshot 'turn' at 7552 (cut 7666), taken during the run
+[08:49:25] v8: 7673 tok (7 pad) in 11.3s (678 tok/s) + 183 ms handover / drafter context | setup 19 ms (V fill 0 ms, 0 rows)
+[08:49:25] prefill: 7673 tok in 11.5s (666 tok/s) | decoding ...
+[08:49:29] prompt 7673 (cached 0, prefill 7673 in 11.5s) | gen 256 in 4.3s (59.3 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:8% 1:5% 2:5% 3:10% 4:5% 5:0% 6:0% 7:68%), ms/cycle 108 (draft 12.8 verify 93.9 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 7928/98304 (8K entry)
+[08:49:29] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7928 tok, prompt 7673 tok, first difference at 7673:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:49:29] request: prompt 7673 tok | cache: restore 'turn' snapshot, reused 7552 | prefilling 121 tok ...
+[08:49:30] prefill: 121 tok in 0.4s (281 tok/s) | decoding ...
+[08:49:34] prompt 7673 (cached 7552, prefill 121 in 0.4s) | gen 256 in 4.4s (57.9 tok/s, 6.24 tok/verify, accept 75% (accepted/7 per cycle: 0:10% 1:2% 2:2% 3:17% 4:5% 5:0% 6:0% 7:63%), ms/cycle 108 (draft 12.9 verify 93.8 sample 0.5 ctx 0.6 host 0.1)) | length | ctx 7928/98304 (8K entry)
+[08:49:34] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7928 tok, prompt 7673 tok, first difference at 7673:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:49:34] request: prompt 7673 tok | cache: restore 'turn' snapshot, reused 7552 | prefilling 121 tok ...
+[08:49:34] prefill: 121 tok in 0.4s (280 tok/s) | decoding ...
+[08:49:39] prompt 7673 (cached 7552, prefill 121 in 0.4s) | gen 256 in 4.4s (57.8 tok/s, 6.24 tok/verify, accept 75% (accepted/7 per cycle: 0:10% 1:2% 2:2% 3:17% 4:5% 5:0% 6:0% 7:63%), ms/cycle 108 (draft 12.9 verify 93.9 sample 0.5 ctx 0.6 host 0.1)) | length | ctx 7928/98304 (8K entry)
+[08:49:39] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7928 tok, prompt 7673 tok, first difference at 7673:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:49:39] request: prompt 7673 tok | cache: restore 'turn' snapshot, reused 7552 | prefilling 121 tok ...
+[08:49:39] prefill: 121 tok in 0.4s (282 tok/s) | decoding ...
+[08:49:44] prompt 7673 (cached 7552, prefill 121 in 0.4s) | gen 256 in 4.4s (57.9 tok/s, 6.24 tok/verify, accept 75% (accepted/7 per cycle: 0:10% 1:2% 2:2% 3:17% 4:5% 5:0% 6:0% 7:63%), ms/cycle 108 (draft 12.8 verify 93.8 sample 0.5 ctx 0.6 host 0.1)) | length | ctx 7928/98304 (8K entry)
+[08:49:44] [cache] text match: the state's tokens kept for 5 of 7928 (token match stopped at 4); prompt 15865 -> 15866 tok (13 ms)
+[08:49:44] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7928 tok, prompt 15866 tok, first difference at 5:
+   state : '<|im_start|>system\nSession 9077f8e1. You are a helpful coding assistant. Follow the final task after the public testing'
+   prompt: '<|im_start|>system\nSession f02db968. You are a helpful coding assistant. Follow the final task after the public testing notes'
+[08:49:44] request: prompt 15866 tok | cache: cold (no reusable state), reused 0 | prefilling 15866 tok ...
+[08:49:44] [ctx] 8192 -> 16384 at pos 0: segments bound, no KV rows copied (77 ms)
+[08:49:44] v8: 32 ANE KV segments registered (ctx 16384)
+[08:50:11] v8: snapshot 'turn' at 15744 (cut 15859), taken during the run
+[08:50:11] v8: 15866 tok (6 pad) in 27.0s (588 tok/s) + 185 ms handover / drafter context | setup 95 ms (V fill 0 ms, 0 rows)
+[08:50:11] prefill: 15866 tok in 27.2s (582 tok/s) | decoding ...
+[08:50:16] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[08:50:16] prompt 15866 (cached 0, prefill 15866 in 27.2s) | gen 256 in 4.7s (54.3 tok/s, 6.10 tok/verify, accept 75% (accepted/7 per cycle: 0:2% 1:7% 2:10% 3:17% 4:0% 5:0% 6:2% 7:62%), ms/cycle 112 (draft 12.8 verify 98.1 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 16128/98304 (16K entry)
+[08:50:16] [cache] text match: the state's tokens kept for 15866 of 16128 (token match stopped at 4); prompt 15865 -> 15866 tok (7 ms)
+[08:50:16] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16128 tok, prompt 15866 tok, first difference at 15866:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:50:16] request: prompt 15866 tok | cache: restore 'turn' snapshot, reused 15744 | prefilling 122 tok ...
+[08:50:16] snapshots dropped (their KV rows were rewritten): dec1
+[08:50:16] prefill: 122 tok in 0.5s (244 tok/s) | decoding ...
+[08:50:22] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[08:50:22] prompt 15866 (cached 15744, prefill 122 in 0.5s) | gen 256 in 5.2s (49.3 tok/s, 5.57 tok/verify, accept 66% (accepted/7 per cycle: 0:13% 1:7% 2:11% 3:9% 4:2% 5:2% 6:9% 7:48%), ms/cycle 113 (draft 13.4 verify 98.4 sample 0.5 ctx 0.6 host 0.1)) | length | ctx 16124/98304 (16K entry)
+[08:50:22] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16124 tok, prompt 15866 tok, first difference at 15866:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:50:22] request: prompt 15866 tok | cache: restore 'turn' snapshot, reused 15744 | prefilling 122 tok ...
+[08:50:22] snapshots dropped (their KV rows were rewritten): dec2
+[08:50:22] prefill: 122 tok in 0.5s (249 tok/s) | decoding ...
+[08:50:27] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[08:50:27] prompt 15866 (cached 15744, prefill 122 in 0.5s) | gen 256 in 5.1s (49.7 tok/s, 5.57 tok/verify, accept 66% (accepted/7 per cycle: 0:13% 1:7% 2:11% 3:9% 4:2% 5:2% 6:9% 7:48%), ms/cycle 112 (draft 12.9 verify 97.9 sample 0.5 ctx 0.6 host 0.1)) | length | ctx 16124/98304 (16K entry)
+[08:50:27] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16124 tok, prompt 15866 tok, first difference at 15866:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:50:27] request: prompt 15866 tok | cache: restore 'turn' snapshot, reused 15744 | prefilling 122 tok ...
+[08:50:28] snapshots dropped (their KV rows were rewritten): dec0
+[08:50:28] prefill: 122 tok in 0.5s (253 tok/s) | decoding ...
+[08:50:33] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[08:50:33] prompt 15866 (cached 15744, prefill 122 in 0.5s) | gen 256 in 5.1s (49.7 tok/s, 5.57 tok/verify, accept 66% (accepted/7 per cycle: 0:13% 1:7% 2:11% 3:9% 4:2% 5:2% 6:9% 7:48%), ms/cycle 112 (draft 12.9 verify 97.9 sample 0.5 ctx 0.5 host 0.1)) | length | ctx 16124/98304 (16K entry)
+[08:50:33] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16124 tok, prompt 32249 tok, first difference at 5:
+   state : '<|im_start|>system\nSession f02db968. You are a helpful coding assistant. Follow the final task after the public testing notes'
+   prompt: '<|im_start|>system\nSession 9408e370. You are a helpful coding assistant. Follow the final task after the public testing'
+[08:50:33] [ctx] 16384 -> 8192 at pos 0: segments bound, no KV rows copied (59 ms)
+[08:50:33] request: prompt 32249 tok | cache: cold (no reusable state), reused 0 | prefilling 32249 tok ...
+[08:50:33] [ctx] 8192 -> 32768 at pos 0: segments bound, no KV rows copied (84 ms)
+[08:50:33] v8: 48 ANE KV segments registered (ctx 32768)
+[08:51:32] v8: snapshot 'turn' at 32128 (cut 32242), taken during the run
+[08:51:32] v8: 32249 tok (7 pad) in 58.6s (550 tok/s) + 198 ms handover / drafter context | setup 102 ms (V fill 0 ms, 0 rows)
+[08:51:32] snapshots dropped (their KV rows were rewritten): dec1
+[08:51:32] prefill: 32249 tok in 58.9s (547 tok/s) | decoding ...
+[08:51:37] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[08:51:37] prompt 32249 (cached 0, prefill 32249 in 59.0s) | gen 256 in 4.8s (53.1 tok/s, 6.40 tok/verify, accept 78% (accepted/7 per cycle: 0:2% 1:5% 2:12% 3:10% 4:0% 5:2% 6:0% 7:68%), ms/cycle 120 (draft 13.0 verify 106.1 sample 0.6 ctx 0.7 host 0.1)) | length | ctx 32507/98304 (32K entry)
+[08:51:37] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32507 tok, prompt 32249 tok, first difference at 32249:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:51:37] request: prompt 32249 tok | cache: restore 'turn' snapshot, reused 32128 | prefilling 121 tok ...
+[08:51:37] snapshots dropped (their KV rows were rewritten): dec2
+[08:51:37] prefill: 121 tok in 0.6s (216 tok/s) | decoding ...
+[08:51:42] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[08:51:42] prompt 32249 (cached 32128, prefill 121 in 0.6s) | gen 256 in 4.6s (56.1 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:5% 1:8% 2:0% 3:8% 4:0% 5:3% 6:3% 7:74%), ms/cycle 120 (draft 13.0 verify 105.7 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 32506/98304 (32K entry)
+[08:51:42] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32506 tok, prompt 32249 tok, first difference at 32249:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:51:42] request: prompt 32249 tok | cache: restore 'turn' snapshot, reused 32128 | prefilling 121 tok ...
+[08:51:43] snapshots dropped (their KV rows were rewritten): dec0
+[08:51:43] prefill: 121 tok in 0.5s (220 tok/s) | decoding ...
+[08:51:47] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[08:51:47] prompt 32249 (cached 32128, prefill 121 in 0.6s) | gen 256 in 4.6s (56.2 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:5% 1:8% 2:0% 3:8% 4:0% 5:3% 6:3% 7:74%), ms/cycle 120 (draft 12.9 verify 105.7 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 32506/98304 (32K entry)
+[08:51:47] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32506 tok, prompt 32249 tok, first difference at 32249:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:51:47] request: prompt 32249 tok | cache: restore 'turn' snapshot, reused 32128 | prefilling 121 tok ...
+[08:51:48] snapshots dropped (their KV rows were rewritten): dec1
+[08:51:48] prefill: 121 tok in 0.5s (223 tok/s) | decoding ...
+[08:51:52] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[08:51:52] prompt 32249 (cached 32128, prefill 121 in 0.5s) | gen 256 in 4.6s (56.2 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:5% 1:8% 2:0% 3:8% 4:0% 5:3% 6:3% 7:74%), ms/cycle 120 (draft 12.8 verify 105.7 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 32506/98304 (32K entry)
+[08:51:53] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32506 tok, prompt 64953 tok, first difference at 5:
+   state : '<|im_start|>system\nSession 9408e370. You are a helpful coding assistant. Follow the final task after the public testing'
+   prompt: '<|im_start|>system\nSession 481c1a0e. You are a helpful coding assistant. Follow the final task after the public testing'
+[08:51:53] [ctx] 32768 -> 8192 at pos 0: segments bound, no KV rows copied (60 ms)
+[08:51:53] request: prompt 64953 tok | cache: cold (no reusable state), reused 0 | prefilling 64953 tok ...
+[08:51:53] [ctx] 8192 -> 65536 at pos 0: segments bound, no KV rows copied (149 ms)
+[08:51:53] v8: 64 ANE KV segments registered (ctx 65536)
+[08:54:14] v8: snapshot 'turn' at 64896 (cut 64946), taken during the run
+[08:54:14] v8: 64953 tok (71 pad) in 141.0s (461 tok/s) + 181 ms handover / drafter context | setup 169 ms (V fill 0 ms, 0 rows)
+[08:54:14] snapshots dropped (their KV rows were rewritten): dec2
+[08:54:14] prefill: 64953 tok in 141.3s (460 tok/s) | decoding ...
+[08:54:20] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[08:54:20] prompt 64953 (cached 0, prefill 64953 in 141.4s) | gen 256 in 6.0s (43.0 tok/s, 5.82 tok/verify, accept 69% (accepted/7 per cycle: 0:11% 1:7% 2:11% 3:7% 4:0% 5:7% 6:0% 7:57%), ms/cycle 135 (draft 12.8 verify 121.0 sample 0.5 ctx 0.8 host 0.1)) | length | ctx 65209/98304 (64K entry)
+[08:54:20] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65209 tok, prompt 64953 tok, first difference at 64953:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:54:20] request: prompt 64953 tok | cache: restore 'turn' snapshot, reused 64896 | prefilling 57 tok ...
+[08:54:20] snapshots dropped (their KV rows were rewritten): dec0
+[08:54:20] prefill: 57 tok in 0.4s (156 tok/s) | decoding ...
+[08:54:25] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[08:54:25] prompt 64953 (cached 64896, prefill 57 in 0.4s) | gen 256 in 5.0s (51.5 tok/s, 6.92 tok/verify, accept 85% (accepted/7 per cycle: 0:0% 1:8% 2:0% 3:8% 4:0% 5:14% 6:0% 7:70%), ms/cycle 134 (draft 12.8 verify 120.2 sample 0.6 ctx 0.7 host 0.1)) | length | ctx 65209/98304 (64K entry)
+[08:54:25] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65209 tok, prompt 64953 tok, first difference at 64953:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:54:25] request: prompt 64953 tok | cache: restore 'turn' snapshot, reused 64896 | prefilling 57 tok ...
+[08:54:26] snapshots dropped (their KV rows were rewritten): dec1
+[08:54:26] prefill: 57 tok in 0.4s (156 tok/s) | decoding ...
+[08:54:31] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[08:54:31] prompt 64953 (cached 64896, prefill 57 in 0.4s) | gen 256 in 5.0s (51.5 tok/s, 6.92 tok/verify, accept 85% (accepted/7 per cycle: 0:0% 1:8% 2:0% 3:8% 4:0% 5:14% 6:0% 7:70%), ms/cycle 134 (draft 12.8 verify 120.2 sample 0.6 ctx 0.7 host 0.1)) | length | ctx 65209/98304 (64K entry)
+[08:54:31] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65209 tok, prompt 64953 tok, first difference at 64953:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[08:54:31] request: prompt 64953 tok | cache: restore 'turn' snapshot, reused 64896 | prefilling 57 tok ...
+[08:54:31] snapshots dropped (their KV rows were rewritten): dec2
+[08:54:31] prefill: 57 tok in 0.4s (156 tok/s) | decoding ...
+[08:54:36] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[08:54:36] prompt 64953 (cached 64896, prefill 57 in 0.4s) | gen 256 in 5.0s (51.1 tok/s, 6.92 tok/verify, accept 85% (accepted/7 per cycle: 0:0% 1:8% 2:0% 3:8% 4:0% 5:14% 6:0% 7:70%), ms/cycle 135 (draft 12.9 verify 121.1 sample 0.6 ctx 0.7 host 0.1)) | length | ctx 65209/98304 (64K entry)

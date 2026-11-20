@@ -1,0 +1,12 @@
+#!/bin/zsh
+# Teacher-forced FP8 accuracy (tf_kl.py) with the server's environment (v8_trace.sh's env); forge must be stopped;
+# swap watchdog on the process.   tf_kl.sh OUT TAG N,N [--kl-against DIR]   (env: V8_DYLIB, F8, EXPECT_F8)
+O=$1; TAG=$2; shift 2
+PY=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+mkdir -p $O
+env MODEL=/Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model SILU=tanh MLP_SILU=tanh GDN_SQ=16 GDN_SV=64 MLP_DS=1 MLP_DS_DYN=0 V3_KV_IN=1 V3_PREFILL=0 \
+    EMBED_NPY=/Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model/embed_tokens_fp16.npy RUNTIME=coreai MPSGRAPH_ANE_BONDED_COMPILE_MODE=2 \
+    FUSE=all I8=1 I8T=1 I8TV=_k256 LUTC=1 I8A=1 I8KV=1 LRM=1 QK8=1 TKV=2048 \
+  $PY -u /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/unit/power/tf_kl.py $O $TAG "$@" > $O/$TAG.log 2>&1 & G=$!
+/Volumes/SSD4TB/anemll-forge-research/tools/swap_watchdog.sh $G 1536 $O/$TAG.watchdog.log >/dev/null 2>&1 & K=$!
+wait $G; rc=$?; kill $K 2>/dev/null; echo "tf_kl $TAG rc=$rc"

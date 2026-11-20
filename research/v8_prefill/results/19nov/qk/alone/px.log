@@ -1,0 +1,22 @@
+gpu layers 1 LMAX 98304 F8 'x' F8VS 1
+BANNER F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib libgpu_v8_f8q.dylib
+V copy fill 4.5 ms
+{"pos": 95232, "F8": "x", "F8VS": "1", "ms_median": 0.092, "ms_min": 0.074, "finite": true}
+  attn_qk8isk   67.431 ms   36.0%  (470 calls)
+  attn_pv_f8v   43.194 ms   23.0%  (470 calls)
+  attn_softmax8n_f8x   41.688 ms   22.2%  (470 calls)
+  attn_combine   16.770 ms    8.9%  (470 calls)
+  lut_gemm32_i8t_k256_4b_cd2   11.115 ms    5.9%  (20 calls)
+  dense_i8_splitk    1.439 ms    0.8%  (20 calls)
+  dense_gemm    0.947 ms    0.5%  (40 calls)
+  dense_splitk    0.897 ms    0.5%  (40 calls)
+  attn_finish    0.737 ms    0.4%  (10 calls)
+  attn_prep8qv_f8v    0.691 ms    0.4%  (10 calls)
+  rms_fwht4    0.631 ms    0.3%  (10 calls)
+  fwht4    0.496 ms    0.3%  (10 calls)
+  splitk_reduce    0.400 ms    0.2%  (60 calls)
+  quant8_blk    0.393 ms    0.2%  (20 calls)
+  rms_partial    0.255 ms    0.1%  (10 calls)
+  to_half_pair_add    0.254 ms    0.1%  (10 calls)
+  from_half_pair    0.149 ms    0.1%  (10 calls)
+  total 187.486 ms

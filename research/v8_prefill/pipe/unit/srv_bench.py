@@ -19,7 +19,7 @@ def stream(port, messages, max_tokens):
                        "chat_template_kwargs": {"enable_thinking": False}}).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
-    t0 = time.perf_counter(); t_first = None; n = 0; out = []; usage = None
+    e0 = time.time(); t0 = time.perf_counter(); t_first = None; n = 0; out = []; usage = None   # e0: epoch (telemetry windows)
     with urllib.request.urlopen(req, timeout=3600) as r:
         for line in r:
             line = line.decode().strip()
@@ -39,7 +39,7 @@ def stream(port, messages, max_tokens):
                     n += 1; out.append(piece)
     t1 = time.perf_counter()
     return {"ttft_s": (t_first or t1) - t0, "total_s": t1 - t0, "chunks": n, "text": "".join(out), "usage": usage,
-            "decode_s": t1 - (t_first or t1)}
+            "decode_s": t1 - (t_first or t1), "t0": e0, "t_first": e0 + ((t_first or t1) - t0), "t1": e0 + (t1 - t0)}
 
 
 def health(port):
@@ -70,6 +70,7 @@ def main():
     print(json.dumps({"request": "cold", "prompt_tokens": p1, "ttft_s": round(r1["ttft_s"], 2),
                       "prefill_tok_s": round(p1 / r1["ttft_s"], 1) if p1 else None, "completion_tokens": c1,
                       "decode_tok_s": round(c1 / max(r1["decode_s"], 1e-9), 1), "server": health(a.port),
+                      "t0": r1["t0"], "t_first": r1["t_first"], "t1": r1["t1"],
                       "text": r1["text"][:300]}), flush=True)
     msgs_c, used, last = msgs, a.offset + a.tokens, r1["text"]
     for k, m in enumerate(int(x) for x in str(a.follow).split(",") if int(x) > 0):

@@ -1,0 +1,177 @@
+[qwen38-27b-ane] started 2026-11-17 07:32:28  pid 68713  listen 127.0.0.1:8765
+[qwen38-27b-ane] model dir     /Volumes/SSD4TB/anemll-forge-research/v8_dec8  (max ctx 98304; Core AI: verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [8192, 16384, 32768, 65536, 98304], KV kv8, one weight copy)
+[qwen38-27b-ane] checkpoint    /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model
+[qwen38-27b-ane] speculative   ON  drafter /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel
+[qwen38-27b-ane] thinking      default off (clients override via chat_template_kwargs.enable_thinking); context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)
+[qwen38-27b-ane] think budget  low=2048,medium=6144,xhigh=12288 tokens per reasoning_effort (request field thinking_budget overrides; then closed with Qwen's budget phrase)
+[qwen38-27b-ane] sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, min_p 0.0 / 0; max_tokens 4096
+[qwen38-27b-ane] repetition    presence_penalty 0.0 thinking / 1.5 non-thinking; DRY multiplier 0.0 base 1.75 allowed 8 tokens; loop guard 3+ periods over 1536+ tokens
+[qwen38-27b-ane] python        /Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+drafter: body-only package built beside release_u15_data600_mat, drafting for release_vq3pA_mixh_s600_k1_mat with its head
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+[07:32:29] ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+[07:32:29] model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+[07:32:29] target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8
+[07:32:29] KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+[07:32:29] KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[07:32:29] [ANE compile] all 18 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+[07:32:29] loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+[07:32:29] loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+[07:32:29] loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+[07:32:29] loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+[07:32:29] loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+[07:32:29] loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+[07:32:30] loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+[07:32:30] drafter: Core AI dflash2_lut4_gptq_nohead.aimodel (body only, drafting with the target's head)
+[qwen38-27b-ane] loaded batched prefill + head + DFlash2 drafter dflash2_lut4_gptq_nohead.aimodel from v8_dec8 (ctx 98304) in 2s
+[07:32:31] v8: GPU engine libgpu_v8_srv3.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+[07:32:31] v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+[07:32:31] v8: prefill engine ready in 0s (V8 for new spans >= 256 tokens)
+[07:32:31] dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode auto, 64K entry up to 0 keys
+[07:32:31] v8: text-level prompt match on; decode snapshots every 256 tokens (last 3); V8 rest >= 128, tail <= 8 rows on the bridge
+[qwen38-27b-ane] serving OpenAI API on http://127.0.0.1:8765/v1 (V8 prefill, speculative ON, ctx 98304)
+[07:34:44] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[07:34:44] request: prompt 2100 tok | cache: cold (no reusable state), reused 0 | prefilling 2100 tok ...
+[07:34:44] v8: 16 ANE KV segments registered (ctx 8192)
+[07:34:48] v8: snapshot 'turn' at 2048 (cut 2093), taken during the run
+[07:34:48] v8: 2100 tok (76 pad) in 3.2s (653 tok/s) + 178 ms handover / drafter context | setup 83 ms (V fill 0 ms, 0 rows)
+[07:34:48] prefill: 2100 tok in 3.5s (603 tok/s) | decoding ...
+[07:34:55] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[07:34:55] prompt 2100 (cached 0, prefill 2100 in 3.5s) | gen 256 in 7.2s (35.5 tok/s, 3.82 tok/verify, accept 41% (accepted/7 per cycle: 0:18% 1:19% 2:24% 3:4% 4:9% 5:3% 6:4% 7:18%), ms/cycle 107 (draft 13.2 verify 93.4 sample 0.3 ctx 0.5 host 0.1)) | length | ctx 2357/98304 (8K entry)
+[07:34:55] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 2357 tok, prompt 2678 tok, first difference at 2356:
+   state : ' a single helper to detect the SoC generation via Core AI architecture'
+   prompt: ' a single helper to detect the SoC generation via Core AI<|im_end|>\n<|im_start|>user\nNow also cover these additional notes.\n\n / M5 Max default.~~ **Resolved:** all'
+[07:34:55] request: prompt 2678 tok | cache: restore 'gen' snapshot, reused 2100 | prefilling 578 tok ...
+[07:34:55] v8: bridge 76 rows to 2176 in 395 ms
+[07:34:55] v8: sync at 2176 in 13 ms
+[07:34:56] v8: snapshot 'turn' at 2560 (cut 2671), taken during the run
+[07:34:56] v8: 502 tok (10 pad) in 0.8s (611 tok/s) + 47 ms handover / drafter context | setup 19 ms (V fill 18 ms, 128 rows)
+[07:34:56] snapshots dropped (their KV rows were rewritten): dec0
+[07:34:56] prefill: 578 tok in 1.3s (445 tok/s) | decoding ...
+[07:35:00] prompt 2678 (cached 2100, prefill 578 in 1.3s) | gen 256 in 4.1s (62.6 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:3% 1:8% 2:5% 3:5% 4:3% 5:3% 6:3% 7:71%), ms/cycle 108 (draft 12.9 verify 93.4 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 2933/98304 (8K entry)
+[07:37:00] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 2933 tok, prompt 8244 tok, first difference at 11:
+   state : '<|im_start|>system\nYou are a concise technical assistant. Session c15271f553cd.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+   prompt: '<|im_start|>system\nYou are a concise technical assistant. Session d63bd09408e3.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+[07:37:00] request: prompt 8244 tok | cache: cold (no reusable state), reused 0 | prefilling 8244 tok ...
+[07:37:00] [ctx] 8192 -> 16384 at pos 0: segments bound, no KV rows copied (70 ms)
+[07:37:00] v8: 32 ANE KV segments registered (ctx 16384)
+[07:37:12] v8: snapshot 'turn' at 8192 (cut 8237), taken during the run
+[07:37:12] v8: 8244 tok (76 pad) in 11.9s (695 tok/s) + 180 ms handover / drafter context | setup 133 ms (V fill 0 ms, 0 rows)
+[07:37:12] prefill: 8244 tok in 12.2s (677 tok/s) | decoding ...
+[07:37:22] decode: 240 tok, 10s, 23.8 tok/s, 2.64 tok/verify, accept 23%, ms/cycle 111 (draft 13.0 verify 97.3 sample 0.2 ctx 0.4 host 0.0)
+[07:37:23] prompt 8244 (cached 0, prefill 8244 in 12.2s) | gen 256 in 11.1s (23.1 tok/s, 2.56 tok/verify, accept 22% (accepted/7 per cycle: 0:29% 1:36% 2:13% 3:10% 4:6% 5:0% 6:3% 7:3%), ms/cycle 111 (draft 13.0 verify 97.3 sample 0.2 ctx 0.4 host 0.0)) | length | ctx 8499/98304 (16K entry)
+[07:37:23] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[07:37:23] request: prompt 8822 tok | cache: continue (model state is a prefix of the prompt), reused 8499 | prefilling 323 tok ...
+[07:37:24] v8: bridge 77 rows to 8576 in 439 ms
+[07:37:24] v8: sync at 8576 in 6 ms
+[07:37:24] v8: snapshot 'turn' at 8704 (cut 8815), taken during the run
+[07:37:24] v8: 246 tok (10 pad) in 0.5s (486 tok/s) + 28 ms handover / drafter context | setup 17 ms (V fill 16 ms, 384 rows)
+[07:37:24] prefill: 323 tok in 1.0s (324 tok/s) | decoding ...
+[07:37:28] prompt 8822 (cached 8499, prefill 323 in 1.0s) | gen 256 in 3.8s (67.6 tok/s, 7.53 tok/verify, accept 93% (accepted/7 per cycle: 0:3% 1:0% 2:3% 3:3% 4:0% 5:0% 6:3% 7:88%), ms/cycle 111 (draft 12.8 verify 97.2 sample 0.6 ctx 0.6 host 0.1)) | length | ctx 9077/98304 (16K entry)
+[07:39:28] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 9077 tok, prompt 16437 tok, first difference at 11:
+   state : '<|im_start|>system\nYou are a concise technical assistant. Session d63bd09408e3.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+   prompt: '<|im_start|>system\nYou are a concise technical assistant. Session 0ac6e356e735.<|im_end|>\n<|im_start|>user\nSummarize the key results'
+[07:39:28] [ctx] 16384 -> 8192 at pos 0: segments bound, no KV rows copied (58 ms)
+[07:39:28] request: prompt 16437 tok | cache: cold (no reusable state), reused 0 | prefilling 16437 tok ...
+[07:39:29] [ctx] 8192 -> 32768 at pos 0: segments bound, no KV rows copied (78 ms)
+[07:39:29] v8: 48 ANE KV segments registered (ctx 32768)
+[07:39:54] v8: snapshot 'turn' at 16384 (cut 16430), taken during the run
+[07:39:54] v8: 16437 tok (75 pad) in 25.5s (645 tok/s) + 194 ms handover / drafter context | setup 124 ms (V fill 0 ms, 0 rows)
+[07:39:54] prefill: 16437 tok in 25.8s (637 tok/s) | decoding ...
+[07:40:04] decode: 218 tok, 10s, 21.6 tok/s, 2.56 tok/verify, accept 22%, ms/cycle 119 (draft 12.9 verify 105.0 sample 0.2 ctx 0.5 host 0.0)
+[07:40:07] prompt 16437 (cached 0, prefill 16437 in 25.9s) | gen 256 in 12.3s (20.7 tok/s, 2.46 tok/verify, accept 21% (accepted/7 per cycle: 0:32% 1:33% 2:17% 3:8% 4:4% 5:2% 6:4% 7:1%), ms/cycle 119 (draft 13.0 verify 105.0 sample 0.2 ctx 0.4 host 0.0)) | length | ctx 16692/98304 (32K entry)
+[07:40:07] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[07:40:07] request: prompt 17015 tok | cache: continue (model state is a prefix of the prompt), reused 16692 | prefilling 323 tok ...
+[07:40:07] v8: bridge 76 rows to 16768 in 514 ms
+[07:40:07] v8: sync at 16768 in 9 ms
+[07:40:08] v8: snapshot 'turn' at 16896 (cut 17008), taken during the run
+[07:40:08] v8: 247 tok (9 pad) in 0.6s (423 tok/s) + 28 ms handover / drafter context | setup 17 ms (V fill 17 ms, 384 rows)
+[07:40:08] prefill: 323 tok in 1.2s (280 tok/s) | decoding ...
+[07:40:14] prompt 17015 (cached 16692, prefill 323 in 1.2s) | gen 215 in 6.3s (34.1 tok/s, 4.06 tok/verify, accept 44% (accepted/7 per cycle: 0:19% 1:19% 2:17% 3:8% 4:9% 5:0% 6:6% 7:23%), ms/cycle 119 (draft 13.0 verify 105.2 sample 0.4 ctx 0.5 host 0.0)) | stop | ctx 17230/98304 (32K entry)
+[07:42:14] [cache] text match: the state's tokens kept for 12 of 17230 (token match stopped at 11); prompt 32819 -> 32820 tok (31 ms)
+[07:42:14] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 17230 tok, prompt 32820 tok, first difference at 12:
+   state : '<|im_start|>system\nYou are a concise technical assistant. Session 0ac6e356e735.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+   prompt: '<|im_start|>system\nYou are a concise technical assistant. Session fb68ed39796f.<|im_end|>\n<|im_start|>user\nSummarize the key results in these'
+[07:42:14] [ctx] 32768 -> 8192 at pos 0: segments bound, no KV rows copied (54 ms)
+[07:42:14] request: prompt 32820 tok | cache: cold (no reusable state), reused 0 | prefilling 32820 tok ...
+[07:42:14] [ctx] 8192 -> 65536 at pos 0: segments bound, no KV rows copied (138 ms)
+[07:42:14] v8: 64 ANE KV segments registered (ctx 65536)
+[07:43:14] v8: snapshot 'turn' at 32768 (cut 32813), taken during the run
+[07:43:14] v8: 32820 tok (76 pad) in 59.2s (555 tok/s) + 203 ms handover / drafter context | setup 187 ms (V fill 0 ms, 0 rows)
+[07:43:14] prefill: 32820 tok in 59.6s (551 tok/s) | decoding ...
+[07:43:24] decode: 200 tok, 10s, 20.0 tok/s, 2.67 tok/verify, accept 24%, ms/cycle 134 (draft 12.8 verify 120.0 sample 0.2 ctx 0.5 host 0.0)
+[07:43:27] prompt 32820 (cached 0, prefill 32820 in 59.6s) | gen 256 in 12.9s (19.8 tok/s, 2.64 tok/verify, accept 23% (accepted/7 per cycle: 0:29% 1:33% 2:14% 3:10% 4:4% 5:5% 6:1% 7:3%), ms/cycle 133 (draft 12.9 verify 119.9 sample 0.2 ctx 0.5 host 0.0)) | length | ctx 33075/98304 (64K entry)
+[07:43:27] [cache] text match: the state's tokens kept for 33075 of 33075 (token match stopped at 11); prompt 33397 -> 33398 tok (15 ms)
+[07:43:27] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[07:43:27] request: prompt 33398 tok | cache: continue (model state is a prefix of the prompt), reused 33075 | prefilling 323 tok ...
+[07:43:27] v8: bridge 77 rows to 33152 in 701 ms
+[07:43:27] v8: sync at 33152 in 8 ms
+[07:43:28] v8: snapshot 'turn' at 33280 (cut 33391), taken during the run
+[07:43:28] v8: 246 tok (10 pad) in 0.7s (335 tok/s) + 29 ms handover / drafter context | setup 21 ms (V fill 20 ms, 384 rows)
+[07:43:28] prefill: 323 tok in 1.5s (216 tok/s) | decoding ...
+[07:43:35] prompt 33398 (cached 33075, prefill 323 in 1.5s) | gen 209 in 7.2s (28.9 tok/s, 3.87 tok/verify, accept 41% (accepted/7 per cycle: 0:20% 1:17% 2:17% 3:11% 4:9% 5:6% 6:4% 7:17%), ms/cycle 134 (draft 12.9 verify 120.2 sample 0.3 ctx 0.5 host 0.0)) | stop | ctx 33607/98304 (64K entry)
+[07:45:36] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 33607 tok, prompt 65589 tok, first difference at 12:
+   state : '<|im_start|>system\nYou are a concise technical assistant. Session fb68ed39796f.<|im_end|>\n<|im_start|>user\nSummarize the key results in these'
+   prompt: '<|im_start|>system\nYou are a concise technical assistant. Session 532ab00f6e58.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+[07:45:36] [ctx] 65536 -> 8192 at pos 0: segments bound, no KV rows copied (58 ms)
+[07:45:36] request: prompt 65589 tok | cache: cold (no reusable state), reused 0 | prefilling 65589 tok ...
+[07:45:36] [ctx] 8192 -> 98304 at pos 0: segments bound, no KV rows copied (194 ms)
+[07:45:36] v8: 80 ANE KV segments registered (ctx 98304)
+[07:48:08] v8: snapshot 'turn' at 65536 (cut 65582), taken during the run
+[07:48:08] v8: 65589 tok (75 pad) in 152.2s (431 tok/s) + 191 ms handover / drafter context | setup 252 ms (V fill 0 ms, 0 rows)
+[07:48:08] prefill: 65589 tok in 152.7s (430 tok/s) | decoding ...
+[07:48:18] decode: 191 tok, 10s, 19.0 tok/s, 2.69 tok/verify, accept 24%, ms/cycle 141 (draft 13.2 verify 127.7 sample 0.2 ctx 0.1 host 0.0)
+[07:48:21] dec8: 89 split verify steps, 127.6 ms each (GPU attention 24.4 ms)
+[07:48:21] decode snapshots: 1 taken (6 ms); kept: dec1, gen, turn
+[07:48:21] prompt 65589 (cached 0, prefill 65589 in 152.7s) | gen 256 in 12.6s (20.3 tok/s, 2.88 tok/verify, accept 27% (accepted/7 per cycle: 0:33% 1:20% 2:15% 3:13% 4:9% 5:3% 6:1% 7:6%), ms/cycle 141 (draft 13.2 verify 127.7 sample 0.3 ctx 0.1 host 0.0)) | length | ctx 65846/98304 (96K entry)
+[07:48:21] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65846 tok, prompt 66167 tok, first difference at 65845:
+   state : ' **V8 KV Cache Performance:** The experimental V8 cache ('
+   prompt: ' **V8 KV Cache Performance:** The experimental V8 cache<|im_end|>\n<|im_start|>user\nNow also cover these additional notes.\n\n5,472 usable history rows**. The builder'
+[07:48:21] request: prompt 66167 tok | cache: restore 'gen' snapshot, reused 65589 | prefilling 578 tok ...
+[07:48:22] v8: bridge 75 rows to 65664 in 854 ms
+[07:48:22] v8: sync at 65664 in 9 ms
+[07:48:24] v8: snapshot 'turn' at 66048 (cut 66160), taken during the run
+[07:48:24] v8: 503 tok (9 pad) in 2.1s (236 tok/s) + 50 ms handover / drafter context | setup 23 ms (V fill 21 ms, 128 rows)
+[07:48:24] snapshots dropped (their KV rows were rewritten): dec1
+[07:48:24] prefill: 578 tok in 3.1s (188 tok/s) | decoding ...
+[07:48:31] dec8: 47 split verify steps, 128.2 ms each (GPU attention 24.8 ms)
+[07:48:31] prompt 66167 (cached 65589, prefill 578 in 3.1s) | gen 201 in 6.7s (30.1 tok/s, 4.28 tok/verify, accept 47% (accepted/7 per cycle: 0:15% 1:13% 2:13% 3:17% 4:13% 5:11% 6:0% 7:19%), ms/cycle 142 (draft 13.2 verify 128.2 sample 0.4 ctx 0.1 host 0.1)) | stop | ctx 66368/98304 (96K entry)
+[07:50:31] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 66368 tok, prompt 95053 tok, first difference at 12:
+   state : '<|im_start|>system\nYou are a concise technical assistant. Session 532ab00f6e58.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+   prompt: '<|im_start|>system\nYou are a concise technical assistant. Session 882cf3b81d51.<|im_end|>\n<|im_start|>user\nSummarize the key results in'
+[07:50:31] [ctx] 98304 -> 8192 at pos 0: segments bound, no KV rows copied (55 ms)
+[07:50:31] request: prompt 95053 tok | cache: cold (no reusable state), reused 0 | prefilling 95053 tok ...
+[07:50:31] [ctx] 8192 -> 98304 at pos 0: segments bound, no KV rows copied (195 ms)
+[07:50:31] v8: 80 ANE KV segments registered (ctx 98304)
+[07:54:56] v8: snapshot 'turn' at 94976 (cut 95046), taken during the run
+[07:54:56] v8: 95053 tok (51 pad) in 264.2s (360 tok/s) + 344 ms handover / drafter context | setup 272 ms (V fill 0 ms, 0 rows)
+[07:54:56] prefill: 95053 tok in 264.8s (359 tok/s) | decoding ...
+[07:55:06] decode: 196 tok, 10s, 19.3 tok/s, 2.88 tok/verify, accept 27%, ms/cycle 149 (draft 13.1 verify 135.4 sample 0.3 ctx 0.1 host 0.1)
+[07:55:09] dec8: 86 split verify steps, 135.1 ms each (GPU attention 31.0 ms)
+[07:55:09] prompt 95053 (cached 0, prefill 95053 in 264.9s) | gen 256 in 12.8s (20.0 tok/s, 2.98 tok/verify, accept 28% (accepted/7 per cycle: 0:17% 1:35% 2:22% 3:8% 4:5% 5:6% 6:3% 7:3%), ms/cycle 149 (draft 13.1 verify 135.2 sample 0.3 ctx 0.1 host 0.1)) | length | ctx 95308/98304 (96K entry)
+[07:55:09] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[07:55:09] request: prompt 95631 tok | cache: continue (model state is a prefix of the prompt), reused 95308 | prefilling 323 tok ...
+[07:55:09] v8: bridge 116 rows to 95424 in 874 ms
+[07:55:09] v8: sync at 95424 in 7 ms
+[07:55:11] v8: snapshot 'turn' at 95552 (cut 95624), taken during the run
+[07:55:11] v8: 207 tok (49 pad) in 1.4s (153 tok/s) + 30 ms handover / drafter context | setup 31 ms (V fill 26 ms, 384 rows)
+[07:55:11] prefill: 323 tok in 2.3s (140 tok/s) | decoding ...
+[07:55:21] decode: 196 tok, 10s, 19.4 tok/s, 2.88 tok/verify, accept 27%, ms/cycle 149 (draft 13.2 verify 135.0 sample 0.3 ctx 0.1 host 0.1)
+[07:55:23] dec8: 83 split verify steps, 134.8 ms each (GPU attention 31.3 ms)
+[07:55:23] prompt 95631 (cached 95308, prefill 323 in 2.3s) | gen 256 in 12.3s (20.8 tok/s, 3.08 tok/verify, accept 30% (accepted/7 per cycle: 0:14% 1:34% 2:27% 3:6% 4:8% 5:2% 6:2% 7:6%), ms/cycle 149 (draft 13.2 verify 134.9 sample 0.3 ctx 0.1 host 0.1)) | length | ctx 95886/98304 (96K entry)

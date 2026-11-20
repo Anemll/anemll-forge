@@ -1,0 +1,353 @@
+2026-11-17 18:51:24.880 python[71563:2198209] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_lut16s_L36.aimodel in 8s
+lut16s     T128      2.790 ms   24.5 TOPS   21.79 us/tok  rel vs fp32 4.78e-03  vs own INT8 recipe -  (recipe vs fp32 -)
+lut16s     T512      8.590 ms   31.9 TOPS   16.78 us/tok  rel vs fp32 4.79e-03  vs own INT8 recipe -  (recipe vs fp32 -)
+lut16s     T1024    17.547 ms   31.2 TOPS   17.14 us/tok  rel vs fp32 4.79e-03  vs own INT8 recipe -  (recipe vs fp32 -)
+---- HWX lut16s
+== lut8_lut16s_L36.aimodel  6F026026/F6DF2CD7/model.hwx
+  8050 tasks, streams {0: 2456, 1: 2456, 2: 322, 3: 322, 4: 1247, 5: 1247}, ExeCycles total 50848
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+    2922    28234  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+    1848     1662  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+    1458    16294  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 l2 pe=-
+     608      264  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None+scale
+     594      834  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add
+     304      442  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=-
+     128     2082  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+     108      160  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=None
+      24       24  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      16      416  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=None
+      16       22  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=None
+      10       52  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add
+       8       38  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=Add
+       6      324  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 wr pe=-
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'fp16', 'float16'): 4514}
+  DRAM writes: 266 fp16 outputs, 0 int8 outputs
+  NE tasks by shape (W x H x C x D):
+     948    15168  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x2560x0 out 128x1x512x0
+    1422    11376  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x2560x0 out 64x1x512x0
+    1416    11328  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1280x0
+      32     2080  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+     120     1800  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+     362     1284  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+      16     1040  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+      32     1024  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 0x1x2560x0 out 0x1x512x0
+      18      576  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 0x1x1024x0 out 0x1x1280x0
+       8      520  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x2560x0 out 512x1x512x0
+       2      130  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x2560x0 out 512x1x512x0
+       2      130  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+       2      130  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+       2      122  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1024x0
+     120      120  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+       2       64  in=float16 kern=fp16 out=float16 wr in WxHxCxD 0x1x2560x0 out 0x1x512x0
+       2       16  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x2560x0 out 64x1x512x0
+       2       14  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       6       12  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x8x0 out 0x1x1024x0
+
+2026-11-17 18:51:34.157 python[71563:2198384] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_lut8a8s_L36.aimodel in 81s
+lut8a8s    T128      2.480 ms   27.6 TOPS   19.37 us/tok  rel vs fp32 3.18e-02  vs own INT8 recipe 1.30e-02  (recipe vs fp32 3.13e-02)
+lut8a8s    T512      5.806 ms   47.2 TOPS   11.34 us/tok  rel vs fp32 1.40e+00  vs own INT8 recipe 1.40e+00  (recipe vs fp32 3.09e-02)
+lut8a8s    T1024    11.207 ms   48.9 TOPS   10.94 us/tok  rel vs fp32 1.40e+00  vs own INT8 recipe 1.40e+00  (recipe vs fp32 3.12e-02)
+---- HWX lut8a8s
+== lut8_lut8a8s_L36.aimodel  7DDF91CD/775EAE7F/model.hwx
+  11623 tasks, streams {0: 3580, 1: 3580, 2: 443, 3: 436, 4: 1792, 5: 1792}, ExeCycles total 36481
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+    3750    22340  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd l2 pe=-
+    1962     1962  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add
+    1473     3412  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     782     2142  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+     674      674  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=Add
+     464      488  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd l2 pe=Add+scale
+     442      442  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None+scale
+     442      442  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=-
+     440      440  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+     416     2080  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add+scale
+     342       93  NE - in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     196      784  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd1 l2 pe=-
+      34      124  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      27        0  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=-+scale
+      26       50  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd12 l2 pe=Add+scale
+      26      182  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=None
+      24      168  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=Add+scale
+      24      312  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 wr pe=None
+      24      120  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+       8       28  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+       8       64  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd1 wr pe=-
+       8       64  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd wr pe=-
+       8        8  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add
+       8        8  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=Add
+       4        0  NE - in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'fp16', 'float16'): 1829, ('int8', 'float16', 'int8', 'float16'): 3962}
+  DRAM writes: 133 fp16 outputs, 2 int8 outputs
+  NE tasks by shape (W x H x C x D):
+    3504    14060  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x1x2560x0 out 64x1x512x0
+     442     9064  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+     882     3238  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+     440      169  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1x0
+      16      128  in=int8 kern=int8 out=float16 wr in WxHxCxD 128x1x2560x0 out 128x1x512x0
+      24       72  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x2560x0 out 64x1x1x0
+       2       26  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x20x0 out 0x1x1x0
+       2       14  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       4       12  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x2560x0 out 64x1x1x0
+       2        2  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x2560x0 out 512x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1x0 out 512x1x1x0
+     464        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1x0 out 64x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1x0 out 128x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1x0 out 128x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 0x1x1x0 out 0x1x1x0
+
+2026-11-17 18:52:58.071 python[71563:2199530] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_s8w_L36.aimodel in 11s
+s8w        T128      2.724 ms   25.1 TOPS   21.28 us/tok  rel vs fp32 1.18e-02  vs own INT8 recipe 4.75e-03  (recipe vs fp32 1.07e-02)
+s8w        T512      8.625 ms   31.7 TOPS   16.85 us/tok  rel vs fp32 1.18e-02  vs own INT8 recipe 4.77e-03  (recipe vs fp32 1.07e-02)
+s8w        T1024    17.486 ms   31.3 TOPS   17.08 us/tok  rel vs fp32 1.18e-02  vs own INT8 recipe 4.78e-03  (recipe vs fp32 1.07e-02)
+---- HWX s8w
+== lut8_s8w_L36.aimodel  9BA663AA/3273B5A8/model.hwx
+  8050 tasks, streams {0: 2456, 1: 2456, 2: 322, 3: 322, 4: 1247, 5: 1247}, ExeCycles total 50848
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+    2436    26830  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd l2 pe=-
+    1848     1662  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+    1456    16282  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd1 l2 pe=-
+     608      264  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None+scale
+     594      834  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add
+     486     1404  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     304      442  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=-
+     124     1936  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+     108      160  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=None
+      24       24  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      16      416  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=None
+      16       22  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=None
+      10       52  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add
+       8       38  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=Add
+       6      324  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd1 wr pe=-
+       4      146  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd wr pe=-
+       2       12  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 l2 pe=-
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'int8', 'float16'): 3902, ('float16', 'float16', 'fp16', 'float16'): 612}
+  DRAM writes: 266 fp16 outputs, 0 int8 outputs
+  NE tasks by shape (W x H x C x D):
+     948    15168  in=float16 kern=int8 out=float16 l2 in WxHxCxD 128x1x2560x0 out 128x1x512x0
+    1422    11376  in=float16 kern=int8 out=float16 l2 in WxHxCxD 64x1x2560x0 out 64x1x512x0
+    1416    11328  in=float16 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1280x0
+      32     2080  in=float16 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+     120     1800  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+     362     1284  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+      16     1040  in=float16 kern=int8 out=float16 l2 in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+      32     1024  in=float16 kern=int8 out=float16 l2 in WxHxCxD 0x1x2560x0 out 0x1x512x0
+      18      576  in=float16 kern=int8 out=float16 l2 in WxHxCxD 0x1x1024x0 out 0x1x1280x0
+       8      520  in=float16 kern=int8 out=float16 l2 in WxHxCxD 512x1x2560x0 out 512x1x512x0
+       2      130  in=float16 kern=int8 out=float16 wr in WxHxCxD 512x1x2560x0 out 512x1x512x0
+       2      130  in=float16 kern=int8 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+       2      130  in=float16 kern=int8 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+       2      122  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1024x0
+     120      120  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+       2       64  in=float16 kern=int8 out=float16 wr in WxHxCxD 0x1x2560x0 out 0x1x512x0
+       2       16  in=float16 kern=int8 out=float16 wr in WxHxCxD 64x1x2560x0 out 64x1x512x0
+       2       14  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       6       12  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x8x0 out 0x1x1024x0
+
+2026-11-17 18:53:10.697 python[71563:2199748] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_s8a8_noks_L36.aimodel in 49s
+s8a8_noks  T128      3.930 ms   17.4 TOPS   30.70 us/tok  rel vs fp32 3.63e-02  vs own INT8 recipe 1.34e-02  (recipe vs fp32 3.58e-02)
+s8a8_noks  T512      8.058 ms   34.0 TOPS   15.74 us/tok  rel vs fp32 1.37e+00  vs own INT8 recipe 1.37e+00  (recipe vs fp32 3.58e-02)
+s8a8_noks  T1024    16.244 ms   33.7 TOPS   15.86 us/tok  rel vs fp32 1.36e+00  vs own INT8 recipe 1.36e+00  (recipe vs fp32 3.59e-02)
+---- HWX s8a8_noks
+== lut8_s8a8_noks_L36.aimodel  793AFFF5/B6E57FBB/model.hwx
+  3425 tasks, streams {0: 883, 1: 887, 2: 276, 3: 275, 4: 559, 5: 545}, ExeCycles total 51870
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+     470      881  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add
+     390    14562  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd l2 pe=-
+     367     1013  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     254    12926  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd1 l2 pe=-
+     231     1291  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=Add+scale
+     231      442  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=-
+     185     2836  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+     181     1133  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add+scale
+     172     4726  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=None
+     124     6446  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd1 wr pe=-
+     120      240  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=Add
+      98      181  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=Add
+      82      420  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      80      158  NE - in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+      80      128  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd l2 pe=Add+scale
+      48       64  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+      46      390  NE - in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+      40        0  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 l2 pe=-
+      40       80  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd2 l2 pe=Add+scale
+      36     1878  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd wr pe=-
+      31      252  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add+scale
+      28      140  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+      22      134  NE - in=float16 src2=float16 kern=fp16 out=float16 rd1 l2 pe=-
+      22      663  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd2 wr pe=Add+scale
+      12      180  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=Add+scale
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'fp16', 'float16'): 741, ('int8', 'float16', 'int8', 'float16'): 804}
+  DRAM writes: 604 fp16 outputs, 24 int8 outputs
+  NE tasks by shape (W x H x C x D):
+     192    12480  in=int8 kern=int8 out=float16 l2 in WxHxCxD 128x1x5120x0 out 128x1x1024x0
+      88     5864  in=int8 kern=int8 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x5120x0
+      68     4420  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x1x5120x0 out 64x1x1024x0
+      52     3380  in=int8 kern=int8 out=float16 wr in WxHxCxD 1024x1x5120x0 out 1024x1x256x0
+      44     2860  in=int8 kern=int8 out=float16 wr in WxHxCxD 1024x1x1024x0 out 1024x1x1280x0
+     176     2640  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+      34     2222  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+     256     2112  in=int8 kern=int8 out=float16 l2 in WxHxCxD 128x1x5120x0 out 128x1x256x0
+      36     1188  in=int8 kern=int8 out=float16 wr in WxHxCxD 512x1x5120x0 out 512x1x256x0
+      28      896  in=int8 kern=int8 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+     208      720  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+       6      390  in=int8 kern=int8 out=float16 l2 in WxHxCxD 0x1x5120x0 out 0x1x1024x0
+      32      320  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1x0
+      66      239  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+      48      144  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1x0
+       2       90  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x5120x0 out 512x1x1x0
+       2       90  in=float16 kern=fp16 out=float16 wr in WxHxCxD 384x1x1024x0 out 384x1x1024x0
+       3       90  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x128x8x0 out 0x1x1024x0
+      14       70  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x128x8x0 out 0x1x1x0
+       2       44  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 0x1x5120x0 out 0x1x1x0
+       2       18  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 384x1x1024x0 out 384x1x1024x0
+       3       18  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x8x0 out 0x1x1024x0
+      32       18  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1x0
+       2       14  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x5120x0 out 64x1x1x0
+       2       14  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       2        2  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1x0
+       9        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x1x0 out 512x1x1x0
+      11        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 1024x1x1x0 out 1024x1x1x0
+      88        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1x0 out 128x1x1x0
+      34        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1x0 out 64x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1x0 out 128x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 0x1x1x0 out 0x1x1x0
+
+2026-11-17 18:54:00.834 python[71563:2200359] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_s8a8_gu_L36.aimodel in 21s
+s8a8_gu    T128      2.362 ms   29.0 TOPS   18.45 us/tok  rel vs fp32 3.09e-02  vs own INT8 recipe 8.40e-03  (recipe vs fp32 3.04e-02)
+s8a8_gu    T512      6.956 ms   39.4 TOPS   13.59 us/tok  rel vs fp32 3.05e-02  vs own INT8 recipe 8.24e-03  (recipe vs fp32 3.00e-02)
+s8a8_gu    T1024    13.624 ms   40.2 TOPS   13.30 us/tok  rel vs fp32 3.08e-02  vs own INT8 recipe 8.37e-03  (recipe vs fp32 3.03e-02)
+---- HWX s8a8_gu
+== lut8_s8a8_gu_L36.aimodel  CF43DB7D/C6D9775B/model.hwx
+  8699 tasks, streams {0: 2633, 1: 2633, 2: 358, 3: 354, 4: 1361, 5: 1360}, ExeCycles total 39641
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+    1876    10480  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd l2 pe=-
+    1542     1838  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+    1400     1880  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add
+     808     8084  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd1 l2 pe=-
+     654     6942  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd l2 pe=-
+     504     3280  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd1 l2 pe=-
+     496     1718  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     408      708  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=Add
+     310      442  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=-
+     296      416  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None+scale
+     130     1946  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+     106      160  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=None
+      24       24  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      16      416  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=None
+      16       28  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add
+      14      140  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      14       26  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=None+scale
+      12       96  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd wr pe=-
+      10      290  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd1 wr pe=-
+      10       10  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=Add
+       8       26  NE - in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+       8       78  NE - in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+       7      199  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd2 wr pe=Add+scale
+       7        0  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=-+scale
+       4        0  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=-+scale
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'fp16', 'float16'): 645, ('int8', 'float16', 'int8', 'float16'): 2402, ('float16', 'float16', 'int8', 'float16'): 1466}
+  DRAM writes: 303 fp16 outputs, 11 int8 outputs
+  NE tasks by shape (W x H x C x D):
+    1392    11136  in=float16 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1280x0
+     936     7488  in=int8 kern=int8 out=float16 l2 in WxHxCxD 128x1x2560x0 out 128x1x512x0
+    1408     5632  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x1x2560x0 out 64x1x512x0
+      32     2080  in=float16 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+     120     1800  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+     370     1334  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+      18     1170  in=float16 kern=int8 out=float16 l2 in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+      20      640  in=float16 kern=int8 out=float16 l2 in WxHxCxD 0x1x1024x0 out 0x1x1280x0
+     120      360  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+      16      256  in=int8 kern=int8 out=float16 l2 in WxHxCxD 0x1x2560x0 out 0x1x512x0
+      10      160  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x64x4x0 out 0x1x512x0
+       2      130  in=int8 kern=int8 out=float16 wr in WxHxCxD 1024x1x2560x0 out 1024x1x512x0
+       2      130  in=float16 kern=int8 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1280x0
+       2      130  in=float16 kern=int8 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+       4      128  in=int8 kern=int8 out=float16 l2 in WxHxCxD 512x1x2560x0 out 512x1x512x0
+      16      128  in=int8 kern=int8 out=float16 wr in WxHxCxD 128x1x2560x0 out 128x1x512x0
+       4      128  in=int8 kern=int8 out=float16 wr in WxHxCxD 512x1x2560x0 out 512x1x512x0
+       4      120  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x128x16x0 out 0x1x1024x0
+       6       96  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x64x12x0 out 0x1x512x0
+       6       78  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x128x30x0 out 0x1x1x0
+       2       26  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x20x0 out 0x1x1x0
+       4       24  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x8x0 out 0x1x1024x0
+       2       14  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       4       12  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x2560x0 out 64x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x2560x0 out 512x1x1x0
+       4        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 512x1x1x0 out 512x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1x0 out 128x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1x0 out 64x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 0x1x1x0 out 0x1x1x0
+       2        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 0x1x1x0 out 0x1x1x0
+
+2026-11-17 18:54:23.739 python[71563:2200739] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_s8a8_dn_L36.aimodel in 41s
+s8a8_dn    T128      2.948 ms   23.2 TOPS   23.03 us/tok  rel vs fp32 1.39e-02  vs own INT8 recipe 9.82e-03  (recipe vs fp32 1.29e-02)
+s8a8_dn    T512      8.991 ms   30.5 TOPS   17.56 us/tok  rel vs fp32 1.40e+00  vs own INT8 recipe 1.40e+00  (recipe vs fp32 1.29e-02)
+s8a8_dn    T1024    18.269 ms   30.0 TOPS   17.84 us/tok  rel vs fp32 1.36e+00  vs own INT8 recipe 1.35e+00  (recipe vs fp32 1.30e-02)
+---- HWX s8a8_dn
+== lut8_s8a8_dn_L36.aimodel  21539639/775EAE7F/model.hwx
+  5967 tasks, streams {0: 1696, 1: 1693, 2: 407, 3: 406, 4: 883, 5: 882}, ExeCycles total 55653
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+    1426    19568  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd l2 pe=-
+     677     2969  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     488      478  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+     476      836  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add
+     472     8528  NE (None) in=float16 src2=float16 kern=int8 out=float16 rd1 l2 pe=-
+     464      360  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None+scale
+     378     1832  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 l2 pe=None
+     246    14490  NE (None) in=int8 src2=float16 kern=int8 out=float16 rd l2 pe=-
+     244      442  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=-
+     224      384  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd l2 pe=Add+scale
+     223      516  NE - in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+     220      376  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=None
+     198     2730  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=Add+scale
+      34      170  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd l2 pe=Add+scale
+      30      498  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+      26      338  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd2 wr pe=None
+      20       24  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 l2 pe=-
+      16       80  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add+scale
+      14       72  PE EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd1 l2 pe=None
+      14       26  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd12 l2 pe=Add+scale
+      12      180  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=Add+scale
+      10       52  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 l2 pe=Add
+       8       70  NE - in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+       8       36  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd wr pe=None+scale
+       8       16  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=int8 rd2 l2 pe=Add+scale
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'int8', 'float16'): 1904, ('float16', 'float16', 'fp16', 'float16'): 962, ('int8', 'float16', 'int8', 'float16'): 250}
+  DRAM writes: 309 fp16 outputs, 1 int8 outputs
+  NE tasks by shape (W x H x C x D):
+    1380    22080  in=float16 kern=int8 out=float16 l2 in WxHxCxD 128x1x2560x0 out 128x1x512x0
+     180    11748  in=int8 kern=int8 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x5120x0
+     462     3696  in=float16 kern=int8 out=float16 l2 in WxHxCxD 64x1x2560x0 out 64x1x512x0
+      66     2742  in=int8 kern=int8 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x5120x0
+     336     2532  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+      40     1280  in=float16 kern=int8 out=float16 l2 in WxHxCxD 0x1x2560x0 out 0x1x512x0
+      16     1040  in=float16 kern=int8 out=float16 l2 in WxHxCxD 512x1x2560x0 out 512x1x512x0
+     160      480  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1024x0 out 128x1x1x0
+     122      448  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+      24      360  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1024x0 out 128x1x1024x0
+       4      260  in=int8 kern=int8 out=float16 wr in WxHxCxD 1024x1x1024x0 out 1024x1x1280x0
+       2      130  in=float16 kern=int8 out=float16 wr in WxHxCxD 512x1x2560x0 out 512x1x512x0
+       2      122  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1024x0
+       2       64  in=float16 kern=int8 out=float16 wr in WxHxCxD 0x1x2560x0 out 0x1x512x0
+       6       60  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1024x0 out 512x1x1x0
+      64       37  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1024x0 out 64x1x1x0
+       2       16  in=float16 kern=int8 out=float16 wr in WxHxCxD 64x1x2560x0 out 64x1x512x0
+       2       14  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       6       12  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x128x8x0 out 0x1x1024x0
+       2       10  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x128x8x0 out 0x1x1x0
+       2        2  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1x0
+     168        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 128x1x1x0 out 128x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 1024x1x1x0 out 1024x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 1024x1x1x0 out 1024x1x1x0
+      64        0  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x1x0 out 64x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 128x1x1x0 out 128x1x1x0
+       1        0  in=float16 kern=fp16 out=float16 wr in WxHxCxD 512x1x1x0 out 512x1x1x0
+
+MPSGRAPH_ANE_BONDED_COMPILE_MODE EV is set to 2.

@@ -1,0 +1,30 @@
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_shared2
+KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[ANE compile] all 17 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+loaded chunk_L00-03.aimodel (26 entries, 0s, bridge)
+loaded chunk_L04-07.aimodel (26 entries, 0s, bridge)
+loaded chunk_L08-11.aimodel (26 entries, 0s, bridge)
+loaded chunk_L12-15.aimodel (26 entries, 0s, bridge)
+loaded chunk_L16-19.aimodel (26 entries, 0s, bridge)
+loaded chunk_L20-23.aimodel (26 entries, 0s, bridge)
+loaded chunk_L24-27.aimodel (26 entries, 0s, bridge)
+loaded chunk_L28-31.aimodel (26 entries, 0s, bridge)
+loaded chunk_L32-35.aimodel (26 entries, 0s, bridge)
+loaded chunk_L36-39.aimodel (26 entries, 0s, bridge)
+loaded chunk_L40-43.aimodel (26 entries, 0s, bridge)
+loaded chunk_L44-47.aimodel (26 entries, 0s, bridge)
+loaded chunk_L48-51.aimodel (26 entries, 0s, bridge)
+loaded chunk_L52-55.aimodel (26 entries, 0s, bridge)
+loaded chunk_L56-59.aimodel (26 entries, 0s, bridge)
+loaded chunk_L60-63.aimodel (26 entries, 0s, bridge)
+v8: GPU engine libgpu_v8_srv3.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+runtime + V8 engine loaded in 3s
+v8: 16 ANE KV segments registered (ctx 8192)
+N 2048: V8 2.9s vs bridge 6.1s | last-token logits cos 0.997359, argmax same True, top-10 overlap 9/10, KL(bridge||V8) 0.01245
+N 6144: V8 8.8s vs bridge 18.2s | last-token logits cos 0.995896, argmax same True, top-10 overlap 8/10, KL(bridge||V8) 0.01007
+saved /Volumes/SSD4TB/anemll-forge-research/v8_dec8/v8pf_served.npz

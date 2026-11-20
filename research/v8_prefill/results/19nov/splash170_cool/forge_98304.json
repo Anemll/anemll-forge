@@ -1,0 +1,188 @@
+{
+ "label": "forge_98304",
+ "url": "http://127.0.0.1:8765/v1",
+ "model": "qwen38-27b-ane",
+ "started": "2026-11-19 13:49:41",
+ "policy": {
+  "temperature": 0,
+  "thinking": false,
+  "max_tokens": 256,
+  "repeats": 3,
+  "fill": "context - 512",
+  "timing": "client stream"
+ },
+ "cases": [
+  {
+   "ctx": 98304,
+   "nonce": "db0db6c3",
+   "fixture_tokens": 97785,
+   "cold": {
+    "t0": 1795125015.3316748,
+    "t_first": 1795125266.3914711,
+    "t_last": 1795125271.8647602,
+    "t_end": 1795125271.864882,
+    "ttft_s": 251.059796333313,
+    "completion_tokens": 256,
+    "prompt_tokens": 97785,
+    "decode_tps": 46.58990223219968,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 97785,
+     "completion_tokens": 256,
+     "total_tokens": 98041,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {},
+    "content": "```python\n\"\"\"Clamp a value to an inclusive range.\"\"\"\n\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n    \"\"\"Clamp value to the inclusive range [low, high].\"\"\"\n    if low > high:\n        raise ValueError(\"low must be <= high\")\n    return max(low, min(high, value))\n\n\nclass TestClamp(unittest.TestCase):\n    def test_value_below_low(self):\n        self.assertEqual(clamp(1.0, 5.0, 10.0), 5.0)\n\n    def test_value_above_high(self):\n        self.assertEqual(clamp(15.0, 5.0, 10.0), 10.0)\n\n    def test_value_inside_range(self):\n        self.assertEqual(clamp(7.5, 5.0, 10.0), 7.5)\n\n    def test_value_equal_to_low(self):\n        self.assertEqual(clamp(5.0, 5.0, 10.0), 5.0)\n\n    def test_value_equal_to_high(self):\n        self.assertEqual(clamp(10.0,"
+   },
+   "prefill_power": {
+    "samples": 211,
+    "seconds": 251.059796333313,
+    "mean_w": {
+     "system_power": 25.086845699617268,
+     "total_power": 45.3603641386205,
+     "cpu_power": 1.1142986315189618,
+     "gpu_power": 15.27595537235569,
+     "ane_power": 0.0,
+     "dram_power": 3.883264435128578
+    },
+    "energy_j": 11388.163782246977,
+    "net_total_w": 41.5335958547765,
+    "net_energy_j": 10427.41611629032
+   },
+   "prefill_tps": 389.4888844336442,
+   "decode": [
+    {
+     "t0": 1795125271.865567,
+     "t_first": 1795125273.0294359,
+     "t_last": 1795125278.716645,
+     "t_end": 1795125278.7167518,
+     "ttft_s": 1.1638689041137695,
+     "completion_tokens": 256,
+     "prompt_tokens": 97785,
+     "decode_tps": 44.83745791670656,
+     "reasoning_chars": 0,
+     "usage": {
+      "prompt_tokens": 97785,
+      "completion_tokens": 256,
+      "total_tokens": 98041,
+      "prompt_tokens_details": {
+       "cached_tokens": 97664
+      }
+     },
+     "server": {},
+     "content": "```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n    \"\"\"Clamp value to the inclusive range [low, high].\"\"\"\n    if low > high:\n        raise ValueError(\"low must be <= high\")\n    return max(low, min(value, high))\n\n\nclass TestClamp(unittest.TestCase):\n    def test_value_below_low(self):\n        self.assertEqual(clamp(-1.0, 0.0, 10.0), 0.0)\n\n    def test_value_above_high(self):\n        self.assertEqual(clamp(15.0, 0.0, 10.0), 10.0)\n\n    def test_value_at_low_boundary(self):\n        self.assertEqual(clamp(0.0, 0.0, 10.0), 0.0)\n\n    def test_value_at_high_boundary(self):\n        self.assertEqual(clamp(10.0, 0.0, 10.0), 10.0)\n\n    def test_value_interior(self):\n        self.assertEqual(clamp(5.0, 0.0, 10.0",
+     "decode_power": {
+      "samples": 4,
+      "seconds": 5.687209129333496,
+      "mean_w": {
+       "system_power": 17.2823146261139,
+       "total_power": 26.123735427856445,
+       "cpu_power": 1.3691892791966405,
+       "gpu_power": 4.1380496177531185,
+       "ane_power": 0.0,
+       "dram_power": 3.3341819047927856
+      },
+      "energy_j": 148.57114661759806,
+      "net_total_w": 22.296967144012452,
+      "net_energy_j": 126.80751509787663
+     }
+    },
+    {
+     "t0": 1795125278.7173738,
+     "t_first": 1795125279.868418,
+     "t_last": 1795125285.467954,
+     "t_end": 1795125285.468052,
+     "ttft_s": 1.1510441303253174,
+     "completion_tokens": 256,
+     "prompt_tokens": 97785,
+     "decode_tps": 45.53948802860715,
+     "reasoning_chars": 0,
+     "usage": {
+      "prompt_tokens": 97785,
+      "completion_tokens": 256,
+      "total_tokens": 98041,
+      "prompt_tokens_details": {
+       "cached_tokens": 97664
+      }
+     },
+     "server": {},
+     "content": "```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n    \"\"\"Clamp value to the inclusive range [low, high].\"\"\"\n    if low > high:\n        raise ValueError(\"low must be <= high\")\n    return max(low, min(value, high))\n\n\nclass TestClamp(unittest.TestCase):\n    def test_value_below_low(self):\n        self.assertEqual(clamp(-1.0, 0.0, 10.0), 0.0)\n\n    def test_value_above_high(self):\n        self.assertEqual(clamp(15.0, 0.0, 10.0), 10.0)\n\n    def test_value_at_low_boundary(self):\n        self.assertEqual(clamp(0.0, 0.0, 10.0), 0.0)\n\n    def test_value_at_high_boundary(self):\n        self.assertEqual(clamp(10.0, 0.0, 10.0), 10.0)\n\n    def test_value_interior(self):\n        self.assertEqual(clamp(5.0, 0.0, 10.0",
+     "decode_power": {
+      "samples": 5,
+      "seconds": 5.599535942077637,
+      "mean_w": {
+       "system_power": 18.78091454492033,
+       "total_power": 27.38349609375,
+       "cpu_power": 1.891694072618742,
+       "gpu_power": 3.511218258147577,
+       "ane_power": 0.0,
+       "dram_power": 3.1996692180633546
+      },
+      "energy_j": 153.3348705966957,
+      "net_total_w": 23.556727809906008,
+      "net_energy_j": 131.9067440493085
+     }
+    },
+    {
+     "t0": 1795125285.468622,
+     "t_first": 1795125286.604804,
+     "t_last": 1795125292.236843,
+     "t_end": 1795125292.237026,
+     "ttft_s": 1.1361820697784424,
+     "completion_tokens": 256,
+     "prompt_tokens": 97785,
+     "decode_tps": 45.27667454447212,
+     "reasoning_chars": 0,
+     "usage": {
+      "prompt_tokens": 97785,
+      "completion_tokens": 256,
+      "total_tokens": 98041,
+      "prompt_tokens_details": {
+       "cached_tokens": 97664
+      }
+     },
+     "server": {},
+     "content": "```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n    \"\"\"Clamp value to the inclusive range [low, high].\"\"\"\n    if low > high:\n        raise ValueError(\"low must be <= high\")\n    return max(low, min(value, high))\n\n\nclass TestClamp(unittest.TestCase):\n    def test_value_below_low(self):\n        self.assertEqual(clamp(-1.0, 0.0, 10.0), 0.0)\n\n    def test_value_above_high(self):\n        self.assertEqual(clamp(15.0, 0.0, 10.0), 10.0)\n\n    def test_value_at_low_boundary(self):\n        self.assertEqual(clamp(0.0, 0.0, 10.0), 0.0)\n\n    def test_value_at_high_boundary(self):\n        self.assertEqual(clamp(10.0, 0.0, 10.0), 10.0)\n\n    def test_value_interior(self):\n        self.assertEqual(clamp(5.0, 0.0, 10.0",
+     "decode_power": {
+      "samples": 5,
+      "seconds": 5.6320390701293945,
+      "mean_w": {
+       "system_power": 18.658786862342755,
+       "total_power": 27.371271514892577,
+       "cpu_power": 1.6137180092943648,
+       "gpu_power": 3.8692671124632207,
+       "ane_power": 0.0,
+       "dram_power": 3.2294995307922365
+      },
+      "energy_j": 154.15607057099479,
+      "net_total_w": 23.544503231048584,
+      "net_energy_j": 132.60356208405338
+     }
+    }
+   ],
+   "decode_tps_median": 45.27667454447212,
+   "decode_j_per_token": 0.6045336100823325,
+   "decode_net_j_per_token": 0.5200139689570721,
+   "prefill_j_per_token": 0.1164612546121284,
+   "prefill_net_j_per_token": 0.10663615192811085,
+   "replies_identical": true
+  }
+ ],
+ "idle": {
+  "samples": 25,
+  "seconds": 30.000365257263184,
+  "mean_w": {
+   "system_power": 2.67685937062928,
+   "total_power": 3.826768283843994,
+   "cpu_power": 1.0312542667669664,
+   "gpu_power": 0.001752020439952123,
+   "ane_power": 0.0,
+   "dram_power": 0.11690262600779533
+  },
+  "energy_j": 114.80444627023002
+ },
+ "finished": "2026-11-19 13:54:52"
+}

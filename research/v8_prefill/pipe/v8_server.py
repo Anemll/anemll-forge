@@ -207,6 +207,7 @@ class V8Engine(S.Engine):
                 return s_
             self.tok.decode = dec
         self._dec_n, self._dec_ms = 0, 0.0
+        self._dprof_arm()
         self._ab_next()
         try:
             return super().generate(*args, **kwargs)
@@ -224,9 +225,83 @@ class V8Engine(S.Engine):
                 st.update(steps=0, wall_ms=0.0, gpu_ms=0.0)
             if self._dec_n:
                 S.log(f"decode snapshots: {self._dec_n} taken ({self._dec_ms:.0f} ms); kept: {', '.join(sorted(self.snaps))}")
+            self._dprof_log()
+
+    # ---- DRAFT_PROF=1 (19 Nov 2026, timing only): the drafter's ANE calls per propose (body = the draft entry,
+    #      head = the target's head on the drafter's 7 rows, ctx = ctx64 context calls), logged per request ----
+    def _dprof_arm(self):
+        d = self.drafter
+        if not os.environ.get("DRAFT_PROF") or d is None or getattr(self, "_dprof", None) is not None:
+            if getattr(self, "_dprof", None) is not None:
+                for k in self._dprof:
+                    self._dprof[k] = [0, 0.0]
+            return
+        self._dprof = {"body": [0, 0.0], "head": [0, 0.0], "ctx": [0, 0.0], "propose": [0, 0.0]}
+
+        class Timed:
+            def __init__(s_, inner, key):
+                s_.inner, s_.key = inner, key
+
+            def run(s_, *a_, **k_):
+                t = time.perf_counter()
+                r = s_.inner.run(*a_, **k_)
+                e = self._dprof[s_.key]; e[0] += 1; e[1] += time.perf_counter() - t
+                return r
+        for attr, key in (("draft_plan", "body"), ("head_plan", "head"), ("ctx_plan", "ctx")):
+            if hasattr(d, attr):
+                setattr(d, attr, Timed(getattr(d, attr), key))
+        p0 = d.propose
+        tl = os.environ.get("DRAFT_TREE_LOG")   # tree-drafting study: per propose the candidates, their unary scores and hp
+        self._dtree = [] if tl else None
+
+        def propose(*a_, **k_):
+            t = time.perf_counter()
+            r = p0(*a_, **k_)
+            e = self._dprof["propose"]; e[0] += 1; e[1] += time.perf_counter() - t
+            if self._dtree is not None and r[0]:
+                info = r[1]
+                f = info._make_logits
+                cl = dict(zip(f.__code__.co_freevars, (c.cell_contents for c in f.__closure__)))
+                raw, rr = cl["raw"], cl.get("r")
+                cand = info["cand"].numpy().astype(np.int32)
+                un = np.take_along_axis(raw, cand, 1).astype(np.float32) * (1.0 if rr is None else rr[:, None])
+                self._dtree.append({"anchor": int(a_[0]), "p0": int(a_[1]), "path": list(r[0]), "cand": cand,
+                                    "unary": un.astype(np.float32), "hp": info["hp"].numpy().astype(np.float16)})
+            return r
+        d.propose = propose
+        S.log("drafter: DRAFT_PROF timing armed (draft_plan / head_plan / ctx_plan / propose)")
+
+    def _dprof_log(self):
+        dp = getattr(self, "_dprof", None)
+        if getattr(self, "_dtree", None):
+            od = Path(os.environ["DRAFT_TREE_LOG"]); od.mkdir(parents=True, exist_ok=True)
+            fn = od / f"req_{int(time.time() * 1e3)}.npz"
+            tr = self._dtree
+            np.savez(fn, anchor=np.array([x["anchor"] for x in tr]), p0=np.array([x["p0"] for x in tr]),
+                     path=np.array([x["path"] for x in tr], np.int32), cand=np.stack([x["cand"] for x in tr]),
+                     unary=np.stack([x["unary"] for x in tr]), hp=np.stack([x["hp"] for x in tr]),
+                     cycles=np.array(self._dcyc, np.int64).reshape(-1, 3), tokens=np.array(self._dtok, np.int64))
+            S.log(f"drafter tree log: {len(tr)} proposes -> {fn}")
+            self._dtree.clear()
+        if getattr(self, "_dcyc", None) is not None:
+            self._dcyc, self._dtok = [], []
+        if not dp or not dp["propose"][0]:
+            return
+        n = dp["propose"][0]
+        S.log("drafter prof: " + f"{n} proposes | " + " ".join(f"{k} {1e3 * v[1] / max(1, v[0]):.2f} ms x {v[0] / n:.2f}" for k, v in dp.items())
+              + f" | propose host {1e3 * (dp['propose'][1] - dp['body'][1] - dp['head'][1]) / n:.2f} ms")
 
     def draft_cycle(self, *args, **kwargs):
+        p_ = self.model.pos
         new, committed = super().draft_cycle(*args, **kwargs)
+        if getattr(self, "_dtree", None) is not None:   # (start position, accepted drafts, bonus token) + the committed stream
+            if getattr(self, "_dcyc", None) is None:
+                self._dcyc, self._dtok = [], []
+            self._dcyc.append((p_, len(new) - 1, int(new[-1]) if new else -1))
+            self._dtok += [int(t) for t in committed] + ([] if not new else [])
+        return self._dc_tail(new, committed)
+
+    def _dc_tail(self, new, committed):
         if DEC_SNAP > 0:
             pos = len(self.fed) + len(committed)
             if pos - self._dec_last >= DEC_SNAP and self.model.pos == pos:
@@ -501,6 +576,11 @@ class V8Engine(S.Engine):
                               "cached_tokens": reused,
                               "logits_finite": bool(np.isfinite(logits).all()) if logits is not None else None}
         S.log(f"prefill: {len(ids) - reused} tok in {dt:.1f}s ({(len(ids) - reused) / max(dt, 1e-9):.0f} tok/s) | decoding ...")
+        pld = os.environ.get("PREFILL_LOGITS_DIR")   # deploy checks (19 Nov 2026): the prompt's last-token logits, one .npy per request
+        if pld and logits is not None:
+            Path(pld).mkdir(parents=True, exist_ok=True)
+            fn = Path(pld) / f"prefill_{len(ids)}_{int(time.time() * 1e3)}.npy"
+            np.save(fn, np.asarray(logits, np.float32)); S.log(f"prefill logits -> {fn}")
         return logits, reused
 
 

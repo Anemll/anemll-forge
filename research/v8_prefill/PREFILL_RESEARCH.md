@@ -230,18 +230,66 @@ IOSurfaces, used zero-copy.
   copy from the ANE's INT8 V (`v8_kv8_v16_fill`). The 64K attention call takes 17.65 ms (KV8 19.83, fp16 17.71);
   64K e2e 419.9 vs 401.7, KL 0.0598.
 
-### The coupling: why balanced estimates are not reached
+### The coupling: why balanced estimates are not reached (measured 18 Nov)
 
-- **The cost.** The GPU and ANE slow each other down. The GPU attention call at 60K takes 18.7 ms alone and 26.8-27.1
-  ms (+43-45%) under an ANE load. The ANE FFN slows 3 to 20% under GPU load.
-- **Not bandwidth.** A weight-light, compute-heavy ANE program and the weight-heavy FFN loop cause the same slowdown.
-  A 153 GB/s GPU memory stream costs the ANE only 7% and ALU FMA 3%, but the int8 DeltaNet loop costs 20%.
-  In V8 the GPU slows only once the ANE is busier than about 50%.
-- **The likely cause:** a shared power or clock limit on the matrix units (not measured: no power or clock samples yet;
-  shared system-cache contention for matrix work would fit the same tests). Moving work to an idle unit buys less than
-  the arithmetic says. ANE prefix chunks at long context, ANE mixers and the A8 wave size all hit this.
+Measured with IOReport and `powermetrics` telemetry; the write-up is [ARTICLE_CONTENTION_M6.md](ARTICLE_CONTENTION_M6.md),
+the counters [pipe/unit/power/IOREPORT_COUNTERS.md](pipe/unit/power/IOREPORT_COUNTERS.md), the logs
+[results/18nov/](results/18nov/README.md). The 15 Nov reading (a shared power or clock limit on the matrix units) was
+wrong.
+
+- **The cost.** The GPU attention call at 60K takes 18.7-19.0 ms alone and 26.2-27.7 ms (+42-46%) next to the ANE FFN;
+  the FFN slows 15-32% next to attention, 0-6% next to the synthetic GPU loads.
+- **It is DRAM.** Attention@60K reads about 93 GB/s (about 1.76 GB per call, about 7x its FP16 K/V: once per query
+  head), the FFN about 85 (its weights once per 64-row block, about 206 MB per `ffn2` call). The pair gets about 134
+  GB/s of the M6's 155, and the GPU's memory latency doubles (190-221 -> 382-429 cycles). GPU loads that read 100+
+  GB/s lose 23-78% next to the ANE; the same matrix work served from cache loses 2-3%.
+- **Not power, not clock, not the system cache.** The GPU stays at 1735 MHz with no power-controller limit in every
+  pair; the highest-power pairs slow the least (INT8 matmul + FFN, 32-37 W: +3 to +8%), a 2 W DRAM stream slows its
+  partner the most; 10 W of extra CPU power leaves attention unchanged. The system cache is about 8 MB (GPU caches 1-2).
+- **The 15 Nov evidence, re-read:** the "weight-light" `hot` probe reads 100+ GB/s from DRAM (its 8 MB of weights do
+  not stay on the ANE); the 153 GB/s stream cost the ANE 7% but itself lost 44-76% (the ANE wins the arbitration).
+- **Real V8 prefill** is GPU-bound from 8K up (GPU 96-100% busy), uses 73-76% of DRAM bandwidth, with the GPU's
+  latency at 250-340 cycles throughout. The ANE's DRAM traffic is about 100 MB per token, so it tracks the prefill
+  rate (64K: about 640 tok/s at the start, 310 at the end). At 64K the GPU clock drops to 1664-1690 MHz after about
+  50 s (`PMULOOP`, heat). The served FFN loads the second ANE cluster about 9% less (chunks 8192 + 9216).
+- **ANE heat.** The ANE alone loses 30-45% within about 4 minutes of continuous work (FFN 2.42 -> 3.49 ms, 18 -> 9 W),
+  restored by 5 minutes idle; hidden in prefill behind the GPU.
 - **Core AI's own GPU path** cannot be the V8 GPU side: `ffn2_L0` took 89.5 ms there (our Metal 4.6), the DeltaNet mix
   took 438 ms, and the 593 MB chunk took 118 s to load and expanded its weights into memory.
+
+### Compute modes (data types), both units (18 Nov)
+
+Names: weight storage, then activation width; L = palette (LUT) storage. WL3A16 = 3-bit palette expanded to FP16,
+FP16 x FP16 (the served ANE FFN); WL3A8 = palette dequantized to INT8 codes, INT8 x INT8 (17 Nov form); WL4A8 =
+4-bit palette widened to INT8 tiles, INT8 x INT8 (the served GPU projections); W4A8 = linear INT4 weights (the GPU's
+`int4b_format`, widened to INT8 by the matrix op).
+
+- **Today's operand types** (`results/18nov/datatype_inventory.md`, read from the code): GPU projections WL4A8 (about
+  27% of the model's multiply-adds per token), attention k / v W8A8, Q.K INT8 x INT8, P.V FP16 x FP16, low-rank and
+  a / b FP16; ANE FFN WL3A16 (about 71%). Nothing uses INT4.
+- **GPU `matmul2d` peak** (in cache): INT8 x INT8 39.5 TOPS, FP8 x FP8 35.8-36.9, INT8 x INT4 32.3, FP16 x FP8 20.7,
+  FP16 x INT4 19.5, BF16 / FP16 19.2-19.3, FP4 x FP4 17.7 (`pipe/unit/power/gpu_mm_peak.swift`).
+- **GPU at prefill shapes** (weights from DRAM once per call, `gpu_wa_gemm.swift`): 128 tokens: W8A8 32.2 TOPS (126
+  GB/s of weights), W4A8 27.8 (54), FP8 x FP8 32.0, W16A16 12.7, W8A16 / W4A16 / WF8A16 / WF4A16 18.0-19.8; 64 tokens:
+  W8A8 16.7 (DRAM-bound at 130 GB/s), W4A8 31.1 (1.87x), W16A16 8.9 (DRAM-bound). With FP16 activations the weight
+  format does not matter; with INT8 activations 4-bit weights win when the call is DRAM-bound.
+- **ANE FFN by mode** (layer 36, 17 Nov row sweep, 290M multiply-adds per token): WL3A16 29.4 TFLOPS at 64 rows, 25.6
+  at 512; WL3A8 35.1 TOPS at 64 rows, 39.4 at 512 (14.7 us per token vs 19.7); WL3A8 loses below 64 rows (quantize
+  cost); single 128-row calls are slow in every mode (18-20).
+- **Under contention** (set `wa`, `results/18nov/coupling/wa/`; GPU at 128 tokens per call, weights from DRAM; each
+  pair against its adjacent alone phases, all warm at 86-96 C):
+
+| ANE FFN (layer 36, chain of 4) | GPU W16A16 | GPU W8A8 | GPU FP8 x FP8 | GPU W4A8 | GPU W4A16 |
+|---|---|---|---|---|---|
+| WL3A16, 64 rows: ANE / GPU slower by | +7.5% / +62% | +3.0% / +74% | +2.3% / +54% | +4.0% / +10.5% | +1.6% / +4% |
+| WL3A8, 64 rows | +36% / +56% | +31% / +70% | +24% / +68% | +11% / +20% | +4.6% / +11% |
+| WL3A16, 512 rows | (first-use compile) | +2.0% / +34% | +3.2% / +49% | +2.6% / +8% | +0.7% / +4% |
+| WL3A8, 512 rows | +3.1% / +51% | +1.9% / +68% | +0.6% / +67% | +4.2% / +13% | +0.3% / +8% |
+
+  GPU W4A8 is the best GPU form in every pairing: 17% slower than W8A8 alone, 1.25-1.3x faster next to the ANE (half
+  the DRAM). The ANE's WL3A8 at 64 rows is faster alone but more bandwidth-bound: next to an 8- or 16-bit GPU stream
+  it loses 24-36% and ends slower than WL3A16; next to W4A8 / W4A16 it keeps its lead. 512-row ANE blocks barely feel
+  the GPU (0.3-4%). The served GPU projections (WL4A8: 4-bit palette indices from DRAM) already have W4A8's bytes.
 
 ### A8: runtime-INT8 FFN on the ANE
 
@@ -268,6 +316,39 @@ The ANE's INT8 rate (about 53 TOPS on a 4096^2 matmul) is twice what our FP16-ac
   - Not in the server.
 - **The split pattern on V8's fp16 LUT FFN** (`w8a8/lut_split_probe.py`): no gain at V8's 128-row calls. At 1024 rows
   it is -8%, against -33% for the A8 int8 form.
+- **Palettized INT8 FFN, 17 Nov** (`w8a8/lut8_a8_probe.py`, layer 36, results in `results/17nov/lut8_a8/`): the
+  weights stay 3-bit with an INT8 palette (`coreai::lut_to_dense` into `constexpr_blockwise_shift_scale`), so nothing
+  is expanded at run time and the compiled program does not grow; the HWX shows INT8 x INT8 tasks. Probe shape
+  (17 x 1024 blocks, K split), against the same shape in FP16 (`lut16s`, 2.79 / 8.59 / 17.55 ms at 128 / 512 / 1024
+  rows). This is **not the served V8 FFN**, which is the chunked [8192, 9216] form at 64 rows (`ffn`, about 1.31-1.35
+  ms = 20.8 us/token, 13 Nov) run as two 64-row blocks per call (`ffn2`, `ffnq2`, `offn2`):
+  - INT8 activations on the gate / up input only (`s8a8_gu`): **correct at every size**, 2.36 / 6.96 / 13.62 ms
+    (-15% at 128 rows and -22% at 1024 rows against the probe's FP16 split, 40 TOPS). Per token at 128 rows that is
+    18.4 us against about 20.8 for the served 64-row FFN, measured on another day: not yet an A/B.
+  - INT8 activations on the down input as well (`lut8a8s`): 2.48 / 5.81 / 11.21 ms, but **wrong from 512 rows**
+    (rel 1.40). The down input alone (`s8a8_dn`) fails the same way, with or without the K split (`s8a8_noks`); the
+    full form (one down conv) is correct. So the failing piece is the 17 per-block INT8 down convs at 512+ rows.
+  - HWX (`results/17nov/lut8_a8/hwx_*.txt`; the compiler's cycle estimates match the measured ratios within 2%):
+    the dequantize is folded (no task reads INT8 outside the NE convs, which take INT8 x INT8 and write FP16). The
+    quantize stays, as it must with a per-token scale, but costs 1-2.5% of cycles (a 1-channel NE reduction and one
+    PE pass that scales and writes INT8). At 128 rows the gate / up convs halve exactly (2176 -> 1088 cycles), but the
+    down convs (17 blocks, 1024 -> 5120) cost the same in INT8 as in FP16 (2210 vs 2214-2222): they are bound by their
+    5120-channel partial sums, not by multiplies, and INT8 adds a rescale and a sum per block on the PE (PE scale and
+    add 9% of cycles against 1.6%), since blocks with their own activation scale cannot accumulate in the NE. That is
+    why INT8 on both is slower than gate / up only at 128 rows. The served chunked FFN has 2 down chunks, not 17.
+  - Accuracy (synthetic input with 8 heavy channels): FFN error 3.1% against 0.48% for FP16. A host simulation of
+    the same recipe gives 3.0-3.1%, so the device is exact to its recipe; the error is the per-token scale of the
+    gate / up input. INT8 palette alone: 1.1-1.2%; INT8 down input adds 0.2%.
+  - On the served FFN (`w8a8/srv_ffn_a8_probe.py`, results in `results/17nov/srv_ffn_a8/`): INT8 gate / up in the
+    served chunks, K split in two, takes 2.005 ms per `ffn2` pair against 2.353 ms for the served `ffn2_L36` (-15%),
+    1.141 against 1.318 ms at 64 rows (-13%); correct, FFN error 1.4% against the served FP16 FFN (the norm and input
+    Hadamard before the quantize leave fewer heavy channels than the synthetic probe input). In 17 x 1024 tiles it is
+    slower (2.137 ms: the concatenation). Decode (`srv_ffn_decode_probe.py`, 4 FFN passes per call): 3-5% slower at
+    8 and 16 rows, so INT8 gate / up is for prefill entries only.
+  - The weights stay one copy in every INT8 program: 3-bit indices with an INT8 palette, expanded on the ANE at run
+    time. A prefill A/B with a separate INT8 FFN package set (`v8/build_v8_ffn8.py`) was stopped: it would have loaded
+    every FFN weight twice. Next: the INT8 entries in the same packages as the FP16 ones, on the same index constants,
+    checked in the package size and HWX; then the real-prefill A/B and KL in that one build.
 
 ### The server (`pipe/v8_server.py`, `pipe/V8_SERVER.md`)
 
@@ -323,25 +404,30 @@ unchanged.
 1. **Fewer, bigger ANE predictions.** Every evaluation has a fixed 0.11-0.23 ms gap that no submission trick hides.
 2. **Never call the same Core AI function from two threads at once**, even with different bindings.
 3. **Fast ANE INT8 forms can be silently wrong.** Check every new form against a host reference.
-4. **The GPU and ANE share a matrix-unit power budget on the M6.** Per-unit ceilings do not add up; measure the pair.
+4. **The GPU and ANE share the M6's DRAM (about 155 GB/s), not a power budget** (corrected 18 Nov with telemetry).
+   Per-unit ceilings do not add up when both stream from memory; count bytes per token and measure the pair.
 5. **Weights once.** The GPU reads the ANE's compiled HWX zero-copy, and shared-weight packages store constants once.
    Duplicated weights do not fit in 32 GB at long context.
-6. **Compare only back-to-back or interleaved runs.** Thermal drift is 5 to 10% within minutes.
+6. **Compare only back-to-back or interleaved runs.** The ANE alone loses 30 to 45% within about four minutes of
+   continuous work (18 Nov); the GPU's clock drops 3 to 4% after about a minute of a long prefill.
 7. **Core AI limits.** A function fails at run time past about 51 bound tensors. A view that does not cover its
    whole IOSurface aborts.
    Segmented KV (commit 1) is the way to grow context without copies.
 8. **Compile cache purges.** After a reboot aned can purge every compiled entry while `forge.py` still reports
    "compiled": use `forge.py compile --force`.
 
-## Where the time goes now
+## Where the time goes now (traced 18 Nov: [ANALYSIS_V8_M6.md](ANALYSIS_V8_M6.md))
 
-- **2K to 8K: ANE-bound.** The ANE runs 98-100% busy. The FFN programs run FP16 activations x LUT at 26-28 TOPS;
-  the ceiling for these programs is about 735-750 tok/s at 2K.
-- **32K and up: GPU-bound on attention.** At 30K a call is pv 3.09 ms, qk 2.27 ms and softmax 1.96 ms. The two-pass
-  score matrix (about 190 MB per call) is most of it.
-- **Decode past 64K:** before SPLIT+GPU, bound by the ANE verify step (135 of 152 ms at 96K). With it, 141 ms per
-  cycle at 64K and 149 at 95K; the GPU attention runs at about 90 to 100 GB/s in the server (127 back to back), held
-  back by its cold start after each ANE call.
+- **2K: ANE-bound.** ANE 99% busy, GPU 89%; the FFN pair costs 2.88 ms of ANE time under contention (2.42 alone),
+  which gives the measured 695 tok/s.
+- **8K: balanced** (both 95-96% busy), 684 tok/s.
+- **32K and up: GPU-bound on attention** (GPU 99-100% busy; attention 49% of its time at 32K, 60% at 64K: 3.5 ms per
+  128-row call at the start of a 64K prompt, 18.8 at the end). About 90% of attention's DRAM traffic is its own score
+  matrix (written, read and rewritten by the softmax, read by P.V).
+- **DeltaNet** costs 2.55 ms per 128-row call in the pipeline: 1.94 alone, 2.12 cycling all 48 layers (cold caches).
+- **Decode:** bound by the ANE's weight stream (98-104 GB/s on average over a cycle, 58% of samples at the counter's
+  128 GB/s top: faster than 128 while streaming; two clusters at 52.8 and 45.8), the GPU idle; 109 ms per cycle at 2K
+  (draft 13.5, verify 94.5); no heat throttling (7 W).
 
 ## Decode: where the verify time goes, and GPU attention for it (16 Nov, night)
 
@@ -406,7 +492,7 @@ the fp16 copy in any of them.
 | V8 driver | `prototypes/v8_prefill.py`, `pipe/unit/run_wd.sh`, `e2e_ab.sh`, `pos_sweep.sh`, `short_sweep.sh` | see V8 |
 | builds | `v8/build_seg2_96.sh`, `build_shared2_all.sh`, `build_shared_chunk.py`, `chunkmlp.py` | v8_shared2 |
 | GPU tables | `pipe/prep_engine.py`, `prep_kv8.py`, `prep_ffn.py` | w_shared2r |
-| coupling | `pipe/unit/contention.sh`, `gpu_steady.py`, `gpu_stress.swift`, `v8/share/ane_load.py` | power budget |
+| coupling | `pipe/unit/contention.sh`, `gpu_steady.py`, `gpu_stress.swift`, `v8/share/ane_load.py`; 18 Nov: `pipe/unit/power/` | DRAM bandwidth and latency (18 Nov telemetry; the 15 Nov power reading was wrong) |
 | A8 | `pipe/v8_a8.py`, `prep_a8*.py`, `w8a8/a8_*.py`, `a8probe/*.sh`, `a8probe/results*.json` | 6K +10.6%, 16K +7.6% |
 | KV8 / K8V16 | `pipe/engine/patch_kv8b.py`, `patch_k8v16.py`, `pipe/unit/attn_kv8_prof.py`, `results/k8v16_65536.json` | lossless, K8V16 = fp16 speed |
 | server | `pipe/v8_server.py`, `v8_engine.py`, `pipe/unit/srv_bench.py`, `srv_matrix.sh`, `results/srv_matrix.jsonl` | table above |

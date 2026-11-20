@@ -1,0 +1,34 @@
+20:31:14 trace x_a (swap 680.44M)
+v8_trace rc=0
+BANNER expect F8=x | loaded F8=x F8F=off FOLD_MIN=0 F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e
+runtime + V8 engine loaded in 1s
+run 0: 65536 tok in 143.35s (457 tok/s), 65536 events
+20:34:58 trace xf_a (swap 680.44M)
+v8_trace rc=0
+BANNER expect F8=x+w128 | loaded F8=x F8F=w128 FOLD_MIN=0 F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8iskm softmax=folded pv=attn_pv_f8m_w128 fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e
+runtime + V8 engine loaded in 1s
+run 0: 65536 tok in 145.11s (452 tok/s), 65536 events
+20:38:46 trace plain_a (swap 680.44M)
+v8_trace rc=0
+BANNER expect F8=off | loaded F8=off F8F=off FOLD_MIN=0 F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv qk=attn_qk8isk softmax=attn_softmax8n pv=attn_pv_w fill=kv8_v_to_v16 | V copy=fp16, 2 B | mask=every element exp=float P=fp16 | kernels=/Users/anemll/Do
+runtime + V8 engine loaded in 1s
+run 0: 65536 tok in 152.99s (428 tok/s), 65536 events
+20:42:40 trace x_b (swap 672.44M)
+v8_trace rc=0
+BANNER expect F8=x | loaded F8=x F8F=off FOLD_MIN=0 F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e
+runtime + V8 engine loaded in 1s
+run 0: 65536 tok in 141.91s (462 tok/s), 65536 events
+20:46:25 trace xf_b (swap 672.44M)
+v8_trace rc=0
+BANNER expect F8=x+w128 | loaded F8=x F8F=w128 FOLD_MIN=0 F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8iskm softmax=folded pv=attn_pv_f8m_w128 fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e
+runtime + V8 engine loaded in 1s
+run 0: 65536 tok in 144.62s (453 tok/s), 65536 events
+{"a": "tr_plain_a", "b": "tr_x_a", "tokens": 65536, "kl_a_b": 5.196538533553677e-06, "cos": 0.9999270175939776, "argmax_same": true, "top10": 10}
+{"a": "tr_plain_a", "b": "tr_x_b", "tokens": 65536, "kl_a_b": 5.196538533553677e-06, "cos": 0.9999270175939776, "argmax_same": true, "top10": 10}
+{"a": "tr_plain_a", "b": "tr_xf_a", "tokens": 65536, "kl_a_b": 8.130373146203474e-06, "cos": 0.9999274099805602, "argmax_same": true, "top10": 10}
+{"a": "tr_plain_a", "b": "tr_xf_b", "tokens": 65536, "kl_a_b": 8.130373146203474e-06, "cos": 0.9999274099805602, "argmax_same": true, "top10": 10}
+20:50:11 restarting forge on 8765 (FP8 serving defaults)
+20:50:16 forge ready
+[20:50:16] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v |
+[20:50:16] dec8: decode GPU engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_clk.dylib sha256 2b64e979a91a414f, kernels dec_kernels.metal 00f351b5edc893b7; keep
+20:50:16 all done

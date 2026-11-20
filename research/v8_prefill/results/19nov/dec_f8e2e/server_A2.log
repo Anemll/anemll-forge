@@ -1,0 +1,179 @@
+[qwen38-27b-ane] started 2026-11-19 11:37:37  pid 93307  listen 127.0.0.1:8771
+[qwen38-27b-ane] model dir     /Volumes/SSD4TB/anemll-forge-research/v8_dec8  (max ctx 98304; Core AI: verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [8192, 16384, 32768, 65536, 98304], KV kv8, one weight copy)
+[qwen38-27b-ane] checkpoint    /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model
+[qwen38-27b-ane] speculative   ON  drafter /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel
+[qwen38-27b-ane] thinking      default off (clients override via chat_template_kwargs.enable_thinking); context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)
+[qwen38-27b-ane] think budget  low=2048,medium=6144,xhigh=12288 tokens per reasoning_effort (request field thinking_budget overrides; then closed with Qwen's budget phrase)
+[qwen38-27b-ane] sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, min_p 0.0 / 0; max_tokens 4096
+[qwen38-27b-ane] repetition    presence_penalty 0.0 thinking / 1.5 non-thinking; DRY multiplier 0.0 base 1.75 allowed 8 tokens; loop guard 3+ periods over 1536+ tokens
+[qwen38-27b-ane] python        /Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+drafter: body-only package built beside release_u15_data600_mat, drafting for release_vq3pA_mixh_s600_k1_mat with its head
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+[11:37:39] ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+[11:37:39] model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+[11:37:39] target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8
+[11:37:39] KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+[11:37:39] KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[11:37:39] [ANE compile] all 18 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+[11:37:39] loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+[11:37:39] loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+[11:37:40] loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+[11:37:40] drafter: Core AI dflash2_lut4_gptq_nohead.aimodel (body only, drafting with the target's head)
+[qwen38-27b-ane] loaded batched prefill + head + DFlash2 drafter dflash2_lut4_gptq_nohead.aimodel from v8_dec8 (ctx 98304) in 1s
+[11:37:41] v8: GPU engine libgpu_v8_f8q.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+[11:37:41] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d
+[11:37:41] v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+[11:37:41] v8: prefill engine ready in 0s (V8 for new spans >= 256 tokens)
+dec_init: attention kernel dec_attn_r4
+[11:37:41] dec8: BANNER decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_clk.dylib sha256 2b64e979a91a414fba14261a02db9db3a9e595cd008b3bece70db474ef74fdb2 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels.metal sha256 00f351b5edc893b73a8ef21433fe8fca425c51a14eac795e151c40e4f5767a1a | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=on
+[11:37:41] dec8: decode GPU engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_clk.dylib sha256 2b64e979a91a414f, kernels dec_kernels.metal 00f351b5edc893b7; keep-alive hold 60 ms (DEC_KA_HOLD_MS), switch /Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka
+[11:37:41] dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode on, 64K entry up to 0 keys
+[11:37:41] v8: text-level prompt match on; decode snapshots every 256 tokens (last 3); V8 rest >= 128, tail <= 8 rows on the bridge
+[qwen38-27b-ane] serving OpenAI API on http://127.0.0.1:8771/v1 (V8 prefill, speculative ON, ctx 98304)
+[11:37:46] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[11:37:46] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[11:37:46] prefill: 15 tok in 0.3s (52 tok/s) | decoding ...
+[11:37:46] dec8: 1 split verify steps, 112.3 ms each (GPU attention 0.5 ms)
+[11:37:46] prompt 15 (cached 0, prefill 15 in 0.3s) | gen 1 in 0.1s (7.6 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 132 (draft 14.2 verify 112.4 sample 0.1 ctx 5.1 host 0.1)) | stop | ctx 16/98304 (8K entry)
+[11:38:17] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16 tok, prompt 32249 tok, first difference at 1:
+   state : '<|im_start|>user\nSay OK.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nOK'
+   prompt: '<|im_start|>system\nSession 81eb78ed. You are a helpful coding assistant. Follow the final task after the'
+[11:38:17] request: prompt 32249 tok | cache: cold (no reusable state), reused 0 | prefilling 32249 tok ...
+[11:38:17] [ctx] 8192 -> 32768 at pos 0: segments bound, no KV rows copied (93 ms)
+[11:38:17] v8: 48 ANE KV segments registered (ctx 32768)
+[11:39:13] v8: snapshot 'turn' at 32128 (cut 32242), taken during the run
+[11:39:13] v8: 32249 tok (7 pad) in 56.5s (571 tok/s) + 211 ms handover / drafter context | setup 121 ms (V fill 0 ms, 0 rows)
+[11:39:13] prefill: 32249 tok in 56.9s (567 tok/s) | decoding ...
+[11:39:18] dec8: 39 split verify steps, 105.3 ms each (GPU attention 9.5 ms)
+[11:39:18] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[11:39:18] prompt 32249 (cached 0, prefill 32249 in 56.9s) | gen 256 in 5.1s (50.3 tok/s, 6.56 tok/verify, accept 81% (accepted/7 per cycle: 0:3% 1:5% 2:13% 3:3% 4:3% 5:3% 6:0% 7:72%), ms/cycle 130 (draft 12.8 verify 105.6 sample 0.6 ctx 11.3 host 0.1)) | length | ctx 32508/98304 (32K entry)
+[11:39:19] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32508 tok, prompt 32249 tok, first difference at 32249:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:39:19] request: prompt 32249 tok | cache: restore 'turn' snapshot, reused 32128 | prefilling 121 tok ...
+[11:39:19] snapshots dropped (their KV rows were rewritten): dec0
+[11:39:19] prefill: 121 tok in 0.6s (206 tok/s) | decoding ...
+[11:39:25] dec8: 38 split verify steps, 105.4 ms each (GPU attention 9.7 ms)
+[11:39:25] prompt 32249 (cached 32128, prefill 121 in 0.6s) | gen 256 in 6.1s (41.8 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:0% 1:11% 2:3% 3:8% 4:5% 5:3% 6:0% 7:71%), ms/cycle 161 (draft 13.0 verify 105.6 sample 0.6 ctx 41.7 host 0.1)) | length | ctx 32504/98304 (32K entry)
+[11:39:25] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32504 tok, prompt 32249 tok, first difference at 32249:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:39:25] request: prompt 32249 tok | cache: restore 'turn' snapshot, reused 32128 | prefilling 121 tok ...
+[11:39:26] prefill: 121 tok in 0.6s (213 tok/s) | decoding ...
+[11:39:30] dec8: 38 split verify steps, 104.7 ms each (GPU attention 9.5 ms)
+[11:39:30] prompt 32249 (cached 32128, prefill 121 in 0.6s) | gen 256 in 4.5s (56.8 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:0% 1:11% 2:3% 3:8% 4:5% 5:3% 6:0% 7:71%), ms/cycle 119 (draft 13.0 verify 104.9 sample 0.6 ctx 0.1 host 0.1)) | length | ctx 32504/98304 (32K entry)
+[11:39:30] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32504 tok, prompt 32249 tok, first difference at 32249:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:39:30] request: prompt 32249 tok | cache: restore 'turn' snapshot, reused 32128 | prefilling 121 tok ...
+[11:39:31] prefill: 121 tok in 0.6s (216 tok/s) | decoding ...
+[11:39:35] dec8: 38 split verify steps, 104.9 ms each (GPU attention 9.5 ms)
+[11:39:35] prompt 32249 (cached 32128, prefill 121 in 0.6s) | gen 256 in 4.5s (56.7 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:0% 1:11% 2:3% 3:8% 4:5% 5:3% 6:0% 7:71%), ms/cycle 119 (draft 13.0 verify 105.0 sample 0.6 ctx 0.1 host 0.1)) | length | ctx 32504/98304 (32K entry)
+[11:39:36] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32504 tok, prompt 64953 tok, first difference at 5:
+   state : '<|im_start|>system\nSession 81eb78ed. You are a helpful coding assistant. Follow the final task after the public testing notes.'
+   prompt: '<|im_start|>system\nSession 4555b586. You are a helpful coding assistant. Follow the final task after the public testing'
+[11:39:36] [ctx] 32768 -> 8192 at pos 0: segments bound, no KV rows copied (58 ms)
+[11:39:36] request: prompt 64953 tok | cache: cold (no reusable state), reused 0 | prefilling 64953 tok ...
+[11:39:36] [ctx] 8192 -> 65536 at pos 0: segments bound, no KV rows copied (124 ms)
+[11:39:36] v8: 64 ANE KV segments registered (ctx 65536)
+[11:42:06] v8: snapshot 'turn' at 64896 (cut 64946), taken during the run
+[11:42:06] v8: 64953 tok (71 pad) in 149.5s (435 tok/s) + 190 ms handover / drafter context | setup 148 ms (V fill 0 ms, 0 rows)
+[11:42:06] prefill: 64953 tok in 149.8s (434 tok/s) | decoding ...
+[11:42:16] decode: 256 tok, 10s, 24.9 tok/s, 6.40 tok/verify, accept 78%, ms/cycle 257 (draft 13.8 verify 118.2 sample 0.6 ctx 124.5 host 0.1)
+[11:42:16] dec8: 40 split verify steps, 118.0 ms each (GPU attention 19.3 ms)
+[11:42:16] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[11:42:16] prompt 64953 (cached 0, prefill 64953 in 149.9s) | gen 256 in 10.3s (24.9 tok/s, 6.40 tok/verify, accept 78% (accepted/7 per cycle: 0:2% 1:5% 2:12% 3:8% 4:0% 5:8% 6:0% 7:65%), ms/cycle 257 (draft 13.8 verify 118.2 sample 0.6 ctx 124.5 host 0.1)) | length | ctx 65211/98304 (64K entry)
+[11:42:16] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65211 tok, prompt 64953 tok, first difference at 64953:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\n\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:42:16] request: prompt 64953 tok | cache: restore 'turn' snapshot, reused 64896 | prefilling 57 tok ...
+[11:42:16] snapshots dropped (their KV rows were rewritten): dec1
+[11:42:16] prefill: 57 tok in 0.4s (148 tok/s) | decoding ...
+[11:42:25] dec8: 38 split verify steps, 117.3 ms each (GPU attention 19.0 ms)
+[11:42:25] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[11:42:25] prompt 64953 (cached 64896, prefill 57 in 0.4s) | gen 256 in 8.5s (30.0 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:5% 1:8% 2:0% 3:3% 4:3% 5:8% 6:5% 7:68%), ms/cycle 224 (draft 13.5 verify 117.5 sample 0.6 ctx 92.5 host 0.1)) | length | ctx 65210/98304 (64K entry)
+[11:42:25] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65210 tok, prompt 64953 tok, first difference at 64953:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:42:25] request: prompt 64953 tok | cache: restore 'turn' snapshot, reused 64896 | prefilling 57 tok ...
+[11:42:25] snapshots dropped (their KV rows were rewritten): dec2
+[11:42:25] prefill: 57 tok in 0.4s (153 tok/s) | decoding ...
+[11:42:30] dec8: 38 split verify steps, 116.9 ms each (GPU attention 18.0 ms)
+[11:42:30] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[11:42:30] prompt 64953 (cached 64896, prefill 57 in 0.4s) | gen 256 in 5.0s (51.5 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:5% 1:8% 2:0% 3:3% 4:3% 5:8% 6:5% 7:68%), ms/cycle 131 (draft 13.0 verify 117.0 sample 0.6 ctx 0.1 host 0.1)) | length | ctx 65210/98304 (64K entry)
+[11:42:30] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65210 tok, prompt 64953 tok, first difference at 64953:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:42:30] request: prompt 64953 tok | cache: restore 'turn' snapshot, reused 64896 | prefilling 57 tok ...
+[11:42:31] snapshots dropped (their KV rows were rewritten): dec0
+[11:42:31] prefill: 57 tok in 0.4s (154 tok/s) | decoding ...
+[11:42:36] dec8: 38 split verify steps, 116.8 ms each (GPU attention 18.0 ms)
+[11:42:36] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[11:42:36] prompt 64953 (cached 64896, prefill 57 in 0.4s) | gen 256 in 5.0s (51.5 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:5% 1:8% 2:0% 3:3% 4:3% 5:8% 6:5% 7:68%), ms/cycle 131 (draft 13.0 verify 116.9 sample 0.6 ctx 0.1 host 0.1)) | length | ctx 65210/98304 (64K entry)
+[11:42:36] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65210 tok, prompt 97785 tok, first difference at 5:
+   state : '<|im_start|>system\nSession 4555b586. You are a helpful coding assistant. Follow the final task after the public testing'
+   prompt: '<|im_start|>system\nSession 5cac7b7a. You are a helpful coding assistant. Follow the final task after the public testing notes.'
+[11:42:36] [ctx] 65536 -> 8192 at pos 0: segments bound, no KV rows copied (59 ms)
+[11:42:36] request: prompt 97785 tok | cache: cold (no reusable state), reused 0 | prefilling 97785 tok ...
+[11:42:36] [ctx] 8192 -> 98304 at pos 0: segments bound, no KV rows copied (170 ms)
+[11:42:36] v8: 80 ANE KV segments registered (ctx 98304)
+[11:46:58] v8: snapshot 'turn' at 97664 (cut 97778), taken during the run
+[11:46:58] v8: 97785 tok (7 pad) in 261.2s (374 tok/s) + 197 ms handover / drafter context | setup 211 ms (V fill 0 ms, 0 rows)
+[11:46:58] snapshots dropped (their KV rows were rewritten): dec1
+[11:46:58] prefill: 97785 tok in 261.6s (374 tok/s) | decoding ...
+[11:47:08] decode: 243 tok, 10s, 24.3 tok/s, 6.23 tok/verify, accept 74%, ms/cycle 257 (draft 13.6 verify 136.2 sample 0.6 ctx 106.5 host 0.1)
+[11:47:08] dec8: 41 split verify steps, 128.7 ms each (GPU attention 27.9 ms)
+[11:47:08] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[11:47:08] prompt 97785 (cached 0, prefill 97785 in 261.6s) | gen 256 in 10.3s (24.7 tok/s, 6.24 tok/verify, accept 76% (accepted/7 per cycle: 0:5% 1:7% 2:10% 3:7% 4:0% 5:7% 6:0% 7:63%), ms/cycle 252 (draft 13.5 verify 135.7 sample 0.6 ctx 102.4 host 0.1)) | length | ctx 98043/98304 (96K entry)
+[11:47:08] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 98043 tok, prompt 97785 tok, first difference at 97785:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\n"""Clamp a value to an inclusive range."""\nimport unittest\n\n\ndef clamp(value: float, low'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:47:08] request: prompt 97785 tok | cache: restore 'turn' snapshot, reused 97664 | prefilling 121 tok ...
+[11:47:09] snapshots dropped (their KV rows were rewritten): dec2
+[11:47:09] prefill: 121 tok in 0.9s (134 tok/s) | decoding ...
+[11:47:15] dec8: 38 split verify steps, 126.1 ms each (GPU attention 26.7 ms)
+[11:47:15] decode snapshots: 1 taken (2 ms); kept: dec0, gen, turn
+[11:47:15] prompt 97785 (cached 97664, prefill 121 in 0.9s) | gen 256 in 6.1s (42.1 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:0% 1:5% 2:3% 3:11% 4:11% 5:3% 6:0% 7:68%), ms/cycle 160 (draft 12.9 verify 126.3 sample 0.6 ctx 20.0 host 0.1)) | length | ctx 98042/98304 (96K entry)
+[11:47:15] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 98042 tok, prompt 97785 tok, first difference at 97785:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:47:15] request: prompt 97785 tok | cache: restore 'turn' snapshot, reused 97664 | prefilling 121 tok ...
+[11:47:16] snapshots dropped (their KV rows were rewritten): dec0
+[11:47:16] prefill: 121 tok in 0.9s (137 tok/s) | decoding ...
+[11:47:22] dec8: 38 split verify steps, 126.9 ms each (GPU attention 26.6 ms)
+[11:47:22] decode snapshots: 1 taken (2 ms); kept: dec1, gen, turn
+[11:47:22] prompt 97785 (cached 97664, prefill 121 in 0.9s) | gen 256 in 5.4s (47.7 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:0% 1:5% 2:3% 3:11% 4:11% 5:3% 6:0% 7:68%), ms/cycle 141 (draft 13.1 verify 127.0 sample 0.7 ctx 0.1 host 0.1)) | length | ctx 98042/98304 (96K entry)
+[11:47:22] thinking off (max_tokens 256) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 98042 tok, prompt 97785 tok, first difference at 97785:
+   state : ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\nimport unittest\n\n\ndef clamp(value: float, low: float, high: float) -> float:\n'
+   prompt: ' invalid bounds.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[11:47:22] request: prompt 97785 tok | cache: restore 'turn' snapshot, reused 97664 | prefilling 121 tok ...
+[11:47:23] snapshots dropped (their KV rows were rewritten): dec1
+[11:47:23] prefill: 121 tok in 0.9s (136 tok/s) | decoding ...
+[11:47:28] dec8: 38 split verify steps, 126.1 ms each (GPU attention 26.6 ms)
+[11:47:28] decode snapshots: 1 taken (2 ms); kept: dec2, gen, turn
+[11:47:28] prompt 97785 (cached 97664, prefill 121 in 0.9s) | gen 256 in 5.3s (48.0 tok/s, 6.74 tok/verify, accept 82% (accepted/7 per cycle: 0:0% 1:5% 2:3% 3:11% 4:11% 5:3% 6:0% 7:68%), ms/cycle 140 (draft 13.1 verify 126.3 sample 0.6 ctx 0.1 host 0.1)) | length | ctx 98042/98304 (96K entry)

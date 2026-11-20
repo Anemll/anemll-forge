@@ -1,0 +1,30 @@
+2026-11-17 16:25:15.658 python[50153:2083613] Warning: no minimum deployment target from CoreAI's target spec; defaulting to the current device's platform and version (27.3.0).
+loaded lut8_lut16_L36.aimodel in 3s
+lut16    T128     11.998 ms    5.7 TOPS   93.74 us/tok  rel vs fp32 4.60e-03
+lut16    T1024    30.481 ms   18.0 TOPS   29.77 us/tok  rel vs fp32 4.61e-03
+---- HWX lut16
+== lut8_lut16_L36.aimodel  F0F9F4C1/6398684E/model.hwx
+  273 tasks, streams {0: 121, 1: 120, 2: 26, 3: 6}, ExeCycles total 60234
+   count   cycles  engine / task type / operand formats / DMA (rd from DRAM, wr to DRAM, l2 = stays on chip)
+     252    53209  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 wr pe=-
+       8     2274  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd12 wr pe=Add
+       5     2775  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd wr pe=-
+       4      822  other EW w/o Reduction w/ ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=-
+       2       44  PE EW w/o Reduction w/o ReLU in=float16 src2=float16 kern=- out=float16 rd1 wr pe=Add
+       1      555  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd1 l2 pe=-
+       1      555  NE (None) in=float16 src2=float16 kern=fp16 out=float16 rd l2 pe=-
+  NE operand formats (in, src2, kernel, out): {('float16', 'float16', 'fp16', 'float16'): 259}
+  DRAM writes: 271 fp16 outputs, 0 int8 outputs
+  NE tasks by shape (W x H x C x D):
+      80    25280  in=float16 kern=fp16 out=float16 wr in WxHxCxD 1024x1x17408x0 out 1024x1x64x0
+     136    17680  in=float16 kern=fp16 out=float16 wr in WxHxCxD 1024x1x5120x0 out 1024x1x256x0
+       8     4440  in=float16 kern=fp16 out=float16 wr in WxHxCxD 32x1x5120x0 out 32x1x8704x0
+       8     4440  in=float16 kern=fp16 out=float16 wr in WxHxCxD 32x1x17408x0 out 32x1x2560x0
+      17     1768  in=float16 kern=fp16 out=float16 wr in WxHxCxD 1024x1x1024x0 out 1024x1x1024x0
+       2     1110  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x5120x0 out 64x1x8704x0
+       2     1110  in=float16 kern=fp16 out=float16 l2 in WxHxCxD 64x1x5120x0 out 64x1x8704x0
+       2      732  in=float16 kern=fp16 out=float16 wr in WxHxCxD 1024x1x8704x0 out 1024x1x8704x0
+       2      444  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x1024x0 out 64x1x1024x0
+       2       90  in=float16 kern=fp16 out=float16 wr in WxHxCxD 64x1x17408x0 out 64x1x17408x0
+
+MPSGRAPH_ANE_BONDED_COMPILE_MODE EV is set to 2.

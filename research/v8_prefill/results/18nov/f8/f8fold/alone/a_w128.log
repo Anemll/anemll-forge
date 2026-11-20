@@ -1,0 +1,9 @@
+gpu layers 1 LMAX 98304 F8 'x' F8VS 1
+BANNER F8=x F8F=w128 FOLD_MIN=0 F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8iskm softmax=folded pv=attn_pv_f8m_w128 fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib libgpu_v8_f8f.dylib
+V copy fill 4.3 ms
+{"pos": 2048, "F8": "x", "F8VS": "1", "ms_median": 2.328, "ms_min": 2.301, "finite": true}
+{"pos": 8192, "F8": "x", "F8VS": "1", "ms_median": 3.687, "ms_min": 3.668, "finite": true}
+{"pos": 16384, "F8": "x", "F8VS": "1", "ms_median": 5.5, "ms_min": 5.479, "finite": true}
+{"pos": 32768, "F8": "x", "F8VS": "1", "ms_median": 9.165, "ms_min": 9.093, "finite": true}
+{"pos": 61440, "F8": "x", "F8VS": "1", "ms_median": 15.483, "ms_min": 15.413, "finite": true}
+{"pos": 95232, "F8": "x", "F8VS": "1", "ms_median": 22.873, "ms_min": 22.829, "finite": true}

@@ -11,8 +11,12 @@ split step only moves the position.
   DecSplit(mb, build).install() after: mb.call / features / accept use the split when use(p0) says so
 Env: V8_DEC8 (auto: split in the 96K entry, and in the 64K entry up to V8_DEC8_MID keys; on: always; off), V8_DEC8_MID
 (0: none; the runtime check measured the 64K entry at -0.7% at 33K keys and +1.8% at 49K, the 96K entry -7.4% at 66K,
--4.5% at 82K, -2.8% at 95K)."""
-import ctypes as C_, json, os, time
+-4.5% at 82K, -2.8% at 95K).
+GPU clock keep-alive (18 Nov 2026, engine/dec_gpu_clk.swift, results/18nov/gpu_clock): DEC_DYLIB (libdec_gpu_clk.dylib =
+libdec_gpu.dylib + the keep-alive; libdec_gpu.dylib = without), DEC_KA_HOLD_MS (60: every split step holds the GPU clock
+up to 60 ms past its last call; 0 = off), DEC_KA_CTL (a file; "off" in it turns the keep-alive off at run time, anything
+else or no file = DEC_KA_HOLD_MS; checked once per split step)."""
+import ctypes as C_, hashlib, json, os, time
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +24,22 @@ import numpy as np
 ENG = Path(__file__).resolve().parent / "engine"
 MODE = os.environ.get("V8_DEC8", "auto")
 MID = int(os.environ.get("V8_DEC8_MID", "0"))
+DEC_DYLIB = os.environ.get("DEC_DYLIB", "libdec_gpu_clk.dylib")
+KA_HOLD = float(os.environ.setdefault("DEC_KA_HOLD_MS", "60"))   # read by libdec_gpu_clk at its first call
+KA_CTL = os.environ.get("DEC_KA_CTL", "/Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka")
+# research (queue 16b, 19 Nov 2026; unset = the served behaviour): DEC_METAL (kernels file in engine/, default
+# dec_kernels.metal), EXPECT_DEC_ATTN / EXPECT_DEC_METAL / EXPECT_DEC_DYLIB (the attention kernel name; sha256 prefixes:
+# the server refuses to start on a mismatch), DEC_LOGITS_DIR (each split step's accepted rows' logits, fp16, one file
+# per start position, first request only)
+DEC_METAL = os.environ.get("DEC_METAL", "dec_kernels.metal")
+LOGITS_DIR = os.environ.get("DEC_LOGITS_DIR")
+
+
+def _mapped(name):
+    lib = C_.CDLL(None)
+    lib._dyld_image_count.restype = C_.c_uint32
+    lib._dyld_get_image_name.restype, lib._dyld_get_image_name.argtypes = C_.c_char_p, [C_.c_uint32]
+    return [p for p in (lib._dyld_get_image_name(i).decode() for i in range(lib._dyld_image_count())) if p.endswith("/" + name)]
 
 
 def patch_runtime():
@@ -69,14 +89,41 @@ class DecSplit:
         ch = man["chunks"]
         assert len(ch) == len(mb.chunks) and all("dec8" in c for c in ch), "not a dec8 server manifest"
         self.nf = len(ch) // 2
-        g = C_.CDLL(str(ENG / "libdec_gpu.dylib"))
+        g = C_.CDLL(str(ENG / DEC_DYLIB))
         g.dec_init.restype, g.dec_init.argtypes = C_.c_int32, [C_.c_char_p]
         g.dec_wrap.restype, g.dec_wrap.argtypes = C_.c_int32, [C_.c_void_p, C_.c_size_t]
         g.dec_seg.restype, g.dec_seg.argtypes = C_.c_int32, [C_.c_int32] * 7
         g.dec_clear.restype, g.dec_clear.argtypes = C_.c_int32, [C_.c_int32]
         g.dec_run.restype, g.dec_run.argtypes = C_.c_double, [C_.c_int32, C_.POINTER(C_.c_int32), C_.POINTER(C_.c_uint32), C_.c_int32]
-        assert g.dec_init(str(ENG / "dec_kernels.metal").encode()) > 0, "dec_init failed"
+        assert g.dec_init(str(ENG / DEC_METAL).encode()) > 0, "dec_init failed"
         self.g = g
+        self.ka, self._ka_m = hasattr(g, "dec_ka_set_hold"), 0
+        if self.ka:
+            g.dec_ka_set_hold.restype, g.dec_ka_set_hold.argtypes = C_.c_double, [C_.c_double]
+            g.dec_ka_get_hold.restype, g.dec_ka_get_hold.argtypes = C_.c_double, []
+            g.dec_ka_info.restype, g.dec_ka_info.argtypes = None, [C_.POINTER(C_.c_double)]
+        mp = _mapped(DEC_DYLIB)
+        km = ENG / DEC_METAL
+        if hasattr(g, "dec_variant"):
+            g.dec_variant.restype, g.dec_variant.argtypes = C_.c_int32, [C_.c_char_p, C_.c_size_t]
+            self._vb = C_.create_string_buffer(256); g.dec_variant(self._vb, 256); variant = self._vb.value.decode()
+        else:
+            self._vb, variant = None, f"attn={os.environ.get('DEC_ATTN', 'dec_attn_r4')} (served dylib: no dec_variant)"
+        dsha = hashlib.sha256(Path(mp[0]).read_bytes()).hexdigest() if mp else "-"
+        msha = hashlib.sha256(km.read_bytes()).hexdigest()
+        log(f"dec8: BANNER decode GPU dylib {mp[0] if mp else 'NOT MAPPED'} sha256 {dsha} | kernels {km} sha256 {msha} | "
+            f"{variant} | V8_DEC8={MODE}")
+        att = variant.split()[0].split("=", 1)[1]
+        for k, have in (("EXPECT_DEC_ATTN", att), ("EXPECT_DEC_METAL", msha), ("EXPECT_DEC_DYLIB", dsha)):
+            want = os.environ.get(k)
+            if want and not (have == want if k == "EXPECT_DEC_ATTN" else have.startswith(want)):
+                raise SystemExit(f"dec8: ABORT {k}={want} but loaded {have}")
+        self._lg, self._last_p0 = None, None
+        log(f"dec8: decode GPU engine {mp[0] if mp else 'NOT MAPPED: ' + DEC_DYLIB} sha256 "
+            f"{hashlib.sha256(Path(mp[0]).read_bytes()).hexdigest()[:16] if mp else '-'}, kernels {km.name} "
+            f"{hashlib.sha256(km.read_bytes()).hexdigest()[:16]}; keep-alive "
+            f"{(f'hold {g.dec_ka_get_hold():g} ms (DEC_KA_HOLD_MS)' if g.dec_ka_get_hold() > 0 else 'off (DEC_KA_HOLD_MS 0)') if self.ka else 'not in this dylib'}"
+            f", switch {KA_CTL}")
         d = mb.inp
         self.files = []
         for j in range(self.nf):
@@ -186,20 +233,56 @@ class DecSplit:
             if mb._last != "dec8":
                 return orig_acc(k)
             assert 0 <= k <= mb._n
+            if self._lg is not None:   # research: DEC_LOGITS_DIR
+                p0_, ids_, lg_ = self._lg; self._lg = None
+                fn = Path(LOGITS_DIR) / f"step_{p0_:07d}.npz"
+                if not fn.exists():
+                    np.savez(fn, p0=p0_, ids=np.array(ids_, np.int64), k=k, logits=np.asarray(lg_[:max(k, 1)], np.float16))
             mb.pending, mb.pos = k, mb.pos + k      # the GPU wrote the block's K / V rows during the step
             mb.hi = max(mb.hi, mb.pos)
         mb.call, mb._features, mb.accept = call, features, accept
         return self
 
+    def _ka_switch(self):
+        try:
+            m = os.stat(KA_CTL).st_mtime_ns
+        except OSError:
+            m = None
+        if m == self._ka_m:
+            return
+        self._ka_m = m
+        off = False
+        if m is not None:
+            try:
+                off = Path(KA_CTL).read_text().strip().lower() == "off"
+            except OSError:
+                pass
+        want = 0.0 if off else KA_HOLD
+        if want != self.g.dec_ka_get_hold():
+            self.g.dec_ka_set_hold(want)
+            self.log(f"dec8: keep-alive {'off' if want <= 0 else f'on, hold {want:g} ms'} ({KA_CTL})")
+
+    def ka_info(self):
+        """[command buffers, GPU busy s, s held] since load, and the current hold (ms); None without the keep-alive."""
+        if not self.ka:
+            return None
+        o = (C_.c_double * 3)(); self.g.dec_ka_info(o)
+        return list(o) + [self.g.dec_ka_get_hold()]
+
     def call(self, ids, logits=True):
         mb, g = self.mb, self.g
         T, n, p0 = mb.T, len(ids), mb.pos
         t0 = time.perf_counter()
+        if self.ka:
+            self._ka_switch()
         d = mb.inp
         xw = d["x"][1]
         xw[:] = 0
         xw[0, :, 0, :n] = mb.emb[ids].T
         mb._common(d, p0, n, T)
+        if self._vb is not None and not (self._last_p0 is not None and self._last_p0 <= p0 <= self._last_p0 + 8):
+            self.log(f"dec8: variant at p0 {p0}: {self.variant()}")   # research: the e4m3 copy's counters so far
+        self._last_p0 = p0
         self._sync_kv()
         plans, head = self._plan(mb.par)
         gpu = 0.0
@@ -221,7 +304,15 @@ class DecSplit:
         mb._n, mb._prefill = n, False
         s = self.stats
         s["steps"] += 1; s["gpu_ms"] += gpu; s["wall_ms"] += 1e3 * (time.perf_counter() - t0)
-        return np.array(mb.logits[:n]) if logits else None
+        out = np.array(mb.logits[:n]) if logits else None
+        if LOGITS_DIR and out is not None:
+            Path(LOGITS_DIR).mkdir(parents=True, exist_ok=True); self._lg = (p0, list(ids), out)
+        return out
+
+    def variant(self):
+        if self._vb is None:
+            return None
+        self.g.dec_variant(self._vb, 256); return self._vb.value.decode()
 
     def features(self, n):
         taps = {}

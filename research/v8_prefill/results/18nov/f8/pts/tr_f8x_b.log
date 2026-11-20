@@ -1,0 +1,36 @@
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8
+KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[ANE compile] all 17 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+v8: GPU engine libgpu_v8_f8.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+runtime + V8 engine loaded in 1s
+BANNER expect F8=x | loaded F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | kernels=/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/kernels.metal+kernels_fold.metal+kernels_f8.metal (170846 chars) | kernels_ok=true | keep-alive: off (libdec_gpu* not loaded) | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8.dylib sha256 50198bdf4f8b6b8b | metal (source, compiled at load; no metallib) kernels.metal:421b61512afa8ead kernels_fold.metal:29e20a68227a840b kernels_f8.metal:811abdd696325eea | MATCH
+v8: 16 ANE KV segments registered (ctx 8192)
+run 0: 4096 tok in 5.80s (706 tok/s), 4096 events
+[ctx] 8192 -> 32768 at pos 0: segments bound, no KV rows copied (87 ms)
+v8: 48 ANE KV segments registered (ctx 32768)
+run 1: 16384 tok in 25.19s (650 tok/s), 16384 events
+[ctx] 32768 -> 8192 at pos 0: segments bound, no KV rows copied (64 ms)
+[ctx] 8192 -> 65536 at pos 0: segments bound, no KV rows copied (107 ms)
+v8: 64 ANE KV segments registered (ctx 65536)
+run 2: 49152 tok in 96.39s (510 tok/s), 49152 events

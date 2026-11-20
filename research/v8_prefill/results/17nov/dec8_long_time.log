@@ -1,0 +1,31 @@
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8
+KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[ANE compile] all 17 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+loaded chunk_L00-07.aimodel (26 entries, 0s, bridge)
+loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+loaded chunk_L08-15.aimodel (26 entries, 0s, bridge)
+loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+loaded chunk_L16-23.aimodel (26 entries, 0s, bridge)
+loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+loaded chunk_L24-31.aimodel (26 entries, 0s, bridge)
+loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+loaded chunk_L32-39.aimodel (26 entries, 0s, bridge)
+loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+loaded chunk_L40-47.aimodel (26 entries, 0s, bridge)
+loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+loaded chunk_L48-55.aimodel (26 entries, 0s, bridge)
+loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+loaded chunk_L56-63.aimodel (26 entries, 0s, bridge)
+dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode auto, 64K entry up to 0 keys
+P  95000: ANE verify (96K entry) 133.8 ms | split, the runtime's own segments 130.2 ms (-2.7%)
+P  95000: split step 130.5 ms (-2.5% vs the ANE verify at 95K)
+P 100000: split step 131.4 ms (-1.8% vs the ANE verify at 95K)
+P 110000: split step 133.9 ms (+0.0% vs the ANE verify at 95K)
+P 120000: split step 136.0 ms (+1.6% vs the ANE verify at 95K)
+P 131064: split step 139.0 ms (+3.8% vs the ANE verify at 95K)
+GPU attention per step (mean over the long runs): 31.8 ms
