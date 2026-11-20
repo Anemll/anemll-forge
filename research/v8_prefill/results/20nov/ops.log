@@ -54,3 +54,22 @@
 08:16 B8 scratch ANE adapter build deleted (Core AI entries 3.4 GB via coreai_cache_delete.py --delete, then 3.4 GB of files); LUT6 tensors kept at jetspec_pp/adapter_lut6 (4.2 GB)
 08:34 arm final_served: start v8_server_dec8_qk.sh ()
 08:35 served forge restored on 8765 (v8_server_dec8_qk.sh, pid 62989); smoke replies identical to chain_v1
+08:48 C1 scratch build: one adapter block, full 8K-96K + split parts (tree20/jsp_parts)
+08:51 C2: Splash 1.7.0 GPU-only (--disable-ane, port 8011, 16K) for the ANE-draft / GPU-verify overlap test
+08:56 C2 done; Splash (8011) stopped
+08:57 C3 replay skip all7 (J1-R1)
+09:22 C3 skip-all7 J1-R1 stopped after 5 gsm8k traces (tau 1.10-1.16: collapse); milder skips next
+09:22 C3 replay skip s43 (J1-R1, gsm8k 0-7)
+09:35 C3 replay skip s32s43 (J1-R1, gsm8k 0-7)
+09:42 C3 skip s32s43 stopped (s43 alone already -35%); C4 calibration capture on gsm8k 8-15 (J3-R3, bf16)
+10:08 C4 calibration captured (84 Linears x 4096 rows, 4.5 GB, gsm8k 8-15); GPTQ on CPU + LUT4 replays (lut4t, lut4h) on GPU
+10:08 C4 replay lut4t (--quant adapter:lut4t, LUT dir -)
+10:39 C4 replay lut4h (--quant adapter:lut4rf, LUT dir /Volumes/SSD4TB/anemll-forge-research/jetspec_pp/adapter_lut4h)
+10:39 C4 GPTQ done (84 tensors, calib output err mean 0.71%); lut4hg replay queued after lut4h
+11:02 C4 replay lut4hg (--quant adapter:lut4rf, LUT dir /Volumes/SSD4TB/anemll-forge-research/jetspec_pp/adapter_lut4hg)
+11:25 C4 ANE LUT4 adapter latency build (adapter_lut4hg, in-graph Hadamards, 3 x 4 blocks, 8K; scratch tree20/jsp_adapter_lut4)
+11:33 C1 / C4 scratch ANE builds deleted (Core AI entries, files); kept: jetspec_pp/adapter_lut4h, adapter_lut4hg, calib_inputs (4.5 GB)
+11:35 forge 8765 found down: pid 62989 exited 09:02:55, 6 s into a 5,939-token Pi request (thinking medium), while the C3 replay held 17.6 GB of GPU memory; stdout was /dev/null, no kernel jetsam kill logged; forge had stayed up through C1-C3 (my error: one model at a time)
+11:35 arm final_served2: start v8_server_dec8_qk.sh ()
+11:37 forge 8765 restored (v8_server_dec8_qk.sh, pid 50952); smoke final_served2 identical to final_served
+11:37 forge 8765 restored (v8_server_dec8_qk.sh, pid 50952); smoke final_served2 identical to final_served

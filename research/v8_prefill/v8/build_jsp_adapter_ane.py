@@ -76,6 +76,65 @@ class Stack(nn.Module):
         return (x, *outs)
 
 
+class PartA(nn.Module):
+    """split form, ANE part A of one block (16 rows): rms -> q (with gate) / k / v projections -> q / k norm -> RoPE;
+    outputs q, g (24, T, 256), kt, vt (4, T, 256): what the GPU decode attention reads (dec_kernels.metal dec_prep)"""
+
+    def __init__(self, layer, T=16):
+        super().__init__()
+        self.layer, self.T = layer, T
+
+    def example(self):
+        f = torch.float16
+        return (torch.randn(1, B.hid, 1, self.T, dtype=f) * 0.02, torch.ones(self.T, B.rot, dtype=f), torch.zeros(self.T, B.rot, dtype=f))
+
+    def forward(self, x, cos, sin):
+        T, nh, nkv, hd, rot = self.T, B.nh, B.nkv, B.hd, B.rot
+        a = self.layer.mix
+        h = B.rms_hidden(x, self.layer.ln1)
+        q_o, k_o, v_o = a.project(h)
+
+        def tmajor(t_, c):
+            return t_.reshape(c, T).transpose(0, 1)
+        qg = tmajor(q_o, 2 * nh * hd).reshape(T, nh, 2 * hd)
+        qh, gate = B.rms_last(qg[:, :, :hd], a.qn), qg[:, :, hd:]
+        kh = B.rms_last(tmajor(k_o, nkv * hd).reshape(T, nkv, hd), a.kn)
+        vh = tmajor(v_o, nkv * hd).reshape(T, nkv, hd)
+        c3, s3 = cos.reshape(T, 1, rot), sin.reshape(T, 1, rot)
+
+        def rope(t_):
+            r, rest_ = t_[..., :rot], t_[..., rot:]
+            return torch.cat([r * c3 + torch.cat([-r[..., rot // 2:], r[..., :rot // 2]], -1) * s3, rest_], -1)
+        return rope(qh).permute(1, 0, 2), gate.permute(1, 0, 2), rope(kh).permute(1, 0, 2), vh.permute(1, 0, 2)
+
+
+class PartB(nn.Module):
+    """split form, ANE part B of one block: o projection of the GPU's gated attention output, + residual, then the MLP"""
+
+    def __init__(self, layer, T=16):
+        super().__init__()
+        self.layer, self.T = layer, T
+
+    def example(self):
+        f = torch.float16
+        return (torch.randn(1, B.nh * B.hd, 1, self.T, dtype=f) * 0.3, torch.randn(1, B.hid, 1, self.T, dtype=f) * 0.3)
+
+    def forward(self, o, x):
+        return self.layer.mlp(x + self.layer.mix.o(o))
+
+
+class MlpOnly(nn.Module):
+    def __init__(self, layer, T=16):
+        super().__init__()
+        self.layer, self.T = layer, T
+
+    def example(self):
+        return (torch.randn(1, B.hid, 1, self.T, dtype=torch.float16) * 0.3,)
+
+    def forward(self, x):
+        return self.layer.mlp(x)
+
+
 def main():
     lut_dir, out, first = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
     count = int(sys.argv[4]) if len(sys.argv) > 4 else 4
@@ -91,8 +150,15 @@ def main():
     for k, name in enumerate(names):
         i = ATT_IDX[first + k]
         W = block_W(lut_dir, name, i)
+        rot = os.environ.get("JSP_ROT") == "1"   # C4: the rotated forms' activation Hadamards in the graph (timing form)
+        if rot:
+            W[f"{i}/mix.rotation"] = np.array([5000 + i, 6000 + i], np.int64)
+            W[f"{i}/mlp.rotation"] = np.array([7000 + i, 8000 + i], np.int64)
         m = B.LayerW(W, i).eval().to(torch.float16)
-        assert m.kind == "full_attention" and m.rin is None and m.rmid is None and m.mix.rmix is None, (name, i)
+        if rot:
+            assert m.rin is not None and m.rmid is not None and m.mix.rmix is not None and m.mix.rout is not None, (name, i)
+        else:
+            assert m.kind == "full_attention" and m.rin is None and m.rmid is None and m.mix.rmix is None, (name, i)
         layers.append(m)
         del W
         gc.collect()
@@ -100,7 +166,13 @@ def main():
     for c in ctxs:
         e = Stack(layers, c, T)
         entries.append((f"blk16_{c // 1024}k", e, e.input_names(), e.output_names()))
-    fname = f"jsp_adapter_b{first:02d}-{first + count - 1:02d}.aimodel"
+    if os.environ.get("JSP_PARTS") == "1":   # C1 (split): one block's ANE parts
+        assert count == 1
+        L0 = layers[0]
+        entries += [("pa16", PartA(L0, T).eval(), ["x", "cos", "sin"], ["q", "g", "kt", "vt"]),
+                    ("pb16", PartB(L0, T).eval(), ["o", "x"], ["y"]),
+                    ("mlp16", MlpOnly(L0, T).eval(), ["x"], ["y"])]
+    fname = f"jsp_adapter_b{first:02d}-{first + count - 1:02d}{'_parts' if os.environ.get('JSP_PARTS') == '1' else ''}{'_rot' if os.environ.get('JSP_ROT') == '1' else ''}.aimodel"
     mb = B.save_program(entries, out / fname)
     mp = out / "manifest.json"
     man = json.loads(mp.read_text()) if mp.exists() else {"version": "jsp_adapter_ane", "kind": "scratch", "chunks": [],

@@ -35,7 +35,7 @@ def sha(p):
 
 def fill(fn, name, T, P, ctx_rows, anc=None, ctap=None, rng=None):
     b = fn.buffer("input", name); a = b.np
-    if name == "x":
+    if name in ("x", "o"):
         a[:] = (rng.standard_normal(a.shape) * 0.02).astype(a.dtype)
     elif name == "cos":
         a[:] = 1
@@ -122,7 +122,7 @@ for ch in man["chunks"]:
         ms = []
         for _ in range(30):
             t1 = time.perf_counter(); plan.run(); ms.append(1e3 * (time.perf_counter() - t1))
-        Y[e] = np.array(outs["y" if "y" in outs else "logits"].np, np.float32)
+        Y[e] = np.array(outs["y" if "y" in outs else "logits" if "logits" in outs else next(iter(outs))].np, np.float32)
         assert np.isfinite(Y[e]).all(), e
         r = {"entry": e, "rows": T, "P": P, "ms_median": float(np.median(ms)), "ms_min": float(np.min(ms))}
         if e.startswith("tree") or e.endswith(("_tc", "_tcT", "_tcTb")):   # a real tree mask too (topological order), same cost expected

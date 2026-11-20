@@ -52,7 +52,37 @@ Plan: `PLAN.md` (Anemll, 19 Nov 22:32). Status line: `/tmp/m6_yolo_status.txt`. 
   - **What would make it pay:** an adapter 2-3x cheaper per pass, or drafting that overlaps the verify.
 - **Memory:** DFlash2 measured 0.84 GB wired (+0.25 GB selector file pages); the LUT6 adapter alone 3.7 GB wired.
 
+**Batch C, Jet Flash estimates (08:40-11:45; sections C1-C5):**
+- **C1, hybrid split** (adapter attention on the GPU's `dec_attn_r4`, projections and MLPs on the ANE at LUT6, 16
+  rows): one 12-block adapter pass sums to 30.7-32.4 ms at 8K (all on the ANE: 27.2 measured), 35.6-42.1 at 32K
+  (44.8), 41.9-54.7 at 64K (64.7), 48.4-67.8 at 96K (85.8). The handoffs are UNMEASURED. It pays from 32K up only.
+- **C2, overlap** (two processes: Splash 1.7.0 GPU-only 16-row verify + an ANE LUT6 adapter-pass loop): Splash
+  decode 58.7 -> 38.2 tok/s (-35%), ANE pass 29.5 -> 45.0 ms (+53%). They contend for DRAM. Best case, J0-R0 hidden
+  under the slowed verify: about 35 tok/s vs DFlash2 56.5 (gsm8k, 8K).
+- **C3, a thinner adapter: no.** Dropping one block costs -35% tok/round (gsm8k J1-R1 8.54 -> 5.55); dropping the 7
+  extra layers collapses it (1.1). The MLPs are not the target layer + a low-rank delta: |delta| / |W| 0.86-0.97,
+  90% of the delta's energy needs rank 2,494-3,615 of 5,120.
+- **C4, LUT4 adapter with Hadamard + GPTQ: lossless for acceptance.** J3-R3 tok/round 10.17 / 13.55 / 10.45
+  (gsm8k / humaneval / mbpp) vs bf16 10.23 / 13.19 / 10.55 (-0.6 / +2.7 / -1.0%), against -13 / -10 / -22% for plain
+  per-tensor LUT4. Calibrated on held-out gsm8k traces 8-15. On the ANE: 22.1 ms per adapter pass (LUT6 27.2,
+  -19%), 3 x 780 MB packages (LUT6 3.35 GB); resident size UNMEASURED.
+- **C5, Jet Flash projection with all of it** (adapter LUT4 measured, head LUT6 and decoder projected, 16-row
+  verify measured ratio, serial ANE): still 12-38% below the served DFlash2 chain (best: humaneval J0-R0 59.9 vs
+  67.8 tok/s). The verify is 72-80% of a cheap round.
+- **Saved queue (item 5):** nothing left to run. WL3A8 temp build, items 9 / 11 / 12 / 13 and the QKE=tg deploy were
+  done on 19 Nov (19 Nov README); item 10 (hybrid GPU + ANE drafter split) is covered by C1.
+- **Caveat:** forge stayed loaded, idle, on 8765 during C1, C2 and the first C3 replay. The ANE and Splash timings
+  ran beside an idle resident forge. At 09:02:49 a Pi request (5,939 tokens, thinking medium) reached it while the C3
+  replay held 17.6 GB of GPU memory, and forge exited 6 s into the prefill (no kernel jetsam kill logged; its stdout
+  was /dev/null, so the cause is UNKNOWN). Restored at 11:37, see below.
+
 **Served state at the end** (08:3x, after the JetSpec++ work as Anemll asked):
+- **Restored again at 11:37** (pid 50952, `pipe/v8_server_dec8_qk.sh`), after the 09:02:55 exit above. Smoke
+  `bench/final_served2`: banner matched (qk=attn_qk8isk_tg, dec8=libdec_gpu_clk.dylib), and humaneval 1 / mt-bench 2
+  replies byte-identical to 08:34's (sha 1681b92d273f64ad / 3b060108f4af10b0), 71.2 / 22.8 tok/s.
+- **Kept on the SSD from batch C:** `jetspec_pp/adapter_lut4h` and `adapter_lut4hg` (LUT4 tensors), `calib_inputs`
+  (4.5 GB of captured adapter inputs; delete when no more GPTQ runs are planned), `calib_gsm8k_8_15` (symlinks). The C1
+  and C4 scratch ANE builds are deleted (Core AI entries first).
 - **Forge:** on 8765 in the served configuration (`pipe/v8_server_dec8_qk.sh`, build v8_dec8, DFlash2 chain). Smoke
   check: banner matched, and humaneval 1 / mt-bench 2 replies byte-identical to the night's chain baseline.
 - **Tree verify:** stays opt-in. `PORT=8765 pipe/v8_server_tree.sh` (build v8_dec8t, 19 Nov conv form), or with
@@ -578,3 +608,148 @@ break even (it takes 98-109). Measured end-to-end tok/s: UNMEASURED (no served J
 head port, the adapter's real attention and its own 12-layer context KV cache, a 16-row chain verify entry, and the
 round driver in the server). What could change it: an adapter 2-3x cheaper per pass (it is 72% of the parameters;
 at 4 bits per-row LUT loses 7-17% acceptance, B7), or drafting that overlaps the ANE verify.
+
+## C. Jet Flash estimates (batch of 20 Nov ~08:40; forge down, Splash briefly up on 8011)
+
+### C1. Hybrid split of the JetSpec++ adapter: MLPs (and projections) on the ANE, attention on the GPU (`c1/`)
+
+**GPU attention core** (the served decode kernel `dec_attn_r4`: prep + attention + combine per layer;
+`pipe/unit/dec_gpu_steady.py`, libdec_gpu_clk.dylib 2b64e979, dec_kernels.metal 00f351b5, keep-alive on; the adapter's
+attention has the target's head layout, 24 q / 4 kv x 256, over an INT8 KV): 8 query rows, one layer, one call at a
+time:
+
+| KV keys | 8K | 32K | 64K | 96K |
+|---|---|---|---|---|
+| ms per layer, 8 rows | 0.141 | 0.546 | 1.071 | 1.613 (122-125 GB/s of K / V) |
+
+16 rows lie between 1x (the K / V read is shared, as in the 16-row kernel Splash runs) and 2x (two 8-row calls with
+this kernel; there is no 16-row variant of ours).
+
+**ANE pieces of one block** (`v8/build_jsp_adapter_ane.py` with `JSP_PARTS=1`: streams.0 at LUT6, 16 rows; scratch,
+deleted; forge.py compile 48 s; `tree_decomp_time.py`, median of 30, package sha d1497c4ad7221174):
+
+| entry | ms |
+|---|---|
+| whole block on the ANE, 8K / 32K / 64K / 96K of KV | 2.48 / 3.73 / 5.39 / 7.15 |
+| part A: rms + q (gate) / k / v projections + q / k norm + RoPE | 0.70 |
+| part B: o projection + residual + MLP | 1.72 |
+| MLP alone | 1.57 |
+
+So the ANE's attention core per block costs about 0.06 / 1.31 / 2.97 / 4.73 ms at 8K / 32K / 64K / 96K (block minus
+A minus B), against the GPU's 0.14-0.28 / 0.55-1.09 / 1.07-2.14 / 1.61-3.23.
+
+**12 blocks (one adapter pass), sum of measured pieces; the ANE <-> GPU handoffs (12 GPU calls + 13 ANE calls if
+B(i) + A(i+1) are fused as in the dec8 split) are not included, UNMEASURED:**
+
+| KV keys | all on the ANE (12 single-block calls) | split: ANE A + B, GPU attention | change |
+|---|---|---|---|
+| 8K | 29.8 ms (27.2 measured with 4-block packages) | 30.7-32.4 | +3 to +9% |
+| 32K | 44.8 | 35.6-42.1 | -6 to -21% |
+| 64K | 64.7 | 41.9-54.7 | -15 to -35% |
+| 96K | 85.8 | 48.4-67.8 | -21 to -44% |
+
+The split pays from 32K up (where the adapter's 12 attention layers read the long context), not at 2K-8K, where the
+adapter is 97% weight traffic: MLPs 57%, projections the rest.
+
+### C2. Can the ANE draft overlap a GPU 16-row verify? (`c2/`, `pipe/unit/power/overlap_run.py`, `ane_pass_loop.py`)
+
+**Setup:** our target has no GPU verify engine. The GPU 16-row verify of a 27B model here is Splash 1.7.0's, run
+GPU-only (`--disable-ane`; git 61f6d516, binary sha 4c20b1d0, UD-IQ3_XXS rev 4ca72078, DFlash2 015e7956,
+`--verify-rows auto`, 16K). Its own logged step costs: 2 / 8 / 15 / 16 rows 95.1 / 111.8 / 112.5 / 112.8 ms. The ANE
+load is one adapter pass in a loop: 12 back-to-back calls of the LUT6 block (16 rows, 8K), each re-reading its 280 MB,
+3.35 GB per pass like the real 12 blocks. Two processes. Prompts: realistic_v1 2K humaneval 1, gsm8k 0, math500 0;
+256 tokens; 3 repeats each; greedy, thinking off.
+
+| | alone | both running at once | change |
+|---|---|---|---|
+| Splash decode, tok/s (median of 9) | 58.7 | 38.2 | -35% |
+| ANE adapter pass | 29.48 ms (1,016 passes) | 45.0 ms (median per request, 142-169 passes each) | +53% |
+
+**They contend for DRAM** (both are bandwidth-bound): overlapping the two adds throughput (about 140 GB/s together)
+but slows each. **Projection vs DFlash2's 107.7 ms cycle (8K entry, gsm8k):**
+- GPU verify at Splash's 16-row step x 1.54 = 174 ms, with the J0-R0 draft (adapter 29.5 x 1.53 + head 14.8 x 1.53 =
+  68 ms) fully hidden under it: 6.12 tok / 174 ms = 35 tok/s.
+- J3-R3: the draft (about 203 ms serial, about 310 contended) does not fit under the verify: about 33 tok/s.
+- DFlash2 chain: 56.5 tok/s.
+
+Even with perfect overlap and no outcome misses, the contention leaves it 38-40% below the served chain. And our own
+verify is on the ANE, so drafting on the ANE cannot overlap it at all.
+
+### C3. A cheaper adapter (`c3/`)
+
+**MLP as target layer + low-rank delta: no** (`jetspec/mlp_delta_svd.py`, `c3/mlp_delta_svd.json`; CPU float32
+singular values, 722 s). Each block's gate / up / down minus the bf16 target layer its FFN was initialized from
+(`resolve_ffn_layer_map`: 5, 19, 33, 37, 40, 44, 47, 50, 53, 56, 59, 61), 36 matrices:
+- |delta| / |W| is 0.86-0.97 (median 0.92): training moved the MLPs almost as far as their own size from the init.
+- 90% of a delta's energy needs rank 2,494-3,615 of 5,120 (50%: 578-1,327).
+- W_target + the rank-r delta still misses W by 0.79-0.88 (r = 256), 0.57-0.72 (r = 1,024), 0.38-0.54 (r = 2,048),
+  relative to |W|. A rank that small would not save anything (rank 2,048 is 40% of the dense matrix).
+
+**Fewer adapter blocks (replay, bf16; skipped blocks pass their input through: `JSP_SKIP_BLOCKS` in jsp_replay.py):**
+
+| adapter | schedule | gsm8k tok/round | vs the whole adapter |
+|---|---|---|---|
+| all 12 blocks | J1-R1 | 8.54 | |
+| drop the last block (`extra_stream_layers.4.3`; 11 left) | J1-R1 | 5.55 | -35% |
+| drop all 7 extra layers (5 left) | J1-R1 | 1.10-1.16 on traces 1-4 (run stopped) | collapse |
+
+The adapter cannot be thinned without retraining: one block less already costs more acceptance than the 8% of the
+pass it saves. The depth schedules (B8: J0-R0 to J3-R3) are the cheap knob that exists. Runs `c3/c3_skip_*`; the
+two-block drop and the all-7 J0-R0 runs were stopped as uninformative.
+
+### C4. LUT4 on the adapter with a Hadamard rotation and GPTQ (`c4/`; head kept bf16)
+
+**Calibration:** the replay's capture hook (`JSP_CAPTURE` in jsp_replay.py) sampled the inputs of all 84 adapter
+Linears, up to 48 rows per call and 4,096 per Linear (344,064 rows, 4.5 GB), on held-out gsm8k traces 8-15 (J3-R3,
+bf16; that run itself 9.27 tok/round, lossless).
+
+**Forms** (all the ANE build's: one 16-entry palette per tensor + a per-output-channel scale):
+- `lut4t`: on the weights as they are, nearest entry.
+- `lut4h`: on Hadamard-rotated weights (x' = R x, R = blockdiag(H_1024) diag(sign), the target builder's rotation
+  form), nearest entry (`jetspec/quant_adapter_gptq.py ... rtn` -> `jetspec_pp/adapter_lut4h`). Weight error 10.0%.
+- `lut4hg`: the same rotation, then GPTQ (blocks of 128 columns, damp 1%, nearest palette entry x row scale, error
+  fed forward with the Cholesky of H'^-1) on the captured inputs (`... gptq` -> `jetspec_pp/adapter_lut4hg`). Weight
+  error 11.5% mean, output error on the calibration rows 0.71% mean (1.73% max); unit check on a correlated random
+  matrix: RTN 9.9% -> GPTQ 6.5% output error.
+
+The replay reads the rotated forms back as W = (lut[idx] x scale) R (spec `lut4rf`; the round trip is exact to 6e-6).
+
+**Acceptance** (replay, J3-R3, adapter at LUT4 in each form, head bf16, gsm8k / humaneval / mbpp 0-7, every trace
+lossless; `c4/c4_*_J3-R3`):
+
+| adapter weights | gsm8k | humaneval | mbpp |
+|---|---|---|---|
+| bf16 | 10.23 | 13.19 | 10.55 |
+| LUT4 per row, k-means (B7) | 9.05 (-11.5%) | 12.23 (-7.3%) | 8.72 (-17.4%) |
+| `lut4t`: LUT4 per tensor + row scale | 8.91 (-12.9%) | 11.83 (-10.3%) | 8.18 (-22.5%) |
+| `lut4h`: + Hadamard | 9.36 (-8.5%) | 12.47 (-5.4%) | 8.72 (-17.4%) |
+| **`lut4hg`: + Hadamard + GPTQ** | **10.17 (-0.6%)** | **13.55 (+2.7%)** | **10.45 (-1.0%)** |
+
+**With the Hadamard rotation and GPTQ, LUT4 on the adapter is lossless for acceptance**, on two sets it was not
+calibrated on (humaneval, mbpp) too. The rotation alone recovers about a third of the loss; GPTQ the rest.
+
+**LUT4 adapter on the ANE, measured** (`build_jsp_adapter_all.sh` with `LUT=adapter_lut4hg JSP_ROT=1 CTXS=8192`: the
+12 blocks with their 4 activation Hadamards each in the graph (q / k / v input, o input, MLP input, down input; the
+timing form: the graph's signs are not the quantizer's), 3 packages x 4 blocks, 780 MB each (0.53 byte per weight);
+compile 26 s; scratch, deleted; banner sha 651a9fe54918b551): 7.41 / 7.37 / 7.30 ms per package, **22.1 ms per
+adapter pass** at 16 rows / 8K, against LUT6's 27.2 (-19%; bytes -33%: the Hadamards and per-call work take the
+rest).
+
+## C5. Jet Flash estimate with everything measured so far (8K entry, serial ANE)
+
+Adapter at LUT4 GPTQ (22.1 ms measured), B16 head at LUT6 (14.8 ms, projected), decoder 7.1 ms (projected), 16-row
+chain verify 102.5 ms (measured ratio):
+
+| schedule | set | drafter ms / round | round ms | tok/round | Jet Flash tok/s | DFlash2 tok/s | vs DFlash2 |
+|---|---|---|---|---|---|---|---|
+| J0-R0 | gsm8k / humaneval / mbpp | 37 / 40 / 39 | 141 / 143 / 142 | 6.12 / 8.59 / 6.64 (bf16) | 43.5 / 59.9 / 46.6 | 56.5 / 67.8 / 54.7 | -23% / -12% / -15% |
+| J1-R1 | gsm8k / humaneval / mbpp | 87 / 97 / 93 | 191 / 201 / 196 | 8.54 / 11.94 / 8.72 (bf16) | 44.7 / 59.5 / 44.4 | | -21% / -12% / -19% |
+| J3-R3 | gsm8k / humaneval / mbpp | 181 / 196 / 203 | 284 / 300 / 306 | 10.17 / 13.55 / 10.45 (LUT4 GPTQ) | 35.8 / 45.2 / 34.1 | | -37% / -33% / -38% |
+
+**Still 12-38% below the served DFlash2 chain.** Where it stands:
+- The verify is 72-80% of the cheap schedules' round; JetSpec++'s extra tokens come only with extra drafter passes.
+- The split (C1) helps the adapter only from 32K up.
+- Overlap with a GPU verify (C2) loses more to DRAM contention than it hides.
+- The adapter cannot be thinned without retraining (C3).
+- To beat DFlash2 at J1-R1 on gsm8k, the drafting would need to fit in about 48 ms per round, against 87 now, and
+  no remaining knob found tonight closes that gap.

@@ -461,6 +461,26 @@ def fake_quant_spec(module, spec):
     (tensors, parameters)."""
     if spec == "8c":
         return fake_quant(module, 8, group=10 ** 9)
+    if spec.startswith("lut") and spec.endswith("rf"):  # 'lut4rf': rotated LUT files (quant_adapter_gptq.py): W = (lut[idx] s) R
+        d = Path(os.environ["JSP_LUT_DIR"]); n_t = n_p = 0
+        with torch.no_grad():
+            for name, m in module.named_modules():
+                if not isinstance(m, nn.Linear) or any(k in name for k in ("embed", "lm_head", "norm")):
+                    continue
+                z = np.load(d / f"{name}.weight.npz")
+                wr = torch.from_numpy(z["lut"].astype(np.float32)).reshape(-1)[torch.from_numpy(z["idx"].astype(np.int64))] \
+                    * torch.from_numpy(z["scale"].astype(np.float32))[:, None]
+                blk = int(z["block"]); sign = torch.from_numpy(z["sign"].astype(np.float32))
+                h = torch.ones(1, 1)
+                while h.shape[0] < blk:
+                    h = torch.cat([torch.cat([h, h], 1), torch.cat([h, -h], 1)], 0)
+                h = h / blk ** 0.5
+                o, i = wr.shape
+                w = (wr.reshape(o, i // blk, blk) @ h).reshape(o, i) * sign     # R^T w': undo the rotation
+                assert tuple(w.shape) == tuple(m.weight.shape), name
+                m.weight.copy_(w.to(device=m.weight.device, dtype=m.weight.dtype))
+                n_t += 1; n_p += m.weight.numel()
+        return n_t, n_p
     if spec.startswith("lut") and spec.endswith("f"):   # 'lut6f': the ANE build's own LUT files (JSP_LUT_DIR, quant_adapter_lut6.py)
         d = Path(os.environ["JSP_LUT_DIR"]); n_t = n_p = 0
         with torch.no_grad():
@@ -653,10 +673,34 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
         mod = {"adapter": drafter.driver.adapter, "head": drafter.driver.head}[what]
         t_q = time.time()
         qinfo[what] = (spec,) + fake_quant_spec(mod, spec)
-        kind = {"8c": "RTN per channel, 8 bits"}.get(spec, (f"LUT {spec[3:-1]} bits per tensor + channel scale (ANE form{', the ANE build files' if spec.endswith('f') else ''})" if spec.endswith(("t", "f"))
+        kind = {"8c": "RTN per channel, 8 bits"}.get(spec, (f"LUT {spec.rstrip('rft')[3:]} bits per tensor + channel scale (ANE form{', Hadamard-rotated files' if spec.endswith('rf') else ', the ANE build files' if spec.endswith('f') else ''})" if spec.endswith(("t", "f"))
                                                             else f"LUT {spec[3:]} bits per row (k-means)") if spec.startswith("lut") else f"RTN g128, {spec} bits")
         print(f"QUANT {what}: {qinfo[what][1]} Linear weights, {qinfo[what][2] / 1e9:.2f}B parameters, {kind}, in {time.time() - t_q:.0f}s", flush=True)
         mem(f"quantized {what}")
+    skip = [x for x in os.environ.get("JSP_SKIP_BLOCKS", "").split(",") if x]   # C3: adapter blocks as identity (u -> u)
+    for name in skip:
+        blk = drafter.driver.adapter.get_submodule(name)
+        if not getattr(blk, "_skipped", False):
+            blk.forward = (lambda **kw: kw["u"]); blk._skipped = True
+    if skip:
+        print(f"SKIP adapter blocks (identity): {skip}", flush=True)
+    cap_dir = os.environ.get("JSP_CAPTURE")   # C4: sampled inputs of every adapter Linear (GPTQ calibration)
+    if cap_dir and not getattr(drafter.driver.adapter, "_cap_hooks", None):
+        capd, per_call, cap_max = {}, int(os.environ.get("JSP_CAPTURE_PER_CALL", "48")), int(os.environ.get("JSP_CAPTURE_ROWS", "4096"))
+        gen = torch.Generator().manual_seed(0)
+
+        def hook(name):
+            def fn(mod, args):
+                x = args[0].detach().reshape(-1, args[0].shape[-1])
+                have = sum(t.shape[0] for t in capd.get(name, []))
+                if have >= cap_max:
+                    return
+                k = min(per_call, x.shape[0], cap_max - have)
+                sel = torch.randperm(x.shape[0], generator=gen)[:k].to(x.device)
+                capd.setdefault(name, []).append(x[sel].to("cpu", torch.float16))
+            return fn
+        hooks = [m.register_forward_pre_hook(hook(n)) for n, m in drafter.driver.adapter.named_modules() if isinstance(m, nn.Linear)]
+        drafter.driver.adapter._cap_hooks = (hooks, capd, Path(cap_dir))
     rows = OutcomeRows(drafter, llm.runner) if a.rows == "outcome" else None
     out = Path(a.out) if not multi else Path(a.out).with_name(Path(a.out).stem + f"_{dataset}.json")
     banner = dict(jetspec_src=str(SRC), jetspec_commit=os.popen(f"git -C {SRC} rev-parse HEAD").read().strip(),
@@ -664,7 +708,7 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
                   release=a.release, target_root=a.target_root, schedule=a.schedule, device=a.device,
                   dtype=str(dtype), config=config.__dict__, max_new=a.max_new, loaded_target_tensors=len(llm.model.loaded),
                   target_load_s=round(t_target, 1), drafter_build_s=round(t_build, 1), torch=torch.__version__,
-                  quant=a.quant or None, mps_allocated_gb=round(torch.mps.current_allocated_memory() / 1e9, 2)
+                  quant=a.quant or None, skip_blocks=os.environ.get("JSP_SKIP_BLOCKS") or None, mps_allocated_gb=round(torch.mps.current_allocated_memory() / 1e9, 2)
                   if torch.backends.mps.is_available() else None)
     print("BANNER " + json.dumps(banner), flush=True)
     dirs = sorted(d for d in glob.glob(f"{tdir}/*") if Path(d, "meta.json").exists())
@@ -701,6 +745,12 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
                    all_lossless=all(r["lossless_vs_trace"] for r in res))
     print("SUMMARY " + json.dumps(summary), flush=True)
     out.write_text(json.dumps(dict(banner=banner, summary=summary, results=res), indent=1))
+    ch = getattr(drafter.driver.adapter, "_cap_hooks", None)
+    if ch:
+        _, cap, d = ch; d.mkdir(parents=True, exist_ok=True)
+        for n, ts in cap.items():
+            np.save(d / f"{n}.npy", torch.cat(ts).numpy())
+        print(f"CAPTURE: {len(cap)} Linear inputs, {sum(sum(t.shape[0] for t in v) for v in cap.values())} rows -> {d}", flush=True)
 
 if __name__ == "__main__":
     main()
