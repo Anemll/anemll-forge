@@ -73,3 +73,16 @@
 11:35 arm final_served2: start v8_server_dec8_qk.sh ()
 11:37 forge 8765 restored (v8_server_dec8_qk.sh, pid 50952); smoke final_served2 identical to final_served
 11:37 forge 8765 restored (v8_server_dec8_qk.sh, pid 50952); smoke final_served2 identical to final_served
+11:50 D1 repro: 6K Pi-shaped prefill on forge alone (pid 50952), swap / vm_stat sampled every 0.5 s
+11:53 D1: forge alone, cold Pi-shaped prefills 7,009 / 7,009 / 6,213 tok: 675 tok/s, swap flat 846.75 MB, wired peak 19.0 GB, forge phys_footprint 5.06 GB; 09:02 exit = forge's swap watchdog (+1536 MB over its 08:34 baseline) during the C3 replay: contention only; jsp_replay.py now refuses while 8765 serves
+11:54 forge 8765 stopped for D2-D3 quiet-machine measurements (idle since 11:52)
+11:54 D2 build: LUT4 hg adapter on the ANE, 3x4 blocks (8K) and 4x3 blocks (8K+32K), scratch tree20/jsp_lut4_b4, jsp_lut4_b3
+12:03 D2 b4 (3 x 4 blocks, 8K, quiet): 7.28 + 7.33 + 7.33 = 21.9 ms per pass; wired +0.83 / 0.86 / 0.86 GB per package after a run (file pages 0.78 GB each move to wired)
+12:10 D2 b3 (4 x 3 blocks, quiet): 8K 22.2 ms, 32K 36.9 ms per pass; wired +0.89 GB per package after a run (both entries bound). D3 GPU LUT4 pass timing (gpu_lut4_pass.py, torch MPS compile_shader)
+12:18 D3 GPU LUT4 adapter (16 rows): best kernel v6_4_64 38.2 ms no-attention pass (59 GB/s; v1-v7 tried, 37.6-218 ms); raw read 150-155 GB/s, torch fp16 M=16 115-118 GB/s, peak 9.3 TFMA/s. D2 J0-R0 LUT4hg acceptance replay
+12:19 D2 replay lut4hg (--quant adapter:lut4rf, LUT dir /Volumes/SSD4TB/anemll-forge-research/jetspec_pp/adapter_lut4hg)
+12:33 D2 J0-R0 LUT4hg replay: 6.07 / 8.53 / 6.59 tok/round (bf16 6.12 / 8.59 / 6.64), lossless. D4 probe build: TREE_FORM=corrx package 0, 8K tree entries, scratch tree20/dec8tx
+12:42 D4: corrx full package 0 exported (59 entries, 1,187 MB) but failed the ANE compile (MLIR MPS to ANEC conversion failed); scratch deleted; per-form probe (layers 0-3, 5 forms)
+13:02 D4 probe 1: corr / corrc (exact cum) on the ANE, 10/12 outputs identical, pend1/2 differ by 1 ulp in kh (36 / 57 elements) and u; the cum row is IDENTICAL (A8's attribution to the decay matmul was wrong): silu(conv + 0) rounds differently from the chain's silu(conv); corrd/corrx/corrx2 ran off the ANE (in-forward index_put); probe 2 with constants + row blend
+13:10 D4 probe 2 (all on the ANE): corrd0 / corrx0 / corrb / corrdb / corrxb all 12/12 bit-identical under chain masks; cost per group corrx0 +4.5% (branched +4.0%), corrxb +5.3%, corr(A8) +11.2%: the one-hot gather ctap@rows is not exact on the ANE, D = ctap - shift is. Full build TREE_FORM=corrx0 -> v8_dec8tx (GW w_dec8tx)
+13:10 D2 scratch builds jsp_lut4_b4 / b3 deleted (Core AI entries, files)

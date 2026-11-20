@@ -643,6 +643,11 @@ def main():
     ap.add_argument("--rows", choices=["outcome", "all"], default="outcome",
                     help="outcome: draft only keyed rows that can be the true outcome (same result, see OutcomeRows)")
     a = ap.parse_args()
+    import socket   # D1 (20 Nov): the replay (~17.6 GB of GPU memory) beside a served forge (19 GB wired) swaps, and forge's
+    with socket.socket() as so_:   # swap watchdog then kills forge (09:02:55): refuse while 8765 serves, unless forced
+        so_.settimeout(0.5)
+        if so_.connect_ex(("127.0.0.1", 8765)) == 0 and os.environ.get("JSP_ALLOW_FORGE") != "1":
+            sys.exit("forge is serving on 8765: stop it first (one model at a time), or set JSP_ALLOW_FORGE=1")
     dtype = torch.bfloat16
     if a.device == "mps":
         patch_cpu_scoring()

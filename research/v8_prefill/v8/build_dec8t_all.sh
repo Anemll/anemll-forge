@@ -3,7 +3,7 @@
 # into v8_dec8t, exactly build_dec8_all.sh's flow: each package compiled (journal_compile.py -> forge.py compile, one
 # compile at a time) as soon as it is exported; then the V8 engine's GPU tables from the new HWX (pipe/w_dec8t, plus
 # prep_kv8.py's INT8 K / V tables -> manifest_best.json) and the server manifest (dec8_srv_manifest.py). Swap watchdog
-# on every process. TREE_FORM (ctap | gather) passes through.
+# on every process. TREE_FORM (ctap | gather | corr | corrx) passes through.
 #   [FIRST=0 LAST=7 OUT=...] build_dec8t_all.sh
 L=/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs; O=${OUT:-/Volumes/SSD4TB/anemll-forge-research/v8_dec8t}; W=${0:a:h}
 LT=${LTAG:-dec8t}   # log tag

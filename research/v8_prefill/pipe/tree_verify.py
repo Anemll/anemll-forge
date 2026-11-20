@@ -29,6 +29,7 @@ POLICY = os.environ.get("TREE_POLICY", "branched")
 TOPC = int(os.environ.get("TREE_TOPC", "4"))
 TAU = float(os.environ.get("TREE_TAU", "1.5"))
 LOGDIR = os.environ.get("TREE_LOG")
+CAP = int(os.environ.get("TREE_CAP", "7"))   # D4 control (TREE_POLICY=cap): the served chain, at most CAP drafts accepted per cycle
 N = 7   # nodes besides the root (8 verify rows)
 
 
@@ -124,7 +125,7 @@ class Tree:
         self.lam = 0.05       # running tok/ms (dink)
         self.req = self._req_stats()
         self.rec = [] if LOGDIR else None
-        self.log(f"tree: BANNER mode=tree8 policy={POLICY} topc={TOPC} tau={TAU} t8 contexts "
+        self.log(f"tree: BANNER mode=tree8 policy={POLICY}{f' cap={CAP}' if POLICY == 'cap' else ''} topc={TOPC} tau={TAU} t8 contexts "
                  f"{[c // 1024 for c in self.ctx_t8]}K | split tree {'on (tdva/tdvba + dec_set_tree)' if self.split_ok else 'OFF'}"
                  f" | build {mb.root}")
 
@@ -298,6 +299,8 @@ class Tree:
         use_tree = not chain_like
         if POLICY == "always":
             use_tree = True
+        elif POLICY == "cap":
+            use_tree = False
         elif POLICY == "dink" and use_tree:
             ctx = mb.ctx
             gain = float(prob[1:].sum() - sum(cprob))
@@ -354,7 +357,8 @@ class Tree:
         lg = mb.call([anchor] + drafts)
         t2 = eng.verify_end = time.perf_counter()
         k, nxt = 0, None
-        while k < 7:
+        kmax = CAP if POLICY == "cap" else 7   # cap: a different cycle split, the same greedy text if verify is split-invariant
+        while k < kmax:
             dk = drafts[k]
             top = S.argmax(lg[k])
             if top != dk:
@@ -366,7 +370,7 @@ class Tree:
             seen[dk] = 1.0
             k += 1
         if nxt is None:
-            nxt = S.argmax(lg[7])
+            nxt = S.argmax(lg[k])
         t3 = time.perf_counter()
         d.add_context(mb.features(k + 1), np.arange(p, p + k + 1), flush=False)
         mb.accept(k + 1)

@@ -753,3 +753,122 @@ chain verify 102.5 ms (measured ratio):
 - The adapter cannot be thinned without retraining (C3).
 - To beat DFlash2 at J1-R1 on gsm8k, the drafting would need to fit in about 48 ms per round, against 87 now, and
   no remaining knob found tonight closes that gap.
+
+## D. Next batch (20 Nov ~11:45; forge down for D2-D4 measurements, restored after)
+
+### D1. The 09:02 forge exit: forge's own swap watchdog, from memory contention (`d1/`)
+
+**Cause, from the logs:** `coreai_seg_logs/watchdog_v8_server.log`: `09:02:55 WATCHDOG: swap grew 1071 -> 3173 MB;
+killing pid 62989 and children`. The server launcher (`pipe/v8_server_dec8.sh`) arms `swap_watchdog.sh` on forge with
++1,536 MB over the system swap at start (08:34, 1,071 MB). The C3 replay (started 08:57, 17.6 GB of GPU memory) beside
+forge's 19 GB of wired memory pushed system swap to 3,173 MB (the replay's own watchdog log has the same peak), and
+the Pi request's prefill began at 09:02:49. The watchdog counts system swap, so the replay's pressure is charged to
+forge. Not a forge bug.
+
+**Reproduction on a quiet machine, forge alone** (`bench/d1/prefill_mem.py`: a Pi-shaped request: 4 tools, a long
+system prompt, reasoning_effort medium, temperature 1.0, top_p 0.95, cold prefix, max_tokens 768; swap and vm_stat
+every 0.5 s; banner checked qk=attn_qk8isk_tg, dec8=libdec_gpu_clk.dylib):
+
+| prompt tokens | prefill | swap start -> peak -> end | free memory min | forge RSS | wired peak |
+|---|---|---|---|---|---|
+| 7,009 (cold) | 10.4 s, 675 tok/s | 846.75 -> 846.75 -> 846.75 MB | 0.20 GB | 4.56 -> 4.69 GB | 19.03 GB |
+| 7,009 (cold, again) | 10.4 s, 676 tok/s | 846.75 -> 846.75 -> 846.75 MB | 0.13 GB | 4.69 -> 4.99 GB | 19.07 GB |
+| 6,213 (cold) | 9.2 s, 675 tok/s | 846.75 -> 846.75 -> 846.75 MB | 0.13 GB | 4.99 -> 5.22 GB | 19.05 GB |
+
+Forge's phys_footprint after these: 5.06 GB (of it 2.65 GB "neural", the ANE programs); inactive (reclaimable) pages
+stayed above 5.9 GB. **Contention only:** forge alone does not grow swap on 6-7K prefills. Forge (19 GB wired) plus a
+17.6 GB replay does not fit in 32 GB.
+
+**Fix (tooling, not forge):** `jetspec/jsp_replay.py` now refuses to start while 8765 serves ("forge is serving on 8765:
+stop it first (one model at a time), or set JSP_ALLOW_FORGE=1"). The ANE build drivers already refuse. Not changed:
+the server watchdog itself (system-wide swap against a baseline taken at start; a slow creep from other apps over a
+long session counts too. A per-process or re-baselined guard is possible; not done without asking).
+
+### D2. The LUT4 (Hadamard + GPTQ) adapter on the ANE, quiet machine (`d2/`)
+
+Builds `build_jsp_adapter_all.sh` with `LUT=adapter_lut4hg JSP_ROT=1` (the 4 activation Hadamards per block in the
+graph), forge down, nothing else running; 16 rows; scratch, deleted after:
+
+| build | 8K pass | 32K pass | packages | wired after a run, per package |
+|---|---|---|---|---|
+| 3 x 4 blocks, 8K entry (`d2/b4`) | 7.28 + 7.33 + 7.33 = **21.9 ms** | (not built: in B8 the 4-block 32K entry failed at compile, 4 blocks x 3 KV segments pass the ~51 bound-tensor limit) | 3 x 780 MB | +0.83 / 0.86 / 0.86 GB (2.55 GB) |
+| 4 x 3 blocks, 8K + 32K entries (`d2/b3`) | 5.55 + 5.53 + 5.56 + 5.55 = **22.2 ms** | 9.24 + 9.22 + 9.24 + 9.24 = **36.9 ms** | 4 x 585 MB | +0.89 GB each (3.57 GB; both entries' buffers bound) |
+
+LUT6, for comparison: 27.2 ms at 8K, 3.67 GB wired (B8); 44.8 ms at 32K (C1, single-block packages). The 11:32
+measurement (22.1 ms) stands.
+
+**J0-R0 acceptance with the LUT4 adapter** (replay, head bf16, lossless; `d2/d2_lut4hg_J0-R0_*`): 6.07 / 8.53 / 6.59
+tok/round on gsm8k / humaneval / mbpp, against bf16 6.12 / 8.59 / 6.64 (-0.9 / -0.7 / -0.7%). J3-R3: C4.
+
+**Jet Flash, serial ANE, measured LUT4 adapter and acceptance** (`jetspec/d2_project.py`; head 14.8 ms and decoder
+7.1 ms PROJECTED as in B8; 16-row verify = the served 8-row verify (chain_v1: 94.1 ms at 8K, 106.5 at 32K) x the
+measured 1.085 / 1.17; DFlash2 cycle 107.7 ms at 8K, 121 ms at 32K; acceptance from short-context traces at both
+entries, so tok/round at 32K of context is UNMEASURED; `d2/projection_ANE.md`):
+
+| entry | schedule | gsm8k | humaneval | mbpp |
+|---|---|---|---|---|
+| 8K | J0-R0 | 43.1 vs 56.5 (-24%) | 59.6 vs 67.8 (-12%) | 46.4 vs 54.7 (-15%) |
+| 8K | J3-R3 | 35.7 vs 56.5 (-37%) | 45.2 vs 67.8 (-33%) | 34.1 vs 54.7 (-38%) |
+| 32K | J0-R0 | 34.1 vs 50.2 (-32%) | 47.0 vs 60.3 (-22%) | 36.7 vs 48.7 (-25%) |
+| 32K | J3-R3 | 27.5 vs 50.2 (-45%) | 34.7 vs 60.3 (-43%) | 26.2 vs 48.7 (-46%) |
+
+### D3. The same LUT4 adapter on the GPU (`d3/`, `jetspec/gpu_lut4_pass.py`)
+
+Metal kernels through `torch.mps.compile_shader` on the same LUT4 tensors (packed 2 indices per byte, the per-tensor
+16-entry palette, per-row scale; 2.233 GB resident): a 16-row LUT4 matmul, the block-1024 Hadamard of the rotated
+inputs, RMSNorm, SwiGLU. Checked against float32 torch on all 7 shapes: rel 2.1e-4 (fp16 output rounding); Hadamard
+rel 2.1e-4 vs the quantizer's rotation. One pass = 12 blocks without the attention core.
+
+| matmul kernel | 12-block pass, no attention | weights read |
+|---|---|---|
+| v1: scalar dot products, x tile in threadgroup memory | 69.6 ms | 32 GB/s |
+| v2: dequantized tile in threadgroup memory + 8x8 simdgroup matrices (26 KB per threadgroup) | 71.3 ms | 31 GB/s |
+| v3: v2 with the palette by simd_shuffle | 79.3 ms | 28 GB/s |
+| v4: indices straight into matrix fragments (registers spill) | 128-218 ms | 10-18 GB/s |
+| v5 / **v6 (4 simdgroups x 64-column chunks, 10 KB: about 3 threadgroups per core)** | 38.6 / **38.2 ms** | **58-59 GB/s** |
+| v7: v6 with W as the untransposed operand | 39.3-48.1 ms (sweep, matmuls only) | 46-57 GB/s |
+
+Reference points on this M6 (12-core GPU), same harness: plain read of 2.23 GB 14.4-14.9 ms (150-155 GB/s); torch
+fp16 matmul at 16 rows 115-118 GB/s of weights; fp16 matmul peak 9.3 TFMA/s (M = 256-2048). So the 16-row LUT4 work
+(71.5 G multiply-adds) is not compute-bound; the best kernel reaches 38% of the read bandwidth. Occupancy was the
+lever (v2 -> v5: same work, 1.8x).
+
+**GPU adapter pass** = 38.2 ms measured + the adapter's 12 attention layers on the GPU (C1's measured `dec_attn_r4`,
+8 rows: 0.141 ms per layer at 8K, 0.546 at 32K; x1 to x2 for 16 rows) = **39.9-41.6 ms at 8K, 44.8-51.3 ms at 32K**
+(q / k norm, RoPE and the gate: UNMEASURED, small). The ANE does it in 22.2 / 36.9 ms.
+
+**Jet Flash with the GPU adapter** (serial; head and decoder as above; the lower attention bound;
+`d3/projection_GPU.md`): 8K J0-R0 38.3 / 52.5 / 41.1 tok/s (-32 / -22 / -25% vs DFlash2), J3-R3 -48 to -51%. **Even
+at the GPU's read-bandwidth floor** (14.5 ms + attention, PROJECTED; `d3/projection_GPUfloor.md`): 8K J0-R0 45.1 /
+62.4 / 48.6 (-20 / -8 / -11%), 32K -14 to -25%. A GPU drafter does not change the conclusion: the 16-row verify (102 /
+125 ms) is most of every round.
+
+### D4. A cheap exact tree conv for tree8 (`d4/`)
+
+**Probe** (`v8/build_tree_corrx_probe.py`: one target group, layers 0-3, 8 rows, 8K of KV, the served weight constants;
+one package per form, each with the served chain entry `full8_8k` and the tree entry `tree8_8k`;
+`pipe/unit/power/d4_probe_check.py`: every output compared under chain masks, then cost per group, median of 30;
+scratch, deleted). Every form adds to the served conv a correction meant to be exactly 0 on rows whose taps are the
+chain's:
+
+| form | correction | bit-identical outputs (chain masks) | per group, chain masks | branched tree |
+|---|---|---|---|---|
+| served chain entry | | | 5.04-5.14 ms | |
+| `corr` (A8's build) | sum_t w_t (ctap_t @ rows - rows shifted by t) | 10 / 12 (pend1, pend2 differ) | +11.2% | +10.2% |
+| `corrc` | corr + cum as g @ tri + g @ (anc - tri) | 10 / 12 (pend1, pend2 differ) | +10.2% | +10.4% |
+| `corrd0` | sum_t w_t (D_t @ rows), D = ctap - the chain shift | **12 / 12** | +11.4% | +12.1% |
+| **`corrx0`** | **[rows w_0 .. rows w_3] (cdim x 44) @ D (44 x 8), channel-major** | **12 / 12** | **+4.5%** | **+4.0%** |
+| `corrb` / `corrdb` / `corrxb` | corr / corrd0 / corrx0 + a row blend (served silu on chain rows) | 12 / 12 | +12.7 / +14.8 / +5.3% | +12.8 / +13.0 / +5.6% |
+
+(19 Nov's inexact tree8 form, A2: +5.7%.)
+
+**What the A8 inexactness was** (`pipe/unit/power/d4_pend_diff.py` on `corrc`): the cum row of the pending tapes is
+identical. The differences are 1-ulp changes in the keys (36 of 49,152 elements in layer 1, 57 in layer 2) and the
+`u` rows that follow from them. **A8's attribution to the in-block decay matmul was wrong; the one-hot gather
+`ctap @ rows` is not exact on the ANE**, so `taps - shifted` is not exactly 0 everywhere. With D = ctap - shift (a
+CONSTANT shift; 0 / 1 values, exact) a chain row's D row is zero and its correction is exactly 0 whatever the matmul's
+rounding. No blend is needed.
+
+Two build pitfalls, both fixed: a shift built by in-place indexing inside forward traces as ops the ANE does not run
+(the first probe's corrd / corrx / corrx2 packages, and the first full corrx package 0, ran off the ANE or failed to
+compile: "MLIR MPS to ANEC conversion failed"); built from numpy it is a constant.

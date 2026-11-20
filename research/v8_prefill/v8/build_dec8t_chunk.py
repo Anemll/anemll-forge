@@ -74,16 +74,27 @@ if TREE_FORM == "corr":
     V.B.GDNW.qkv_heads = _qkv_heads_corr
 
 
+D4P = None
+if TREE_FORM not in ("ctap", "gather", "corr"):
+    # D4 (20 Nov 2026): the probe's forms (build_tree_corrx_probe.FORMS: corrd0, corrx0, corrb, corrdb, corrxb, ...), the
+    # same patch functions as the probe packages; FORM is set only while a tree entry traces
+    import build_tree_corrx_probe as D4P  # noqa: E402
+    assert TREE_FORM in D4P.FORMS, f"TREE_FORM {TREE_FORM} not in {sorted(D4P.FORMS)}"
+
 def _tree_on(anc, ctap):
     TPB.TREE.update(anc=anc, ctap=ctap, T=8)
     if TREE_FORM == "gather":
         TDC.GATHER["on"] = True
+    if D4P is not None:
+        D4P.FORM["conv"], D4P.FORM["cum"] = D4P.FORMS[TREE_FORM]
 
 
 def _tree_off():
     TPB.TREE.update(anc=None, ctap=None, T=None)
     if TREE_FORM == "gather":
         TDC.GATHER["on"] = False
+    if D4P is not None:
+        D4P.FORM["conv"], D4P.FORM["cum"] = None, "anc"
 
 
 B, M = V.B, V.M
