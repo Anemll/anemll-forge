@@ -16,8 +16,10 @@ Plan: `PLAN.md` (Anemll, 19 Nov 22:32). Status line: `/tmp/m6_yolo_status.txt`. 
 - **Why it is not the default:**
   - **Not token-identical:** the tree entry's conv taps differ from the served conv by rel 1.8e-3 per group and flip
     near-ties. The same flips happen with chain-shaped trees run through the tree entry.
-  - **The exact conv form costs too much:** it is bit-identical in the probe, but costs x1.096 per tree verify, which
-    projects to about break-even (build and identity check: A8).
+  - **The exact conv form costs too much:** it was built and served (A8). It matches the chain entry bit for bit
+    except the DeltaNet pending tape (rel 1-3e-7, from the in-block decay matmul on the mask input), and that is
+    still enough to flip near-ties: 3-8 of 9 replies identical per rung. Its chain-shaped cycles cost +7%. The served
+    chain is deterministic across restarts (18 / 18 identical), with about 4% tok/s noise between runs.
 - **16 / 32 rows on the ANE:**
   - **Where the cost is:** the FFN is nearly free (+2 / +4%). The cost is the DeltaNet UT solve (+27 / +130% for 3
     layers; block forward substitution cuts 32 rows by 40%), the tree conv taps (+0.66 / +1.58 ms per group, now the
@@ -449,3 +451,21 @@ So the served DFlash2 holds about 0.84 GB wired (its ANE program and weights) pl
 process; its selector tables add about 0.25 GB (mapped from the file in the server: file pages). It drafts through
 the target's own head, which stays. Dropping it saves about 0.84 GB wired + 0.25 GB of file pages (measured pieces;
 the served process's total was not re-measured with and without it).
+
+**Quant ladder** (05:29-06:49; `jetspec/b7_ladder.sh` -> `jsp_replay.py --multi gsm8k=...,humaneval=...,mbpp=... --limit 8 --quant ...`: one process per setting, the models loaded once, the drafter rebuilt per set with its calibration entry; fake quantization in place on MPS; banner per set in `b7/b7_*_<set>.json`; swap flat in every run). tok/round on the same traces:
+
+| drafter weights | gsm8k tok/round (vs bf16) | humaneval tok/round (vs bf16) | mbpp tok/round (vs bf16) | lossless |
+|---|---|---|---|---|
+| bf16 | 10.23 | 13.19 | 10.55 | yes |
+| int8 per channel, adapter + head | 10.17 (-0.6%) | 13.26 (+0.5%) | 10.66 (+1.0%) | yes |
+| 6-bit g128, adapter + head | 10.20 (-0.3%) | 13.19 (+0.0%) | 10.45 (-1.0%) | yes |
+| LUT4 per row, adapter (head bf16) | 9.05 (-11.5%) | 12.23 (-7.3%) | 8.72 (-17.4%) | yes |
+| LUT3 per row, adapter (head bf16) | 2.67 (bf16 on the same 2: 11.58, -77%) | not run | not run | yes |
+| our DFlash2 chain (tok/verify, same prompts) | 6.08 | 7.30 | 5.89 | |
+
+- **8-bit per channel and 6-bit g128 (adapter + head) are lossless for acceptance** (within +-1%).
+- **Per-row LUT (one 2^b palette per output row, k-means, no rotation, no calibration):** 4 bits loses 7-17%; 3 bits
+  collapses (2.6-2.7 tok/round). This is not our quantization pipeline (the target uses Hadamard rotations, GPTQ
+  and vector LUTs); a rotated and calibrated 4-bit form is the open test. 4-bit RTN g128 (adapter + head, gsm8k) lost
+  9.3% (B above).
+- The LUT3 run was stopped after 2 gsm8k traces (clear collapse, about 2 min per trace).
