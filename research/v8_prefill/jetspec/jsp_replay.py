@@ -445,7 +445,15 @@ def main():
                   target_load_s=round(t_target, 1), drafter_build_s=round(t_build, 1), torch=torch.__version__)
     print("BANNER " + json.dumps(banner), flush=True)
     res = []
+    if Path(a.out).exists():   # resume (20 Nov 2026): keep the traces an earlier run of the same command finished
+        old = json.loads(Path(a.out).read_text())
+        if old.get("banner", {}).get("schedule") == a.schedule and old.get("banner", {}).get("rows") == a.rows:
+            res = old.get("results", [])
+            print(f"RESUME: {len(res)} traces already in {a.out}", flush=True)
+    done = {r["trace"] for r in res}
     for d in dirs:
+        if Path(d).name in done:
+            continue
         tr = Trace(d)
         cap = min(a.max_new, tr.known - tr.P - (0 if tr.meta.get("stop_appended") else 16))
         r = run_trace(llm, drafter, config, tr, max_new=cap)

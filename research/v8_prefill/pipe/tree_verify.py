@@ -318,7 +318,7 @@ class Tree:
             kids.setdefault(int(parent[r_]), {})[int(tok[r_])] = r_
         v, path, nxt = 0, [0], None
         while True:
-            a = int(np.argmax(lg[v]))
+            a = S.argmax(lg[v])
             c = kids.get(v, {}).get(a)
             if c is None:
                 nxt = a
@@ -349,13 +349,14 @@ class Tree:
 
     def _chain(self, eng, anchor, drafts, samp, rng, seen, hist, dry, t0, t1, p):
         """the release chain cycle's verify / accept / commit (draft_cycle after propose), greedy"""
+        import qwen38_server as S
         mb, d = self.mb, eng.drafter
         lg = mb.call([anchor] + drafts)
         t2 = eng.verify_end = time.perf_counter()
         k, nxt = 0, None
         while k < 7:
             dk = drafts[k]
-            top = int(np.argmax(lg[k]))
+            top = S.argmax(lg[k])
             if top != dk:
                 nxt = top
                 break
@@ -365,7 +366,7 @@ class Tree:
             seen[dk] = 1.0
             k += 1
         if nxt is None:
-            nxt = int(np.argmax(lg[7]))
+            nxt = S.argmax(lg[7])
         t3 = time.perf_counter()
         d.add_context(mb.features(k + 1), np.arange(p, p + k + 1), flush=False)
         mb.accept(k + 1)

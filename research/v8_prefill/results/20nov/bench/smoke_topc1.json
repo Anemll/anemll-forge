@@ -1,0 +1,236 @@
+{
+ "label": "smoke_topc1",
+ "banner": "BANNER [smoke_topc1] prompts realistic_v1.json sha 693e3097d942e5a5 gen 320 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=always topc=1 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8t",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=always topc=1 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8t"
+ },
+ "prompts_sha": "693e3097d942e5a5",
+ "gen": 320,
+ "started": "2026-11-20 00:27:08",
+ "rungs": {
+  "2k": [
+   {
+    "t0": 1795163248.6533701,
+    "t_first": 1795163249.647147,
+    "t_last": 1795163254.268336,
+    "t_end": 1795163254.2683918,
+    "ttft_s": 0.993776798248291,
+    "completion_tokens": 320,
+    "prompt_tokens": 279,
+    "decode_tps": 69.02985181816005,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 279,
+     "completion_tokens": 320,
+     "total_tokens": 599,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 67.5,
+     "tok_verify": 7.62,
+     "accept_pct": 96,
+     "hist": "0:0% 1:0% 2:0% 3:5% 4:2% 5:0% 6:0% 7:93%",
+     "ms_cycle": 113,
+     "draft_ms": 13.0,
+     "verify_ms": 98.4
+    },
+    "content": "```python\ndef get_odd_collatz(n):\n    \"\"\"\n    Given a positive integer n, return a sorted list that has the odd numbers in collatz sequence.\n\n    The Collatz conjecture is a conjecture in mathematics that concerns a sequence defined\n    as follows: start with any positive integer n. Then each term is obtained from the \n    previous term as follows: if the previous term is even, the next term is one half of \n    the previous term. If the previous term is odd, the next term is 3 times the previous\n    term plus 1. The conjecture is that no matter what value of n, the sequence will always reach 1.\n\n    Note: \n        1. Collatz(1) is [1].\n        2. returned list sorted in increasing order.\n\n    For example:\n    get_odd_collatz(5) returns [1, 5] # The collatz sequence for 5 is [5, 16, 8, 4, 2, 1], so the odd numbers are only 1, and 5.\n    \"\"\"\n    odd_numbers = set()\n    current = n\n    while True:\n        if current % 2 == 1:\n            odd_numbers.add(current)\n        if current == 1:\n            break\n        if current % 2 == 0:\n            current = current // 2\n        else:\n            current = 3 * current + 1\n    return",
+    "server_prefill": [
+     [
+      279,
+      0.9
+     ]
+    ],
+    "sha": "1681b92d273f64ad",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.621189117431641,
+     "mean_w": {
+      "system_power": 13.511152289604492,
+      "total_power": 19.58042885260328,
+      "cpu_power": 1.9337180902030533,
+      "gpu_power": 1.5750449465944862,
+      "ane_power": 0.0,
+      "dram_power": 2.560513526201248
+     },
+     "energy_j": 90.48486472829478,
+     "net_total_w": 15.637983812854134,
+     "net_energy_j": 72.26608061453368
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795163254.579849,
+    "t_first": 1795163255.668242,
+    "t_last": 1795163255.781863,
+    "t_end": 1795163255.78192,
+    "ttft_s": 1.088392972946167,
+    "completion_tokens": 14,
+    "prompt_tokens": 199,
+    "decode_tps": 114.41547252083154,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 199,
+     "completion_tokens": 14,
+     "total_tokens": 213,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 14,
+     "tps": 40.1,
+     "tok_verify": 4.67,
+     "accept_pct": 52,
+     "hist": "0:0% 1:0% 2:33% 3:33% 4:0% 5:0% 6:33% 7:0%",
+     "ms_cycle": 116,
+     "draft_ms": 13.3,
+     "verify_ms": 102.0
+    },
+    "content": "```json\n[5, 1, 3]\n```",
+    "server_prefill": [
+     [
+      199,
+      0.8
+     ]
+    ],
+    "sha": "2d1fb5c121e32ff9",
+    "decode_power": null,
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795163256.091522,
+    "t_first": 1795163256.501176,
+    "t_last": 1795163267.048168,
+    "t_end": 1795163267.048228,
+    "ttft_s": 0.4096541404724121,
+    "completion_tokens": 224,
+    "prompt_tokens": 53,
+    "decode_tps": 21.143469502765655,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 53,
+     "completion_tokens": 224,
+     "total_tokens": 277,
+     "prompt_tokens_details": {
+      "cached_tokens": 11
+     }
+    },
+    "server": {
+     "gen": 224,
+     "tps": 21.0,
+     "tok_verify": 2.41,
+     "accept_pct": 20,
+     "hist": "0:33% 1:27% 2:22% 3:9% 4:6% 5:1% 6:1% 7:1%",
+     "ms_cycle": 115,
+     "draft_ms": 14.6,
+     "verify_ms": 99.5
+    },
+    "content": "The air in the marketplace hung thick and heavy, a humid tapestry woven from the sharp, earthy scent of damp soil, the sweet rot of overripe peaches, and the pungent, spicy bite of fresh-ground cumin drifting from a nearby stall. A cacophony of voices rose and fell in a rhythmic tide\u2014vendors hawking their wares in melodic, urgent calls, the clatter of wooden crates being stacked, and the sudden, sharp *thud* of a melon being dropped onto a scale. Before me, a riot of color exploded in every direction: pyramids of emerald limes, cascades of crimson tomatoes, and bolts of indigo silk that shimmered like liquid night under the dappled sunlight filtering through the canvas awnings. The ground beneath my feet was a mosaic of crushed pebbles and spilled grains, slick with the morning\u2019s dew, while the distant hum of a generator buzzed against the low, constant murmur of the crowd, creating a sensory overload that felt less like a place and more like a living, breathing entity.",
+    "server_prefill": [
+     [
+      42,
+      0.3
+     ]
+    ],
+    "sha": "9a0e7943d8b26d31",
+    "decode_power": {
+     "samples": 9,
+     "seconds": 10.54699182510376,
+     "mean_w": {
+      "system_power": 15.750298940511122,
+      "total_power": 20.387847900390625,
+      "cpu_power": 1.3940074068814874,
+      "gpu_power": 0.012201489055212022,
+      "ane_power": 0.0,
+      "dram_power": 3.2313400639428034
+     },
+     "energy_j": 215.03046513687877,
+     "net_total_w": 16.44540286064148,
+     "net_energy_j": 173.44952953172367
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795163267.3558028,
+    "t_first": 1795163267.7078679,
+    "t_last": 1795163282.7863302,
+    "t_end": 1795163282.786391,
+    "ttft_s": 0.3520650863647461,
+    "completion_tokens": 320,
+    "prompt_tokens": 74,
+    "decode_tps": 21.15600333345693,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 74,
+     "completion_tokens": 320,
+     "total_tokens": 394,
+     "prompt_tokens_details": {
+      "cached_tokens": 11
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 21.1,
+     "tok_verify": 2.39,
+     "accept_pct": 20,
+     "hist": "0:34% 1:31% 2:19% 3:4% 4:5% 5:4% 6:2% 7:0%",
+     "ms_cycle": 113,
+     "draft_ms": 13.7,
+     "verify_ms": 98.8
+    },
+    "content": "The first blow doesn\u2019t feel like pain, exactly. It feels like a sudden, violent tearing of the air.\n\nFor a century, I have been still. I have been the anchor of this place. My roots are tangled with the earth\u2019s memory, my bark is a map of every storm I\u2019ve survived, and my canopy is the home of a thousand birds and the quiet sanctuary of the mosses that cling to my shoulders. I am not just wood; I am a living archive, a breathing lung of the forest, a slow, silent witness to the turning of the seasons.\n\nThen, the noise comes. It is not the gentle rustle of wind or the soft crunch of deer hooves. It is a mechanical, rhythmic *thud-thud-thud* that vibrates through my trunk, shaking the leaves in a panic I cannot control. The smell of sawdust is sharp and acrid, cutting through the sweet, damp air of the forest. It smells like death.\n\nWhen the first deep cut bites into my bark, I feel a shockwave of betrayal. I am not being harvested for a purpose I understand. I am not being cleared for a path or a home. I am being erased.\n\nAs the axe bites deeper, I feel a strange, terrifying clarity. My sap, my lifeblood, begins to flow out in a warm, sticky stream. It is not just blood; it is the liquid memory of every rain I\u2019ve drunk, every sun I\u2019ve absorbed. I feel my connection to the soil weakening. The roots that",
+    "server_prefill": [
+     [
+      63,
+      0.2
+     ]
+    ],
+    "sha": "ae95e1cf62df499f",
+    "decode_power": {
+     "samples": 13,
+     "seconds": 15.078462362289429,
+     "mean_w": {
+      "system_power": 16.60834486310607,
+      "total_power": 21.34786004286546,
+      "cpu_power": 1.4563142701737717,
+      "gpu_power": 0.011750114925488744,
+      "ane_power": 0.0,
+      "dram_power": 3.271450794660128
+     },
+     "energy_j": 321.8929041717692,
+     "net_total_w": 17.405415003116314,
+     "net_energy_j": 262.44689502451706
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ]
+ },
+ "idle": {
+  "samples": 15,
+  "seconds": 20.00506019592285,
+  "mean_w": {
+   "system_power": 3.6117076370013597,
+   "total_power": 3.9424450397491455,
+   "cpu_power": 0.26282633753928747,
+   "gpu_power": 0.011442184535248583,
+   "ane_power": 0.0,
+   "dram_power": 0.05646888067324956
+  },
+  "energy_j": 78.86885033929912
+ },
+ "ended": "2026-11-20 00:28:03"
+}

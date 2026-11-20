@@ -4,7 +4,10 @@ path is the served one) plus single-call tree verify entries on the same weight 
                                rows in topological order) and ctap (4 x 8 x 11 fp16 one-hot conv taps); the DeltaNet WY /
                                UT block and the attention's intra-block mask take anc, the causal conv its taps through
                                ctap (build_tree_probe.TreeEntry; TREE_FORM=gather: the taps gathered then the served
-                               depthwise conv kernel at stride 4, build_tree_decomp.TreeG)
+                               depthwise conv kernel at stride 4, build_tree_decomp.TreeG; TREE_FORM=corr: the served
+                               conv kernel on the rows as they lie + sum_t w_t (ctap_t @ rows - rows shifted by t),
+                               exactly 0 on rows whose taps are the 3 rows before them, so chain-shaped paths compute
+                               what the chain entry does)
   tdva, tdvba                  dva / dvba (the split verify's ANE parts) with anc / ctap the same way (dvb has no
                                DeltaNet layer and serves both)
 TREE_CTXS (default 8192,16384,32768,65536: the entries the server runs without the split) picks the t8 contexts.
@@ -42,6 +45,33 @@ TREE_FORM = os.environ.get("TREE_FORM", "ctap")
 if TREE_FORM == "gather":
     import build_tree_decomp as TDC  # noqa: E402,F401  (its qkv_heads_gather patch; GATHER["on"] while tracing)
 TREE_CTXS = [int(c) for c in os.environ.get("TREE_CTXS", "8192,16384,32768,65536").split(",") if c]
+if TREE_FORM == "corr":
+    import torch.nn.functional as _F
+    _qkv_tree = V.B.GDNW.qkv_heads   # build_tree_probe's ctap form (and the served form when no tree traces)
+
+    def _qkv_heads_corr(self, rows, T):
+        B_ = V.B
+        if TPB.TREE["ctap"] is None or T != TPB.TREE["T"]:
+            return _qkv_tree(self, rows, T)
+        cdim = rows.shape[1]
+        conv = _F.conv2d(rows.transpose(0, 1).reshape(1, cdim, 1, T + 3), self.cw.transpose(0, 1).reshape(cdim, 1, 1, 4),
+                         groups=cdim).reshape(cdim, T)                                 # the served conv (chain taps)
+        taps = TPB.TREE["ctap"] @ rows                                                 # (4, T, cdim): the tree's taps
+        shifted = torch.stack([rows[t:t + T] for t in range(4)], 0)                    # the chain's taps
+        conv = B_.silu(conv + ((taps - shifted) * self.cw.reshape(4, 1, -1)).sum(0).transpose(0, 1))
+        kd, nk, nv, dk, dv = B_.kd, B_.nk, B_.nv, B_.dk, B_.dv
+        qq, kk, vv = conv[:kd], conv[kd:2 * kd], conv[2 * kd:]
+
+        def heads(t):
+            t = t.reshape(nk, dk, T).permute(0, 2, 1)
+            return t.reshape(nk, 1, T, dk).repeat(1, nv // nk, 1, 1).reshape(nv, T, dk)
+
+        def l2n(t, s_):
+            return t * torch.rsqrt((t * t).sum(-1, keepdim=True) + 1e-6) * s_
+        vh = vv.reshape(nv, dv, T).permute(0, 2, 1)
+        vh = vh * B_.GDN_SV if B_.GDN_SV != 1 else vh
+        return l2n(heads(qq), dk ** -0.5 * B_.GDN_SQ), l2n(heads(kk), 1.0), vh
+    V.B.GDNW.qkv_heads = _qkv_heads_corr
 
 
 def _tree_on(anc, ctap):

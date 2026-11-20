@@ -106,7 +106,8 @@ def main():
             if ok:
                 tv = sum(r["server"]["gen"] for r in ok) / sum(r["server"]["gen"] / r["server"]["tok_verify"] for r in ok)
                 ts = sum(r["completion_tokens"] - 1 for r in ok) / sum(r["t_last"] - r["t_first"] for r in ok)
-                print(f"[{a.label}] {rung} SUMMARY tok/s {ts:.2f} (token-weighted), tok/verify {tv:.3f}", flush=True)
+                agg = hashlib.sha256("".join(r["sha"] for r in rows).encode()).hexdigest()[:16]
+                print(f"[{a.label}] {rung} SUMMARY tok/s {ts:.2f} (token-weighted), tok/verify {tv:.3f}, output checksum {agg}", flush=True)
     finally:
         rec["ended"] = time.strftime("%Y-%m-%d %H:%M:%S")
         save()

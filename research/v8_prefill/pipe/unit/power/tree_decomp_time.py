@@ -54,7 +54,7 @@ def fill(fn, name, T, P, ctx_rows, anc=None, ctap=None, rng=None):
     elif name == "anc":
         a[:] = anc
     elif name == "ctap":
-        a[:] = ctap
+        a[:] = ctap if a.shape == ctap.shape else ctap.transpose(2, 0, 1).reshape(a.shape)   # (T + 3, 4T): channel-major
     return b
 
 
@@ -125,16 +125,16 @@ for ch in man["chunks"]:
         Y[e] = np.array(outs["y"].np, np.float32)
         assert np.isfinite(Y[e]).all(), e
         r = {"entry": e, "rows": T, "P": P, "ms_median": float(np.median(ms)), "ms_min": float(np.min(ms))}
-        if e.startswith("tree"):   # a real tree mask too (topological order), same cost expected
+        if e.startswith("tree") or e.endswith(("_tc", "_tcT", "_tcTb")):   # a real tree mask too (topological order), same cost expected
             ta, tc = tree_masks(T)
             if "anc" in ins: ins["anc"].np[:] = ta
-            if "ctap" in ins: ins["ctap"].np[:] = tc
+            if "ctap" in ins: ins["ctap"].np[:] = tc if ins["ctap"].np.shape == tc.shape else tc.transpose(2, 0, 1).reshape(ins["ctap"].np.shape)
             ms2 = []
             for _ in range(15):
                 t1 = time.perf_counter(); plan.run(); ms2.append(1e3 * (time.perf_counter() - t1))
             r["ms_median_tree_mask"] = float(np.median(ms2))
             if "anc" in ins: ins["anc"].np[:] = anc
-            if "ctap" in ins: ins["ctap"].np[:] = ctap
+            if "ctap" in ins: ins["ctap"].np[:] = ctap if ins["ctap"].np.shape == ctap.shape else ctap.transpose(2, 0, 1).reshape(ins["ctap"].np.shape)
             plan.run(); r["y_chainmask"] = np.array(outs["y"].np, np.float32)
         res["entries"][e] = r
         print(json.dumps({k: v for k, v in r.items() if not k.startswith("y_")}), flush=True)
@@ -147,6 +147,13 @@ for e in list(res["entries"]):   # tree8 with a chain mask against chain8, the s
             rel = float(np.linalg.norm(a - b) / max(np.linalg.norm(a), 1e-9))
             res["entries"][t]["y_rel_vs_chain8"] = rel
             print(f"check {t} (chain mask) vs {e}: y relative error {rel:.2e}", flush=True)
+for t in [e for e in Y if e.startswith("gdn") and not e.endswith(("_inv", "_none"))]:   # gdn_wy probe: vs the served solve
+    ref = t.rsplit("_", 1)[0] + "_inv"
+    if ref in Y:
+        a, b = Y[ref], res["entries"][t].get("y_chainmask", Y[t])
+        res["entries"][t]["y_vs_inv"] = {"max_abs": float(np.abs(a - b).max()), "rel": float(np.linalg.norm(a - b) / max(np.linalg.norm(a), 1e-9)),
+                                         "bit_identical": bool(np.array_equal(a, b))}
+        print(f"check {t} (chain masks) vs {ref}: {res['entries'][t]['y_vs_inv']}", flush=True)
 for t in [e for e in Y if e.startswith("tree") and e.endswith("8_8k")]:   # chain-mask tree forms vs the served form
     if "full8_8k" in Y:
         a, b = Y["full8_8k"], Y[t]
