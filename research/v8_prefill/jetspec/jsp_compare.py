@@ -15,7 +15,7 @@ def main():  # noqa: C901
         m = re.search(r"gen (\d+) in ([\d.]+)s \(([\d.]+) tok/s, ([\d.]+) tok/verify.*ms/cycle (\d+) \(draft ([\d.]+) verify ([\d.]+)", l)
         dfl.append(dict(gen=int(m.group(1)), tps=float(m.group(3)), tv=float(m.group(4)), cyc=float(m.group(5)),
                         draft=float(m.group(6)), verify=float(m.group(7))))
-    dfl = dfl[-32:]
+    dfl = dfl[-int(__import__("os").environ.get("NREQ", "32")):]
     res = rep["results"]
     print(f"{len(res)} replayed traces; {len(dfl)} DFlash2 request lines")
     tot_g = tot_r = 0

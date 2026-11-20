@@ -233,7 +233,10 @@ ea591258, libdec_gpu_clk 2b64e979, build v8_dec8 manifest b59b6319, ka on): gsm8
 before the target (its CPU build + CPU state, 6.4 GB transient, no longer stacks on the target); the hybrid decoder's
 verification read of the tail tensors (3.5 GB, dropped by the reference) checks the pins, names and header shapes only;
 the 2.5 GB CPU embedding table is memory-mapped from the checkpoint; resume from the output file. Then: MPS 16.6 GB
-after load, swap +2.2 GB during load and back to +0 after (watchdog limit +3 GB for the replay).
+after load, swap +2.2 GB during load and back to +0 after (watchdog limit +3 GB for the replay). Later (02:24), with
+10 GB of file cache left by the captures, two replays were stopped again at the load (+3.5 / +4 GB): the adapter is now
+preloaded before the target as well (its 8.3 GB file streams through the cache while the most memory is free); then
+swap does not grow at all during the load.
 
 **Check** (1 trace x 64 tokens): `--rows all` and `--rows outcome` give the same accept lengths
 [7, 4, 6, 1, 3, 16, 3, 16, 7] (9 / 9 hits, lossless), 13.77 against 1.97 s per round.
@@ -299,3 +302,31 @@ positions. At 4 bits on the ANE (bandwidth-bound, about 120 GB/s): adapter 2.2 G
 0.8 GB), about 7 ms; anchor decoder (target layers 62 / 63 on the tap-61 feature, about 0.4 GB), about 3 ms. That is
 about 28 ms per round, the projection's 30 ms row (+34% at 2K), if 4-bit weights keep its acceptance. Memory: about
 3.4 GB more beside the served stack.
+
+**Beyond gsm8k** (02:09-03:11; `make_pinned.py`: the first user turn of humaneval-t0 / mbpp-t0 / mt-bench-t0 0-7
+re-rendered in the 27b files' no-think form and tokenized with our tokenizer, the rendering checked against
+27b-prompts_gsm8k128's ids; capture as above; replay with each set's own calibration entry `--dataset`; mt-bench 0 is
+9 tokens long, shorter than the reader's 16-token margin, so it is skipped):
+
+| set (prompts) | JetSpec++ J3-R3 tok/round | our DFlash2 chain tok/verify | ratio | rounds | lossless |
+|---|---|---|---|---|---|
+| gsm8k (0-31) | 9.50 | 5.75 | x1.65 | 1,519 | 32 / 32 |
+| humaneval (0-7) | 13.20 | 7.30 | x1.81 | 190 | 8 / 8 |
+| mbpp (0-7) | 10.55 | 5.89 | x1.79 | 100 | 8 / 8 |
+| mt-bench (1-7) | 4.94 | 3.48 | x1.42 | 710 | 7 / 7 |
+
+JetSpec++'s B16 blocks give x1.4-1.8 more tokens per verify on code, math and chat. Compare tree8 (A7): x1.03-1.08.
+
+**Does the JetSpec++ drafter survive an ANE port's bit width?** (`jsp_replay.py --quant`: round-to-nearest symmetric
+fake quantization of every Linear weight of the adapter and the B16 head, per output row and 128-input group, in place;
+gsm8k traces 0-7, J3-R3, rows outcome; `jetspec/replay_q_*.json` / `.log`):
+
+| drafter weights | tok/round, traces 0-7 | vs bf16 | lossless |
+|---|---|---|---|
+| bf16 (reference) | 10.23 | | yes |
+| adapter 4 bits, head 4 bits (6.2B parameters) | 9.28 | -9.3% | 8 / 8 |
+| adapter 3 bits, head 4 bits (traces 0-1 only, stopped) | 4.04 (bf16 on those: 11.58) | -65% | 2 / 2 |
+| our DFlash2 chain on the same 8 prompts | 6.08 tok/verify | | |
+
+Plain 4-bit RTN keeps x1.53 over our DFlash2 chain; 3 bits breaks the adapter (a calibrated or LUT quantization, as
+our target uses, may do better; not tested). So an ANE port needs the adapter at 4 bits or more: about 3.4 GB.

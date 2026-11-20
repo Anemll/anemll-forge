@@ -29,6 +29,6 @@ check)
   done;;
 replay)
   $PY $J/jsp_replay.py --traces $CAP/traces --max-new 2048 --rows outcome --schedule J3-R3 --dataset $DATASET --out $RES/replay_$TAG.json > $RES/replay_$TAG.log 2>&1 & BP=$!
-  $WD $BP 3072 $RES/replay_$TAG.watchdog.log >/dev/null 2>&1 &
+  $WD $BP ${WDMB:-3072} $RES/replay_$TAG.watchdog.log >/dev/null 2>&1 &
   wait $BP; echo "replay rc $?"; tail -5 $RES/replay_$TAG.log;;
 esac

@@ -400,6 +400,23 @@ def preload_drafter(release, device, dtype):
     DR.load_drafter = load_drafter
 
 
+def preload_adapter(release, device, dtype):
+    """The adapter (8.6 GB) before the target too (20 Nov 2026): its file streams through the page cache while the most
+    memory is free; build_drafter then gets the preloaded module (same low-memory loader, same checks)."""
+    from jetspec.engines.jetspec_plus_plus.draft.reference.models import adapter as A
+    path = Path(release) / "adapter"
+    mod = load_adapter_lowmem(path, device, dtype)
+    key = (str(path), str(device), dtype)
+
+    def load_adapter(p, device=None, dtype=None, *a_, **k_):
+        if (str(p), str(device), dtype) == key and not a_ and not k_:
+            return mod
+        return load_adapter_lowmem(p, device, dtype)
+    load_adapter.preloaded = True
+    A.load_adapter = load_adapter
+    return mod
+
+
 def mem(tag):
     import gc, resource
     gc.collect()
@@ -410,9 +427,31 @@ def mem(tag):
     print(f"MEM {tag}: max RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9:.1f} GB{mps}", flush=True)
 
 
+def fake_quant(module, bits, group=128, skip=("embed", "lm_head", "norm")):
+    """Round-to-nearest symmetric quantization of every Linear weight in module, per output row and group of `group`
+    input channels, written back in place in the weights' own dtype (20 Nov 2026: does the drafter survive the
+    bit width an ANE port would use?). Returns (tensors, parameters) quantized."""
+    n_t = n_p = 0
+    qmax = 2 ** (bits - 1) - 1
+    with torch.no_grad():
+        for name, m in module.named_modules():
+            if not isinstance(m, nn.Linear) or any(k in name for k in skip):
+                continue
+            w = m.weight
+            o, i = w.shape
+            g = group if i % group == 0 else i
+            x = w.float().reshape(o, i // g, g)
+            sc = x.abs().amax(-1, keepdim=True).clamp_min(1e-12) / qmax
+            w.copy_((torch.clamp(torch.round(x / sc), -qmax - 1, qmax) * sc).reshape(o, i).to(w.dtype))
+            n_t += 1; n_p += w.numel()
+            del x, sc
+    return n_t, n_p
+
+
 def patch_adapter_loader():
     from jetspec.engines.jetspec_plus_plus.draft.reference.models import adapter as A
-    A.load_adapter = load_adapter_lowmem
+    if not getattr(A.load_adapter, "preloaded", False):   # keep a preloaded adapter
+        A.load_adapter = load_adapter_lowmem
 
 
 def check_adapter_loader(path, device="cpu", dtype=torch.bfloat16):
@@ -513,6 +552,7 @@ def main():
     ap.add_argument("--dataset", default="gsm8k", help="calibration entry (gsm8k, math500, ...)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--tiny", action="store_true", help="tiny random artifacts (make_tiny.py): no stop tokens")
+    ap.add_argument("--quant", default="", help="research: fake-quantize drafter parts, e.g. adapter:4,head:4 (RTN, g128)")
     ap.add_argument("--rows", choices=["outcome", "all"], default="outcome",
                     help="outcome: draft only keyed rows that can be the true outcome (same result, see OutcomeRows)")
     a = ap.parse_args()
@@ -527,17 +567,28 @@ def main():
     if not a.tiny:
         preload_drafter(a.release, a.device, dtype)
         mem("drafter head preloaded")
+        preload_adapter(a.release, a.device, dtype)
+        mem("adapter preloaded")
     llm = make_llm(a.target_root, a.device, dtype, eos=set() if a.tiny else EOS)
     mem("target loaded")
     t_target = time.time() - t0
     drafter, config, t_build = build(llm, release=a.release, schedule=a.schedule, dataset=a.dataset)
     mem("drafter built")
+    qinfo = {}
+    for part in [x for x in a.quant.split(",") if x]:
+        what, bits = part.split(":")
+        mod = {"adapter": drafter.driver.adapter, "head": drafter.driver.head}[what]
+        qinfo[what] = (int(bits),) + fake_quant(mod, int(bits))
+        print(f"QUANT {what}: {qinfo[what][1]} Linear weights, {qinfo[what][2] / 1e9:.2f}B parameters at {bits} bits (RTN g128)", flush=True)
+    if qinfo:
+        mem("quantized")
     rows = OutcomeRows(drafter, llm.runner) if a.rows == "outcome" else None
     banner = dict(jetspec_src=str(SRC), jetspec_commit=os.popen(f"git -C {SRC} rev-parse HEAD").read().strip(),
                   rows=a.rows, dataset=a.dataset,
                   release=a.release, target_root=a.target_root, schedule=a.schedule, device=a.device,
                   dtype=str(dtype), config=config.__dict__, max_new=a.max_new, loaded_target_tensors=len(llm.model.loaded),
-                  target_load_s=round(t_target, 1), drafter_build_s=round(t_build, 1), torch=torch.__version__)
+                  target_load_s=round(t_target, 1), drafter_build_s=round(t_build, 1), torch=torch.__version__,
+                  quant=a.quant or None)
     print("BANNER " + json.dumps(banner), flush=True)
     res = []
     if Path(a.out).exists():   # resume (20 Nov 2026): keep the traces an earlier run of the same command finished
@@ -551,6 +602,9 @@ def main():
             continue
         tr = Trace(d)
         cap = min(a.max_new, tr.known - tr.P - (0 if tr.meta.get("stop_appended") else 16))
+        if cap < 1:   # 20 Nov 2026: a reply shorter than the reader's 16-token margin (e.g. mt-bench 0, 14 tokens)
+            print(f"{Path(d).name}: SKIP (stream {tr.known - tr.P} tokens, cap {cap})", flush=True)
+            continue
         r = run_trace(llm, drafter, config, tr, max_new=cap)
         if rows is not None:
             r["rows_ran"], r["rows_skipped"] = rows.ran, rows.skipped
