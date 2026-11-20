@@ -6,7 +6,8 @@
 set -u
 J=${0:a:h}; PY=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
 WD=/Volumes/SSD4TB/anemll-forge-research/tools/swap_watchdog.sh
-PR=/Volumes/SSD4TB/anemll-forge-research/jetspec_pp/src/JetSpec/bench/jetspec_plus_plus/prompts/27b-prompts_gsm8k128.json
+PR=${PR:-/Volumes/SSD4TB/anemll-forge-research/jetspec_pp/src/JetSpec/bench/jetspec_plus_plus/prompts/27b-prompts_gsm8k128.json}
+COUNT=${COUNT:-32}; DATASET=${DATASET:-gsm8k}; TAG=${TAG:-j3r3}
 mkdir -p $RES
 case $1 in
 capture)
@@ -14,10 +15,10 @@ capture)
   OUT=$CAP PROMPTS=$PR nohup zsh $J/jsp_capture_server.sh > $RES/capture_server.out 2>&1 &
   for i in $(seq 1 120); do grep -q "serving OpenAI API" $CAP/server.log 2>/dev/null && break; sleep 2; done
   grep -q "serving OpenAI API" $CAP/server.log || { echo "capture server did not come up"; tail -20 $CAP/server.log; exit 1; }
-  $PY $J/jsp_capture_client.py --first 0 --count 32 --max-tokens 2112 --out $RES/capture_client.jsonl
+  $PY $J/jsp_capture_client.py --first 0 --count $COUNT --max-tokens 2112 --out $RES/capture_client_$TAG.jsonl
   P=$(lsof -tnP -iTCP:8771 -sTCP:LISTEN); [ -n "$P" ] && kill $P
   for i in $(seq 1 30); do lsof -nP -iTCP:8771 -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 1; done
-  grep -E "tok/verify" $CAP/server.log | tail -40 > $RES/capture_decode_lines.txt
+  grep -E "\| gen [0-9]+ in .*tok/verify" $CAP/server.log > $RES/capture_decode_lines_$TAG.txt
   echo "capture done: $(ls $CAP/traces | wc -l) traces";;
 check)
   for r in all outcome; do
@@ -27,7 +28,7 @@ check)
     tail -3 $RES/check_$r.log
   done;;
 replay)
-  $PY $J/jsp_replay.py --traces $CAP/traces --max-new 2048 --rows outcome --schedule J3-R3 --out $RES/replay_j3r3.json > $RES/replay_j3r3.log 2>&1 & BP=$!
-  $WD $BP 3072 $RES/replay.watchdog.log >/dev/null 2>&1 &
-  wait $BP; echo "replay rc $?"; tail -5 $RES/replay_j3r3.log;;
+  $PY $J/jsp_replay.py --traces $CAP/traces --max-new 2048 --rows outcome --schedule J3-R3 --dataset $DATASET --out $RES/replay_$TAG.json > $RES/replay_$TAG.log 2>&1 & BP=$!
+  $WD $BP 3072 $RES/replay_$TAG.watchdog.log >/dev/null 2>&1 &
+  wait $BP; echo "replay rc $?"; tail -5 $RES/replay_$TAG.log;;
 esac

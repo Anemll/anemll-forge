@@ -7,7 +7,7 @@ verify cost ratio (JetSpec++ verifies B16 blocks: 16 rows).
 import json, re, sys
 
 
-def main():
+def main():  # noqa: C901
     rep = json.loads(open(sys.argv[1]).read())
     lines = [l for l in open(sys.argv[2]) if "tok/verify" in l]
     dfl = []

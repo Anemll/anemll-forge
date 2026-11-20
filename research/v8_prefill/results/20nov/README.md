@@ -237,3 +237,65 @@ after load, swap +2.2 GB during load and back to +0 after (watchdog limit +3 GB 
 
 **Check** (1 trace x 64 tokens): `--rows all` and `--rows outcome` give the same accept lengths
 [7, 4, 6, 1, 3, 16, 3, 16, 7] (9 / 9 hits, lossless), 13.77 against 1.97 s per round.
+
+## A7. Tree8 like for like (offline, the chain's own texts, measured costs)
+
+The served tree8 verify cost, measured in the branched run (server `tree:` lines, per context entry): 8K entry 99.9 /
+95.5 ms (x1.046), 32K 112.8 / 108.8 (x1.036), 64K 127.5 / 123.5 (x1.033), 96K split 133.4 / 127.0 (x1.050). With
+these ratios in the simulator (A1b; `tree_dyn_real/meas_*.json`), tok/s against the chain:
+
+| rung | tree8 always | tree8 when branched (served default) | dynamic chain / 8 / 16 / 32 (16 / 32 at +29% / +58%) | tree8 when branched, exact conv form (x1.096) |
+|---|---|---|---|---|
+| 2K | +1.2% | +3.0% | +2.9% | +0.7% |
+| 8K | -1.2% | +1.0% | +2.2% | -0.8% |
+| 32K | -0.8% | +1.5% | +2.0% | -0.4% |
+| 64K | -1.7% | +0.5% | +0.4% | -1.4% |
+| 96K | -1.3% | +0.6% | +1.8% | -1.6% |
+| chat / code / math | +7.8 / -3.0 / -2.7% | +8.0 / +0.3 / +0.6% | +9.5 / +0.0 / +1.1% | +3.8 / -0.3 / -0.1% |
+
+So the bench's +1-11% (A3) is mostly the replies changing; like for like, tree8 adds +0.5-3% (chat +8%) with the
+inexact conv taps, and about nothing with the exact form.
+
+**Fixed tree shapes** (so the conv taps would be compile-time slices, exact and nearly free): 1,990 cycles have 707
+distinct top-7 shapes (the chain 45%, no other above 0.8%). "Chain of L + leaf siblings" layouts reach 4.57-4.61
+tok/verify alone (chain 4.953) and 5.09 / 5.14 / 5.18 with an oracle choice among the best 2 / 3 / 4 shapes per cycle,
+against 5.12 for the dynamic tree without an oracle. Not pursued.
+
+**Replay, J3-R3 over the 32 traces** (01:15-01:57, `jetspec/replay_j3r3.json` / `.log`, `compare_j3r3.txt`;
+banner: JetSpec 41a30357, rows outcome, dataset gsm8k, release pins checked, bf16 on MPS, max 2,048 new tokens):
+- **Lossless on all 32** (output = the captured stream), 1,519 rounds, 1.50 s per round (the reference on MPS).
+- **JetSpec++ 9.50 tokens per round against our DFlash2 chain's 5.75 tok/verify on the same prompts: x1.65.**
+  Per trace 6.9-14.2 against 4.6-7.3. Accept lengths: 16 (the whole B16 block) in 33% of rounds; 1-3 in 23%.
+- **Projection** (served 2K cycle: draft 13.2 + verify 94.5 ms; tok/s = tok/round / (draft + verify x ratio)): with a
+  16-row chain verify at x1.14 (A2's chain form) and a 30 ms drafter, 68.9 tok/s against DFlash2's 53.4 (+29%); at
+  x1.26 and 60 ms, break-even.
+- **Integration is not possible tonight:** JetSpec++'s drafter is the B16 head (1.6B parameters, 3.2 GB bf16) plus the
+  adapter (4.47B, 8.3 GB) plus the anchor decoder (the target's layers 62 / 63 on the tap-61 features): about 12 GB in
+  bf16 next to our 10 GB target on a 32 GB Mac, and the reference needs 1.5 s per round on the GPU. A served version
+  needs a quantized ANE port of the head and adapter (about 3 GB at 4 bits; one pass per round after the verify) and a
+  16-row chain verify entry (next section).
+
+**What a B16 block costs our verify** (`chain16/`, `v8/build_chain16_probe.py`, scratch, deleted; forge.py compile
+59 s; `tree_decomp_time.py`, median of 30). One target group in the served verify form, and the LUT4 head with 8- and
+16-row entries in one package (one weight copy):
+
+| | 8 rows | 16 rows, served solve | 16 rows, block forward substitution |
+|---|---|---|---|
+| group, 8K of KV | 5.05 ms | 5.76 (+14%) | 5.50 (+8.9%) |
+| group, 32K / 64K | 5.80 / 6.75 | | 6.83 (+18%) / 8.63 (+28%) |
+| head (final norm + lm_head) | 4.29 | 4.30 (+0.4%) | |
+
+- A whole 16-row CHAIN verify (16 groups + head) is x1.085 at the 8K entry, x1.17 at 32K, x1.27 at 64K (there the
+  split verify's GPU attention would take the rows instead). A chain needs no tree conv taps, so B16 chains suit
+  this target much better than 16-row trees (+23%, A6).
+- **JetSpec++ projection** with these costs (2K: tok/s = 9.50 / (drafter + 94.5 x 1.085)): 82 / 72 / 59 tok/s with
+  a 13 / 30 / 60 ms drafter, against DFlash2's 53.4: +54% / +34% / +10%. The drafter's cost on the M6 decides it.
+
+**What the JetSpec++ drafter would cost here (from its artifacts):** the adapter (`adapter/head.safetensors`, 4.47B
+parameters) is a "ctxkv" head: 5 streams of target-sized layers (stream depths 1 / 1 / 1 / 4 / 5 = 12 layers, each
+an attention + a 17,408-wide SwiGLU initialized from the target) that turn the target's tap features of each newly
+committed token into the drafter's context K / V. So per round it runs on about 9.5 new tokens, not on the 16 draft
+positions. At 4 bits on the ANE (bandwidth-bound, about 120 GB/s): adapter 2.2 GB, about 18 ms; B16 head (1.6B,
+0.8 GB), about 7 ms; anchor decoder (target layers 62 / 63 on the tap-61 feature, about 0.4 GB), about 3 ms. That is
+about 28 ms per round, the projection's 30 ms row (+34% at 2K), if 4-bit weights keep its acceptance. Memory: about
+3.4 GB more beside the served stack.
