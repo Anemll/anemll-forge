@@ -622,6 +622,9 @@ def main():
     except Exception as e:  # noqa: BLE001
         J.result(dev, aid, pkg, "failed", error=f"{type(e).__name__}: {e}"); raise
     J.result(dev, aid, pkg, "ok", model_load_s=time.time() - t0)
+    if os.environ.get("TREE") == "1":   # tree verify (20 Nov 2026, tree_verify.py): a dec8t build's t8 / tdva / tdvba entries
+        import tree_verify
+        tree_verify.install(engine, S.log)
     server = S.ThreadingHTTPServer((a.host, a.port), S.make_handler(engine))
     print(f"[{S.MODEL_ID}] serving OpenAI API on http://{a.host}:{a.port}/v1 (V8 prefill, "
           f"{'speculative ON' if a.draft else 'speculative OFF'}, ctx {a.ctx})", flush=True)

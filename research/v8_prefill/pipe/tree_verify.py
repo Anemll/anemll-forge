@@ -1,0 +1,431 @@
+"""Tree verify for the V8 server (20 Nov 2026, research/v8_prefill/results/20nov): DFlash2's draft as a dynamic tree
+in the 8 verify rows, on a dec8t build (v8/build_dec8t_chunk.py: every served entry unchanged + t8_<ctx>k and
+tdva / tdvba with ancestor-mask inputs on the same weight constants).
+Per cycle (greedy requests only; sampling and prompt-lookup cycles keep the served chain):
+  tree     best-first by path probability under the served selector score s_i(c | parent) (the drafter's own chain
+           rule, top TREE_TOPC children per node, softmax(s / TREE_TAU)): the anchor + 7 nodes, rows in pop order
+           (topological). The drafter's chain is the tree whose 7 nodes are the argmax child at every depth.
+  policy   TREE_POLICY: branched (default; the tree entry only when the 7 nodes are not the chain, else the served chain
+           entry), always (the tree entry every greedy cycle), dink (tree when E_tree - E_chain > lam (ms_tree - ms_chain),
+           lam = the running tok/ms, both ms running means per context entry; E = sum of node path probabilities)
+  verify   non-split (the 8K-64K entries): t8_<ctx>k (anc, ctap, RoPE at p0 + depth). Split (dec8: the 96K entry):
+           tdva / tdvba + the GPU attention with each row's ancestor mask (dec_set_tree in DEC_DYLIB; the tree is
+           refused with a dylib that lacks it). dvb (no DeltaNet layer) serves both.
+  accept   greedy: from the root, the child whose token is the row's argmax, until none; the next token is the last
+           accepted row's argmax; an accepted stop token ends the walk as in the chain (uncommitted).
+  commit   the accepted rows are moved to rows 0..k in place: every DeltaNet layer's pending tape (k / u / wk rows, cum
+           columns) and conv rows, the new K / V rows (non-split: the entry outputs before accept(); split: the cache rows
+           the GPU wrote at p0 + row), the drafter's tap features. The rest of the runtime then sees a chain of k + 1
+           rows (snapshots, the next call's commit, V8 continuation prefill), so nothing else changes.
+Env: TREE=1 (install, v8_server.py), TREE_POLICY (branched), TREE_TOPC (4), TREE_TAU (1.5; the calibration of
+results/20nov), TREE_LOG (a directory: one npz per request with each cycle's tree, choice, accepted path; research),
+TREE_CHECK (1: assert the tree's chain-shaped cycles commit exactly what the chain would; research)."""
+import heapq, os, time
+from pathlib import Path
+
+import numpy as np
+
+POLICY = os.environ.get("TREE_POLICY", "branched")
+TOPC = int(os.environ.get("TREE_TOPC", "4"))
+TAU = float(os.environ.get("TREE_TAU", "1.5"))
+LOGDIR = os.environ.get("TREE_LOG")
+N = 7   # nodes besides the root (8 verify rows)
+
+
+def build_tree(anchor, cand, unary, hp, pc, sc, n=N, topc=TOPC, tau=TAU):
+    """Best-first tree. cand / unary: (7, 16) per depth, hp: (7, 256), pc / sc: the selector tables (numpy rows by
+    token: functions returning float32 rows on demand). Returns parent, token, depth (root at row 0), path probability per row (tau), and the
+    chain's tokens and path probabilities (the argmax child at every depth)."""
+    S = [sc(cand[d]) for d in range(cand.shape[0])]                                   # (16, 256) per depth
+    pcache = {}
+
+    def child_scores(d, pred):
+        if pred not in pcache:
+            pcache[pred] = pc(pred)
+        return unary[d] + S[d] @ (pcache[pred] * hp[d])
+    parent, tok, depth, prob = [-1], [int(anchor)], [0], [1.0]
+    heap, tie = [], 0
+    s = child_scores(0, int(anchor))
+
+    def push(row, d, s_):
+        nonlocal tie
+        z = s_ / tau; z = z - z.max(); lp = z - np.log(np.exp(z).sum())
+        base = np.log(max(prob[row], 1e-30))
+        for o in np.argsort(-s_)[:topc]:
+            tie += 1
+            heapq.heappush(heap, (-(base + float(lp[o])), tie, row, d, int(cand[d][o])))
+    push(0, 0, s)
+    while heap and len(tok) < n + 1:
+        nlp, _, row, d, t = heapq.heappop(heap)
+        parent.append(row); tok.append(t); depth.append(d + 1); prob.append(float(np.exp(-nlp)))
+        if d + 1 < cand.shape[0]:
+            push(len(tok) - 1, d + 1, child_scores(d + 1, t))
+    # the chain (the drafter's own path) and its path probabilities at this tau
+    ctok, cprob, pred, lp = [], [], int(anchor), 0.0
+    for d in range(cand.shape[0]):
+        s_ = child_scores(d, pred)
+        o = int(np.argmax(s_))
+        z = s_ / tau; z = z - z.max(); lp += float(z[o] - np.log(np.exp(z).sum()))
+        pred = int(cand[d][o]); ctok.append(pred); cprob.append(float(np.exp(lp)))
+    return np.array(parent), np.array(tok, np.int64), np.array(depth), np.array(prob), ctok, cprob
+
+
+def is_chain(parent, tok, ctok):
+    return all(parent[r] == r - 1 for r in range(1, len(parent))) and list(tok[1:]) == list(ctok[:len(tok) - 1])
+
+
+def masks(parent):
+    T = len(parent)
+    anc = np.zeros((T, T), np.float16)
+    paths = []
+    for i in range(T):
+        p, j = [], i
+        while j >= 0:
+            anc[i, j] = 1; p.append(j); j = parent[j]
+        paths.append(p[::-1])
+    ctap = np.zeros((4, T, T + 3), np.float16)
+    for i in range(T):
+        seq = [0, 1, 2] + [3 + r for r in paths[i]]
+        for t in range(4):
+            ctap[t, i, seq[len(seq) - 4 + t]] = 1
+    bits = [sum(1 << j for j in range(T) if anc[i, j]) for i in range(T)]        # row i's visible block rows (GPU)
+    lo = sum(bits[i] << (8 * i) for i in range(4)); hi = sum(bits[i] << (8 * (i - 4)) for i in range(4, T))
+    return anc, ctap, lo, hi
+
+
+class Tree:
+    def __init__(self, eng, log=print):
+        self.e, self.log = eng, log
+        mb = eng.model
+        self.mb = mb
+        d = eng.drafter
+        # the selector tables stay as the drafter maps them (BF16, safetensors); rows converted on demand (no FP32 copy)
+        import torch
+        self.pc = lambda t: d.pc[int(t)].float().numpy()
+        self.sc = lambda c: d.sc[torch.as_tensor(np.asarray(c, np.int64))].float().numpy()
+        ents = set(mb.chunks[0]["fns"])
+        self.ctx_t8 = sorted(int(e[3:-1]) * 1024 for e in ents if e.startswith("t8_"))
+        assert self.ctx_t8, "no t8_<ctx>k entries: not a dec8t build"
+        f = mb.chunks[0]["fns"][f"t8_{self.ctx_t8[0] // 1024}k"]
+        for n in ("anc", "ctap"):
+            b = f.buffer("input", n)
+            mb.inp[n] = (b, b.np)
+        for ch in mb.chunks:   # the same layout in every chunk's tree entries
+            for e in ch["fns"]:
+                if e.startswith("t8_"):
+                    for n in ("anc", "ctap"):
+                        assert list(ch["fns"][e].spec("input", n)["strides"]) == list(mb.inp[n][0].strides), (e, n)
+        mb._plans = {}
+        self.split = getattr(eng, "dec8", None)
+        self.split_ok = False
+        if self.split is not None:
+            self._init_split()
+        self.ms = {}          # (kind, ctx) -> running mean verify ms
+        self.lam = 0.05       # running tok/ms (dink)
+        self.req = self._req_stats()
+        self.rec = [] if LOGDIR else None
+        self.log(f"tree: BANNER mode=tree8 policy={POLICY} topc={TOPC} tau={TAU} t8 contexts "
+                 f"{[c // 1024 for c in self.ctx_t8]}K | split tree {'on (tdva/tdvba + dec_set_tree)' if self.split_ok else 'OFF'}"
+                 f" | build {mb.root}")
+
+    def _req_stats(self):
+        return {"cycles": 0, "tree": 0, "chain": 0, "other": 0, "tok": 0, "tree_tok": 0, "chain_tok": 0,
+                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0}
+
+    # ---- split path (dec8): tdva / tdvba + GPU attention with the tree mask ----
+    def _init_split(self):
+        s = self.split
+        g = s.g
+        if not hasattr(g, "dec_set_tree"):
+            self.log("tree: the decode GPU dylib has no dec_set_tree: split tree verify OFF (chain there)")
+            return
+        import ctypes as C_
+        g.dec_set_tree.restype, g.dec_set_tree.argtypes = C_.c_int32, [C_.c_uint32, C_.c_uint32]
+        for F in s.files:
+            m = F["c0"]["model"]
+            F["tfa"], F["tfba"] = m.function("tdva"), m.function("tdvba")
+            for n in F["ao"]:
+                assert list(F["tfa"].spec("output", n)["strides"]) == list(F["ao"][n].strides), ("tdva", n)
+            for n in F["bao"]:
+                assert list(F["tfba"].spec("output", n)["strides"]) == list(F["bao"][n].strides), ("tdvba", n)
+            for n in ("anc", "ctap"):
+                assert list(F["tfa"].spec("input", n)["strides"]) == list(self.mb.inp[n][0].strides), ("tdva", n)
+                assert list(F["tfba"].spec("input", n)["strides"]) == list(self.mb.inp[n][0].strides), ("tdvba", n)
+        self._tplans = {}
+        self.split_ok = True
+
+    def _split_plan(self, par):
+        if par in self._tplans:
+            return self._tplans[par]
+        s, mb = self.split, self.mb
+        B, d = s.B, mb.inp
+        shared = {n: d[n][0] for n in ("cos", "sin", "conv_sel", "commit", "commit_last", "anc", "ctap")}
+        x, plans = d["x"][0], []
+        for F in s.files:
+            c0, c1 = F["c0"], F["c1"]
+            s0, n0 = c0["stb"][par], c0["stb"][1 - par]
+            s1, n1 = c1["stb"][par], c1["stb"][1 - par]
+            pa = B.Plan([F["tfa"].bind({"x": x, **shared, **s0}, {**F["ao"], **{f"{k}_out": v for k, v in n0.items()}})])
+            pba = B.Plan([F["tfba"].bind({"o": F["o_ba"], "xr_prev": F["ao"]["xr"], **shared, **s1},
+                                         {**F["bao"], **{f"{k}_out": v for k, v in n1.items()}})])
+            pb = B.Plan([F["fb"].bind({"o": F["o_b"], "x": F["bao"]["xr"]}, F["bo"])])
+            plans.append((pa, pba, pb))
+            x = F["bo"]["y"]
+        head = B.Plan([mb.head.bind({"x": x}, mb.hout)])
+        self._tplans[par] = (plans, head)
+        return self._tplans[par]
+
+    # ---- one tree verify call ----
+    def _inputs(self, tok, depth, anc, ctap):
+        mb = self.mb
+        d, p0, T = mb.inp, mb.pos, mb.T
+        xw = d["x"][1]
+        xw[:] = 0
+        xw[0, :, 0, :T] = mb.emb[tok].T
+        mb._common(d, p0, T, T)
+        ang = np.concatenate([np.outer(p0 + depth, mb.inv)] * 2, axis=1)
+        d["cos"][1][:] = np.cos(ang)
+        d["sin"][1][:] = np.sin(ang)
+        d["anc"][1][:] = anc
+        d["ctap"][1][:] = ctap
+
+    def call(self, tok, depth, anc, ctap, lo, hi):
+        mb = self.mb
+        p0 = mb.pos
+        if not mb.fit(p0 + 8):
+            raise ValueError("context full")
+        s = self.split
+        use_split = s is not None and s.use(p0) and p0 + 8 <= mb.cap(mb.ctx)
+        if use_split:
+            if not self.split_ok:
+                return None
+            self._inputs(tok, depth, anc, ctap)
+            if s.ka:
+                s._ka_switch()
+            s._sync_kv()
+            assert s.g.dec_set_tree(lo, hi) == 0
+            plans, head = self._split_plan(mb.par)
+            try:
+                for j, (pa, pba, pb) in enumerate(plans):
+                    F = s.files[j]
+                    pa.run()
+                    r = s.g.dec_run(2 * j, F["Ha"], s.st, p0)
+                    assert r >= 0, f"GPU attention, chunk {2 * j}: {r}"
+                    pba.run()
+                    r2 = s.g.dec_run(2 * j + 1, F["Hba"], s.st, p0)
+                    assert r2 >= 0, f"GPU attention, chunk {2 * j + 1}: {r2}"
+                    pb.run()
+                head.run()
+            finally:
+                s.g.dec_set_tree(0, 0)     # 0, 0: the chain mask (the served visibility)
+            mb._flip()
+            mb._last = "dec8"
+            s.stats["steps"] += 1
+        else:
+            if mb.ctx not in self.ctx_t8:
+                return None
+            entry = f"t8_{mb.ctx // 1024}k"
+            self._inputs(tok, depth, anc, ctap)
+            mb._plan(entry)[2].run()
+            mb._flip()
+            mb._last = entry
+        mb.stats["calls"] += 1
+        mb._n, mb._prefill = 8, False
+        return np.array(mb.logits[:8]), use_split
+
+    # ---- commit: the accepted rows to rows 0..k ----
+    def compact(self, path, split):
+        mb = self.mb
+        k1 = len(path)
+        if path == list(range(k1)):
+            return False
+        idx, dst = np.array(path), np.arange(k1)
+        P = mb.P
+        for ch in mb.chunks:
+            w = ch["curw"]
+            for j in ch["gdn_j"]:
+                pend, conv = w[f"pend{j}"], w[f"conv{j}"]
+                for b0 in (0, P, 2 * P):
+                    pend[:, b0 + dst] = pend[:, b0 + idx]
+                pend[:, 3 * P, dst] = pend[:, 3 * P, idx]
+                conv[3 + dst] = conv[3 + idx]
+        if split:   # the GPU wrote row r's K / V at p0 + r: move the accepted ones to p0 + 0..k
+            from qwen38_kv_cache import seg_locate
+            p0, seg = mb.pos, mb.kv_seg
+            for i, ch in enumerate(mb.chunks):
+                kv = mb.kv[i]
+                for j in ch["att_j"]:
+                    for t in range(1, k1):
+                        si, ri, _ = seg_locate(seg, p0 + path[t])
+                        di, rd, _ = seg_locate(seg, p0 + t)
+                        kv[f"k{j}_{di}"][1][:, :, rd] = kv[f"k{j}_{si}"][1][:, :, ri]
+                        kv[f"ks{j}_{di}"][1][:, rd] = kv[f"ks{j}_{si}"][1][:, ri]
+                        kv[f"v{j}_{di}"][1][:, rd] = kv[f"v{j}_{si}"][1][:, ri]
+                        kv[f"vs{j}_{di}"][1][:, rd] = kv[f"vs{j}_{si}"][1][:, ri]
+        else:       # the entry's new K / V rows, read by accept()
+            for ch in mb.chunks:
+                ow = ch["ow"][mb._last]
+                for j in ch["att_j"]:
+                    for n in (f"k{j}_new", f"v{j}_new"):
+                        ow[n][:, dst] = ow[n][:, idx]
+        return True
+
+    # ---- the cycle ----
+    def cycle(self, eng, anchor, samp, rng, seen, hist, dry, orig):
+        """eng.draft_cycle replacement: (new tokens, committed) or orig(...) for a chain cycle."""
+        import qwen38_server as S
+        mb, d = self.mb, eng.drafter
+        temp = samp[0]
+        lazy = hasattr(d, "flush")
+        if temp > 0 or not lazy or eng.ngram is not None:   # sampling / prompt lookup: the served chain
+            self.req["other"] += 1
+            return orig(anchor, samp, rng, seen, hist, dry)
+        p = mb.pos
+        t0 = time.perf_counter()
+        now = time.perf_counter()
+        if now < eng.verify_end + S.DRAFT_GAP:
+            time.sleep(eng.verify_end + S.DRAFT_GAP - now)
+        path0, info = d.propose(anchor, p)
+        drafts = [int(t) for t in path0]
+        f = info._make_logits
+        cl = dict(zip(f.__code__.co_freevars, (c.cell_contents for c in f.__closure__)))
+        raw, rr = cl["raw"], cl.get("r")
+        cand = info["cand"].numpy()
+        unary = np.take_along_axis(raw, cand, 1).astype(np.float32) * (1.0 if rr is None else np.asarray(rr, np.float32)[:, None])
+        hp = info["hp"].numpy().astype(np.float32)
+        parent, tok, depth, prob, ctok, cprob = build_tree(anchor, cand, unary, hp, self.pc, self.sc)
+        chain_like = is_chain(parent, tok, ctok)
+        use_tree = not chain_like
+        if POLICY == "always":
+            use_tree = True
+        elif POLICY == "dink" and use_tree:
+            ctx = mb.ctx
+            gain = float(prob[1:].sum() - sum(cprob))
+            dt = self.ms.get(("tree", ctx), 0.0) - self.ms.get(("chain", ctx), 0.0)
+            use_tree = gain > self.lam * max(dt, 0.0)
+        t1 = time.perf_counter()
+        if not use_tree:   # the served chain with these drafts (the chain cycle's own code path)
+            r = self._chain(eng, anchor, drafts, samp, rng, seen, hist, dry, t0, t1, p)
+            return r
+        anc, ctap, lo, hi = masks(parent)
+        out = self.call(tok, depth, anc, ctap, lo, hi)
+        if out is None:
+            return self._chain(eng, anchor, drafts, samp, rng, seen, hist, dry, t0, t1, p)
+        lg, split = out
+        t2 = eng.verify_end = time.perf_counter()
+        kids = {}
+        for r_ in range(1, len(tok)):
+            kids.setdefault(int(parent[r_]), {})[int(tok[r_])] = r_
+        v, path, nxt = 0, [0], None
+        while True:
+            a = int(np.argmax(lg[v]))
+            c = kids.get(v, {}).get(a)
+            if c is None:
+                nxt = a
+                break
+            if a in eng.stops:
+                nxt = a
+                break
+            seen[a] = 1.0
+            path.append(c)
+            v = c
+        k = len(path) - 1
+        t3 = time.perf_counter()
+        moved = self.compact(path, split)
+        feats = mb.features(8)[path]
+        d.add_context(feats, np.arange(p, p + k + 1), flush=False)
+        mb.accept(k + 1)
+        t4 = time.perf_counter()
+        for key, dt in (("draft", t1 - t0), ("verify", t2 - t1), ("sample", t3 - t2), ("ctx", t4 - t3)):
+            eng.tm[key] += dt
+        eng.cycles += 1
+        eng.acc_hist[min(k, 7)] += 1
+        self._account("tree", mb.ctx, 1e3 * (t2 - t1), k + 1, moved)
+        if self.rec is not None:
+            self.rec.append({"p0": p, "parent": parent, "tok": tok, "prob": prob, "ctok": ctok, "cprob": cprob,
+                             "tree": 1, "path": path + [-1] * (8 - len(path)), "nxt": nxt, "ms": 1e3 * (t2 - t1)})
+        committed = [anchor] + [int(tok[r_]) for r_ in path[1:]]
+        return [int(tok[r_]) for r_ in path[1:]] + [nxt], committed
+
+    def _chain(self, eng, anchor, drafts, samp, rng, seen, hist, dry, t0, t1, p):
+        """the release chain cycle's verify / accept / commit (draft_cycle after propose), greedy"""
+        mb, d = self.mb, eng.drafter
+        lg = mb.call([anchor] + drafts)
+        t2 = eng.verify_end = time.perf_counter()
+        k, nxt = 0, None
+        while k < 7:
+            dk = drafts[k]
+            top = int(np.argmax(lg[k]))
+            if top != dk:
+                nxt = top
+                break
+            if dk in eng.stops:
+                nxt = dk
+                break
+            seen[dk] = 1.0
+            k += 1
+        if nxt is None:
+            nxt = int(np.argmax(lg[7]))
+        t3 = time.perf_counter()
+        d.add_context(mb.features(k + 1), np.arange(p, p + k + 1), flush=False)
+        mb.accept(k + 1)
+        t4 = time.perf_counter()
+        for key, dt in (("draft", t1 - t0), ("verify", t2 - t1), ("sample", t3 - t2), ("ctx", t4 - t3)):
+            eng.tm[key] += dt
+        eng.cycles += 1
+        eng.acc_hist[k] += 1
+        self._account("chain", mb.ctx, 1e3 * (t2 - t1), k + 1, False)
+        if self.rec is not None:
+            self.rec.append({"p0": p, "parent": np.arange(-1, 7), "tok": np.array([anchor] + drafts), "prob": np.zeros(8),
+                             "ctok": drafts, "cprob": [0.0] * 7, "tree": 0, "path": list(range(k + 1)) + [-1] * (7 - k),
+                             "nxt": nxt, "ms": 1e3 * (t2 - t1)})
+        return drafts[:k] + [nxt], [anchor] + drafts[:k]
+
+    def _account(self, kind, ctx, ms, ntok, moved):
+        q = self.req
+        q["cycles"] += 1; q[kind] += 1; q["tok"] += ntok; q[f"{kind}_tok"] += ntok; q[f"{kind}_ms"] += ms
+        q["nonprefix"] += int(moved)
+        key = (kind, ctx)
+        self.ms[key] = ms if key not in self.ms else 0.9 * self.ms[key] + 0.1 * ms
+        cyc = ms + 14.0
+        self.lam = 0.98 * self.lam + 0.02 * (ntok / cyc)
+
+    def request_end(self):
+        q = self.req
+        if q["cycles"]:
+            tv = lambda k: q[f"{k}_tok"] / max(1, q[k])  # noqa: E731
+            self.log(f"tree: {q['cycles']} cycles: tree {q['tree']} ({tv('tree'):.2f} tok/verify, "
+                     f"{q['tree_ms'] / max(1, q['tree']):.1f} ms), chain {q['chain']} ({tv('chain'):.2f} tok/verify, "
+                     f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}; accepted path off the chain rows "
+                     f"in {q['nonprefix']}")
+        if self.rec:
+            od = Path(LOGDIR); od.mkdir(parents=True, exist_ok=True)
+            fn = od / f"tree_{int(time.time() * 1e3)}.npz"
+            R = self.rec
+            np.savez(fn, p0=np.array([r["p0"] for r in R]), parent=np.stack([r["parent"] for r in R]),
+                     tok=np.stack([r["tok"] for r in R]), prob=np.stack([r["prob"] for r in R]),
+                     tree=np.array([r["tree"] for r in R]), path=np.array([r["path"] for r in R]),
+                     nxt=np.array([r["nxt"] for r in R]), ms=np.array([r["ms"] for r in R]))
+            self.rec.clear()
+        self.req = self._req_stats()
+
+
+def install(eng, log=print):
+    """eng: the V8Engine. Replaces the release Engine.draft_cycle (which V8Engine.draft_cycle calls) per instance."""
+    import qwen38_server as S
+    t = Tree(eng, log)
+    orig = S.Engine.draft_cycle.__get__(eng)
+
+    def draft_cycle(self_, anchor, samp, rng, seen, hist=None, dry=None):
+        return t.cycle(eng, anchor, samp, rng, seen, hist, dry, orig)
+    S.Engine.draft_cycle = draft_cycle
+    gen0 = eng.generate
+
+    def generate(*a, **k):
+        try:
+            return gen0(*a, **k)
+        finally:
+            t.request_end()
+    eng.generate = generate
+    eng.tree = t
+    return t
