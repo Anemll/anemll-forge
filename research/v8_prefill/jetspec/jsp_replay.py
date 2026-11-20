@@ -96,13 +96,31 @@ class Trace:
 
 
 # ---------------------------------------------------------------- the replay target
+def mmap_bf16(path, name):
+    """A BF16 tensor of a safetensors file as a read-only memory map (file-backed pages, nothing copied)."""
+    import struct
+    with open(path, "rb") as f:
+        n = struct.unpack("<Q", f.read(8))[0]
+        hdr = json.loads(f.read(n))
+    meta = hdr[name]
+    assert meta["dtype"] == "BF16", meta["dtype"]
+    a, b = meta["data_offsets"]
+    arr = np.memmap(path, dtype=np.uint16, mode="r", offset=8 + n + a, shape=tuple(meta["shape"]))
+    assert arr.nbytes == b - a
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return torch.from_numpy(arr).view(torch.bfloat16)
+
+
 class CpuEmbedding(nn.Module):
-    """The 2.5 GB table stays on the CPU; looked-up rows go to the compute device."""
+    """The 2.5 GB table stays on the CPU, memory-mapped from the checkpoint (20 Nov 2026: file-backed pages instead
+    of a 2.5 GB copy); looked-up rows go to the compute device."""
 
     def __init__(self, vocab, width, device, dtype):
         super().__init__()
-        self.weight = nn.Parameter(torch.empty(vocab, width, dtype=dtype), requires_grad=False)
-        self.out_device = device
+        self.weight = None
+        self.shape, self.out_device = (vocab, width), device
 
     def forward(self, ids):
         return torch.nn.functional.embedding(ids.cpu(), self.weight).to(self.out_device)
@@ -139,6 +157,10 @@ class ReplayTarget(nn.Module):
         index = json.loads((root / "model.safetensors.index.json").read_text())["weight_map"]
         own = {k: v for k, v in self.state_dict().items()
                if not (k.startswith("model.layers.") and int(k.split(".")[2]) not in self.tail)}
+        en = "model.language_model.embed_tokens.weight"
+        w = mmap_bf16(str(root / index[en]), en)
+        assert tuple(w.shape) == self.model.embed_tokens.shape and dtype == torch.bfloat16
+        self.model.embed_tokens.weight = w
 
         def source(name):
             return "lm_head.weight" if name == "lm_head.weight" else "model.language_model." + name[len("model."):]
@@ -151,7 +173,7 @@ class ReplayTarget(nn.Module):
                         x = f.get_tensor(source(n))
                         assert tuple(x.shape) == tuple(t.shape), (n, x.shape, t.shape)
                         t.copy_(x.to(dtype=dtype))
-        self.loaded = sorted(own)
+        self.loaded = sorted(own) + ["model.embed_tokens.weight (memory-mapped)"]
 
 
 class ReplayCache:
@@ -321,6 +343,73 @@ def load_adapter_lowmem(path, device, dtype):
     return head
 
 
+def check_only_load_target_tensors(root, names, *, file_pins=None, prefixes=()):
+    """hybrid.HybridAnchorDecoder.from_checkpoint's verification read (20 Nov 2026): the reference loads the tail
+    tensors (layers 62 / 63, norm, lm_head: 3.5 GB) only to check them and drops them (the decoder views the target's
+    own). Same checks (file SHA256 pins, the index, missing / unexpected names), shapes from the safetensors headers,
+    nothing materialized; returns {} (the caller ignores the value)."""
+    from safetensors import safe_open
+    from jetspec.engines.jetspec_plus_plus.draft.reference.models import decoder as D
+    root = Path(root).resolve(strict=True)
+
+    def checked(name):
+        path = (root / name).resolve(strict=True)
+        if Path(name).is_absolute() or ".." in Path(name).parts:
+            raise ValueError(f"target-file path escapes the target directory: {name}")
+        if file_pins is not None:
+            if name not in file_pins:
+                raise ValueError(f"target-slice decoder lacks pin for {name}")
+            with path.open("rb") as stream:
+                actual = hashlib.file_digest(stream, "sha256").hexdigest()
+            if actual != file_pins[name]:
+                raise ValueError(f"target-file SHA256 mismatch: {name}")
+        return path
+    index = root / "model.safetensors.index.json"
+    weight_map = json.loads(checked(index.name).read_text())["weight_map"]
+    missing = set(names) - set(weight_map)
+    if missing:
+        raise ValueError(f"target-slice decoder missing tensors: {sorted(missing)}")
+    unexpected = {n for n in weight_map if n.startswith(prefixes)} - set(names)
+    if unexpected:
+        raise ValueError(f"target-slice decoder unexpected tensors: {sorted(unexpected)}")
+    for shard in sorted({weight_map[n] for n in names}):
+        with safe_open(str(checked(shard)), framework="pt") as handle:
+            for n in names:
+                if weight_map[n] == shard:
+                    handle.get_slice(n).get_shape()
+    del D
+    return {}
+
+
+PRELOADED = {}
+
+
+def preload_drafter(release, device, dtype):
+    """The B16 drafter head before the target (20 Nov 2026): the reference load_drafter builds it on the CPU and loads the
+    whole state on the CPU before moving it (6.4 GB transient); done first, that peak does not stack on the target."""
+    from jetspec.engines.jetspec_plus_plus.draft.reference.models import drafter as DR
+    head = DR.load_drafter(release, device=device, dtype=dtype, model_family="27b")
+    PRELOADED["head"] = (str(release), str(device), dtype, head)
+    load0 = DR.load_drafter
+
+    def load_drafter(checkpoint, *, device, dtype, model_family="auto", **kw):
+        r, d, t, h = PRELOADED["head"]
+        if (str(checkpoint), str(device), dtype) == (r, d, t) and model_family in ("27b", "auto") and not kw:
+            return h
+        return load0(checkpoint, device=device, dtype=dtype, model_family=model_family, **kw)
+    DR.load_drafter = load_drafter
+
+
+def mem(tag):
+    import gc, resource
+    gc.collect()
+    mps = ""
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+        mps = f", MPS {torch.mps.current_allocated_memory() / 1e9:.1f} GB (driver {torch.mps.driver_allocated_memory() / 1e9:.1f})"
+    print(f"MEM {tag}: max RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9:.1f} GB{mps}", flush=True)
+
+
 def patch_adapter_loader():
     from jetspec.engines.jetspec_plus_plus.draft.reference.models import adapter as A
     A.load_adapter = load_adapter_lowmem
@@ -434,9 +523,15 @@ def main():
     if a.limit:
         dirs = dirs[:a.limit]
     t0 = time.time()
+    H.load_target_tensors = check_only_load_target_tensors
+    if not a.tiny:
+        preload_drafter(a.release, a.device, dtype)
+        mem("drafter head preloaded")
     llm = make_llm(a.target_root, a.device, dtype, eos=set() if a.tiny else EOS)
+    mem("target loaded")
     t_target = time.time() - t0
     drafter, config, t_build = build(llm, release=a.release, schedule=a.schedule, dataset=a.dataset)
+    mem("drafter built")
     rows = OutcomeRows(drafter, llm.runner) if a.rows == "outcome" else None
     banner = dict(jetspec_src=str(SRC), jetspec_commit=os.popen(f"git -C {SRC} rev-parse HEAD").read().strip(),
                   rows=a.rows, dataset=a.dataset,

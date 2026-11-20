@@ -22,12 +22,12 @@ capture)
 check)
   for r in all outcome; do
     $PY $J/jsp_replay.py --traces $CAP/traces --limit 1 --max-new 64 --rows $r --out $RES/check_$r.json > $RES/check_$r.log 2>&1 & BP=$!
-    $WD $BP 1536 $RES/check_$r.watchdog.log >/dev/null 2>&1 &
+    $WD $BP 3072 $RES/check_$r.watchdog.log >/dev/null 2>&1 &
     wait $BP || { echo "check $r failed"; tail -20 $RES/check_$r.log; exit 1; }
     tail -3 $RES/check_$r.log
   done;;
 replay)
   $PY $J/jsp_replay.py --traces $CAP/traces --max-new 2048 --rows outcome --schedule J3-R3 --out $RES/replay_j3r3.json > $RES/replay_j3r3.log 2>&1 & BP=$!
-  $WD $BP 1536 $RES/replay.watchdog.log >/dev/null 2>&1 &
+  $WD $BP 3072 $RES/replay.watchdog.log >/dev/null 2>&1 &
   wait $BP; echo "replay rc $?"; tail -5 $RES/replay_j3r3.log;;
 esac

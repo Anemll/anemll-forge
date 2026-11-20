@@ -170,3 +170,70 @@ v8_dec8t, `TREE_POLICY=branched`; banner as above). Compared with `bench/compare
 - **Not like-for-like:** the replies diverge (fluent near-tie flips from the conv-tap numerics, as in the smoke test;
   e.g. 8K mt-bench 2 from char 2), so the texts and their acceptance differ. The offline estimate on the chain's own
   texts is +3.4% tok/verify (A1b). The exact-on-chain conv form is needed for a fair A/B and for identity.
+
+## A5. DeltaNet solve and tree conv forms at 8 / 16 / 32 rows (`gdnwy/`, scratch probe, deleted)
+
+`v8/build_gdn_wy_probe.py`: the 3 DeltaNet mixers of layers 0-2 (served weight constants) as verify entries, one
+package per P; compiled with forge.py compile (29 s), timed with `tree_decomp_time.py` (median of 30). Forge down.
+ms per 3 layers; "exact" = bit-identical to the served form under chain masks:
+
+| form | 8 rows | 16 rows | 32 rows | exact |
+|---|---|---|---|---|
+| served (`inv`: log-depth Neumann inverse over T rows) | 1.74 | 2.21 | 4.03 | (reference) |
+| no solve (`none`: timing floor, wrong output) | 1.75 | 1.74 | 1.92 | |
+| block inverse, 8-row blocks (`blk`) | | 1.98 | 2.73 | no (rel 1.8e-3 / 2.1e-3) |
+| block forward substitution (`bfs`) | | 1.98 | 2.44 | no (rel 1.7e-3 / 2.0e-3) |
+| tree conv taps, one-hot matmul (19 Nov form, `tc`) | 2.03 | 2.87 | 5.61 | no (rel 3.0e-3 / 2.5e-3 / 2.4e-3) |
+| tree conv taps channel-major (`tcT`) | 2.36 | 3.39 | 6.62 | no |
+| served conv + correction exact on chain-tap rows (`tcC`) | 2.28 | 3.22 | 5.97 | yes at 8 and 32 (16: rel 3.2e-4) |
+| channel-major taps + block inverse (`tcTb`) | | 3.14 | 5.32 | no |
+
+- **The UT solve is the DeltaNet's whole row cost:** without it the 3 layers cost the same at 8, 16 and 32 rows.
+  Block forward substitution takes 32 rows from 4.03 to 2.44 ms (16 rows: 2.21 -> 1.98).
+- **The tree's conv taps are now the main wide-tree cost** (+0.29 / +0.66 / +1.58 ms per 3 layers at 8 / 16 / 32
+  rows, x 16 groups); the channel-major layout is worse.
+- **Exact tree8:** the correction form is bit-identical to the served form on chain-tap rows but costs +0.54 ms per
+  group at 8 rows (+9% of a verify) against +0.29 (+5%) for the inexact taps.
+
+## A6. Can 16 / 32 rows be cheap on the ANE? The cost build-up (analysis)
+
+Per target group at 8K (ms; the served chain8 group = 5.06), each term measured in A2 / A5:
+
+| term | 16 rows | 32 rows |
+|---|---|---|
+| FFN | +0.06 | +0.12 |
+| DeltaNet solve, best form (block forward substitution) | +0.24 | +0.70 |
+| tree conv taps (one-hot matmul; the exact form costs more) | +0.66 | +1.58 |
+| attention at 8K of KV (at 64K: +1.45 / +3.73) | +0.19 | +0.53 |
+| group total | +1.15 (+23%) | +2.93 (+58%) |
+| head: two / four 8-row head calls (+5.5 / +16.5 ms per verify), or a wider head entry (FFN-like, about +0.2) | | |
+
+Projected verify cost with the best forms: 16 rows about +23% (+29% with two head calls), 32 rows about +58%; at 64K
+the attention adds +25% / +63% more unless the split path's GPU attention takes 16 / 32 rows (its kernel is 8-row).
+With the realistic-set simulator (A1b), a dynamic chain / 8 / 16 / 32 policy gains +2.9-5.2% over the chain if 16 / 32
+rows cost +14% / +30%, +4-7% at +10% / +20%, +8-10.5% at +5% / +10%. At +23% / +58% it gains about what tree8 alone
+gains. **What would make wide trees pay here:** a cheap tree conv (the taps are now the largest term: a form that
+gathers only the 3 rows before each branch, or a conv-friendly tree layout), the block solve, a 16 / 32-row head
+entry, and for long contexts the split verify's GPU attention at 16 / 32 rows. Each is a build plus runtime work; not
+started tonight (the projected gain over tree8 is 2-4% at the reachable costs).
+
+## B. JetSpec++ (JetX) by replay on our target (`jetspec/`)
+
+**Capture** (00:48-00:53, forge down; `v8_work/jetspec/phaseB.sh capture` -> `jsp_capture_server.sh` on port 8771, the
+served configuration of v8_server_dec8_qk.sh with `pipe/v8_server_tapdump.py`; banner in
+`/Volumes/SSD4TB/anemll-forge-research/jetspec_pp/capture_gsm8k32_20nov/banner.txt`: v8_server.py f0be4385, dylib
+ea591258, libdec_gpu_clk 2b64e979, build v8_dec8 manifest b59b6319, ka on): gsm8k prompts 0-31 of
+`27b-prompts_gsm8k128.json` (sha 2ac6748d), greedy, thinking off, presence 0, max 2,112 tokens. 32 traces (915 MB),
+14,984 generated tokens (one capped at 2,112). The served DFlash2 chain on these: 6.4-7.3 tok/verify per request
+(`jetspec/capture_decode_lines.txt`).
+
+**Replay memory (fixed tonight):** the full replay had never run on the real artifacts. It peaked above the free
+25 GB (the swap watchdog stopped it twice at +1.5 GB): Metal allocations do not show in RSS. Changes in
+`jsp_replay.py` (copies `jsp_replay.pre_resume.py`, `jsp_replay.pre_mem.py` kept): the B16 drafter head is loaded
+before the target (its CPU build + CPU state, 6.4 GB transient, no longer stacks on the target); the hybrid decoder's
+verification read of the tail tensors (3.5 GB, dropped by the reference) checks the pins, names and header shapes only;
+the 2.5 GB CPU embedding table is memory-mapped from the checkpoint; resume from the output file. Then: MPS 16.6 GB
+after load, swap +2.2 GB during load and back to +0 after (watchdog limit +3 GB for the replay).
+
+**Check** (1 trace x 64 tokens): `--rows all` and `--rows outcome` give the same accept lengths
+[7, 4, 6, 1, 3, 16, 3, 16, 7] (9 / 9 hits, lossless), 13.77 against 1.97 s per round.
