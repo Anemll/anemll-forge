@@ -42,7 +42,8 @@ RR = `/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/
     (JetSpec++); T and U (why Splash's tree pays, prompt lookup, 16-row cost)
   - `RR/results/21nov/README.md` (tree8 served, fresh vs used server, ring fix, sysk crash), `RR/results/21nov/pi_decode/`
     (real Pi sessions), `RR/results/21nov/tree_sampled/` (tree8 for sampled requests)
-- **Server:** `C/pipe/v8_server.py` (V8 engine: GPU + ANE prefill, decode on the ANE with GPU attention, prompt cache);
+- **Server:** `C/pipe/v8_server.py` (V8 engine: GPU + ANE prefill, decode verify on the ANE with GPU attention only at
+  the 96K entry (`C/pipe/dec_split.py` `use()`), prompt cache);
   `C/pipe/tree_verify.py` (tree8: build_tree, masks, call, compact, walk_sampled); the base
   `/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py` (Engine.draft_cycle, dist,
   sampling) and `dflash2_coreai_drafter.py` in the same folder.
@@ -60,11 +61,13 @@ RR = `/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/
   ..%, ms/cycle M (draft d verify v sample s ctx c host h))". Sampled requests (temperature > 0) are Pi's.
 
 ## State and the numbers that matter
-- **Cycle budget:** DFlash2 drafter (7 drafts, ANE) about 13 ms + one 8-row target verify (ANE FFN and DeltaNet, GPU
-  attention with a clock keep-alive): 94-97 ms at 2-8K, about 106 at 16-32K, about 121 at 32-64K, about 136 at 57K.
-  Host work under 1 ms. Verify is about 85% of a cycle; tok/s = 1000 x tok/verify / ms per cycle.
-- **Served config (21 Nov):** tree8 (a dynamic top-7 tree in the 8 verify rows, used only when it differs from the
-  chain), prompt lookup off, DRAFT_RING_SNAP=fix, TREE_SAMPLED=1 (tree8 for sampled requests, from 21 Nov 10:32).
+- **Cycle budget:** DFlash2 drafter (7 drafts, ANE) about 13 ms + one 8-row target verify: 94-97 ms at 2-8K, about
+  106 at 16-32K, about 121 at 32-64K, about 136 at 57K. Up to the 64K entry the whole verify (FFN, DeltaNet,
+  attention) runs on the ANE; at the 96K entry attention moves to the GPU (split verify, clock keep-alive). Host work
+  under 1 ms. Verify is about 85% of a cycle; tok/s = 1000 x tok/verify / ms per cycle.
+- **Served config (21 Nov, forge pid 73029):** tree8 (a dynamic top-7 tree in the 8 verify rows, used only when it
+  differs from the chain), prompt lookup off, DRAFT_RING_SNAP=fix, TREE_SAMPLED=1 (tree8 for sampled requests, from
+  10:32), COLD_SCRUB off.
 - **Greedy tree8 vs chain, end to end** (20 Nov U1): +4.6 / +6.5 / +4.9 / +1.9% tok/s at 2K / 8K / 32K / 64K. On
   identical texts the gain is +0.5-3% (chat +8%). Prompt lookup (NGRAM_DRAFT) gives +101% on full-file code edits and
   is neutral elsewhere.
@@ -76,9 +79,10 @@ RR = `/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/
   Parked until there are two execution units.
 - **Real Pi use** (sampled at temperature 1.0, thinking on, 6K-57K context): the 21 Nov session ran at 33.5 tok/s and
   4.10 tok/verify. Until 21 Nov tree8 skipped every sampled cycle (tree_verify.py: sampled -> chain).
-- **Sampled tree8 A/B** (same prompts and seeds, fresh launches): +8.5% tok/s overall (27 of 36 paired requests faster): 8K +9.0%, 32K +11.6%, code +10.9%,
-  agent -1.6% (noise level; it already accepts 5.2 per verify). tok/verify 3.91 -> 4.35, ms per cycle +2.4%.
-  The tree runs in 52-82% of sampled cycles (`RR/results/21nov/tree_sampled/`).
+- **Sampled tree8 A/B** (same prompts and seeds, fresh launches): +8.5% tok/s overall, 27 of 36 paired requests
+  faster: 8K +9.0%, 32K +11.6%, code +10.9%, agent -1.6% (noise level; it already accepts 5.2 per verify).
+  tok/verify 3.91 -> 4.35, ms per cycle +2.4%. The tree runs in 52-82% of sampled cycles
+  (`RR/results/21nov/tree_sampled/`).
 - **Power:** about 22-25 W total during decode (CPU + GPU about 2 W): 0.48-0.62 J per generated token greedy, 0.73-0.88
   Pi-like.
 - **Known open items:**
