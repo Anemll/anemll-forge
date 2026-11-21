@@ -1,0 +1,1186 @@
+{
+ "label": "lga_len16_srm",
+ "banner": "BANNER [lga_len16_srm] prompts realistic_v1.json sha 693e3097d942e5a5 gen 384 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on lookup_gate=len:16 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)",
+ "banner_parts": {
+  "lookup": "on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off)",
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on lookup_gate=len:16 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)"
+ },
+ "prompts_sha": "693e3097d942e5a5",
+ "gen": 384,
+ "temp": 1.0,
+ "think": 1,
+ "seed": 5100,
+ "started": "2026-11-21 14:41:06",
+ "rungs": {
+  "2k": [
+   {
+    "t0": 1795300871.9496179,
+    "t_first": 1795300872.553764,
+    "t_last": 1795300875.9983602,
+    "t_end": 1795300875.998424,
+    "ttft_s": 0.6041462421417236,
+    "completion_tokens": 187,
+    "prompt_tokens": 76,
+    "tool_calls": 0,
+    "decode_tps": 53.99762328672355,
+    "usage": {
+     "prompt_tokens": 112,
+     "completion_tokens": 187,
+     "total_tokens": 299,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 187,
+     "tps": 52.5,
+     "tok_verify": 5.84,
+     "accept_pct": 69,
+     "hist": "0:3% 1:9% 2:9% 3:16% 4:3% 5:6% 6:6% 7:47%",
+     "ms_cycle": 111,
+     "draft_ms": 13.2,
+     "verify_ms": 96.0,
+     "tree_cycles": 11,
+     "tree_tv": 3.82,
+     "tree_ms": 98.8,
+     "chain_cycles": 21,
+     "chain_tv": 6.9,
+     "chain_ms": 94.5,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple arithmetic. Need final with step by step and boxed. Let's compute: Carmen 100, Samantha 100+25=125, Daisy 125+50=175. Sum=100+125+175=400. Final boxed.\nCarmen has $100.\n\nSamantha has $25 more than Carmen:\n\n\\[\n100 + 25 = 125\n\\]\n\nDaisy has $50 more than Samantha:\n\n\\[\n125 + 50 = 175\n\\]\n\nNow add all three amounts:\n\n\\[\n100 + 125 + 175 = 400\n\\]\n\n\\[\n\\boxed{400}\n\\]",
+    "seed": 5103,
+    "server_prefill": [
+     [
+      112,
+      0.5
+     ]
+    ],
+    "sha": "0bd7b3935af7524d",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.4445960521698,
+     "mean_w": {
+      "system_power": 14.869049224852246,
+      "total_power": 19.627344131469727,
+      "cpu_power": 1.7205093113120287,
+      "gpu_power": 0.0046949244019298805,
+      "ane_power": 0.0,
+      "dram_power": 3.033090670903524
+     },
+     "energy_j": 67.60827210983871,
+     "net_total_w": 8.751479387283325,
+     "net_energy_j": 30.14531134808152
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795300876.310754,
+    "t_first": 1795300876.914987,
+    "t_last": 1795300884.7137659,
+    "t_end": 1795300884.713831,
+    "ttft_s": 0.6042330265045166,
+    "completion_tokens": 384,
+    "prompt_tokens": 87,
+    "tool_calls": 0,
+    "decode_tps": 49.110253179343395,
+    "usage": {
+     "prompt_tokens": 123,
+     "completion_tokens": 384,
+     "total_tokens": 507,
+     "prompt_tokens_details": {
+      "cached_tokens": 49
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 48.5,
+     "tok_verify": 5.57,
+     "accept_pct": 61,
+     "hist": "0:6% 1:12% 2:9% 3:13% 4:12% 5:12% 6:10% 7:28%",
+     "ms_cycle": 115,
+     "draft_ms": 12.4,
+     "verify_ms": 96.9,
+     "lookup_cycles": 4,
+     "lookup_tok_verify": 7.25,
+     "tree_cycles": 37,
+     "tree_tv": 4.14,
+     "tree_ms": 98.1,
+     "chain_cycles": 28,
+     "chain_tv": 6.46,
+     "chain_ms": 95.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple math. Need solve. Let's parse: Cat eats nine sausages in 30 minutes. Dog can eat same number in 2/3 the amount of time cat takes. Calculate average time the two take to eat the sausages. Ambiguity: \"the two take the eat the sausages\" likely if cat and dog eat together? Or average of their times? Let's examine wording: \"A cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in 2/3 the amount of time the cat takes. Calculate the average time the two take the eat the sausages.\" Maybe they ask average time the two take to eat the sausages (together)? Could be combined rate. Need reason.\n\nCat rate: 9 sausages/30 min = 0.3 sausages/min or 1/3 min per sausage. Dog eats 9 saus\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nThe cat eats 9 sausages in 30 minutes, so the cat\u2019s rate is:\n\n\\[\n\\frac{9}{30}=\\frac{3}{10}\n\\]\n\nsausages per minute.\n\nThe dog eats the same 9 sausages in \\(\\frac{2}{3}\\) of the cat\u2019s time:\n\n\\[\n\\frac{2}{3}\\times 30 = 20\n\\]\n\nminutes.\n\nSo the dog\u2019s rate is:\n\n\\[\n\\frac{9}{20}\n\\]\n\nsausages per minute.\n\nIf they eat together, their combined rate is:\n\n\\[\n\\frac{3}{10}+\\frac{9}{20}\n\\]\n\n\\[\n=\\frac{",
+    "seed": 5104,
+    "server_prefill": [
+     [
+      74,
+      0.5
+     ]
+    ],
+    "sha": "e0b3a7bbd02f9216",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 7.798778772354126,
+     "mean_w": {
+      "system_power": 19.055933860387718,
+      "total_power": 23.908982140677317,
+      "cpu_power": 1.6304869489723164,
+      "gpu_power": 0.003318843682350823,
+      "ane_power": 0.0,
+      "dram_power": 3.2192424876349315
+     },
+     "energy_j": 186.46086238730817,
+     "net_total_w": 13.033117396490915,
+     "net_energy_j": 101.64239928935262
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795300885.023354,
+    "t_first": 1795300885.4148219,
+    "t_last": 1795300893.586717,
+    "t_end": 1795300893.586781,
+    "ttft_s": 0.391467809677124,
+    "completion_tokens": 384,
+    "prompt_tokens": 68,
+    "tool_calls": 0,
+    "decode_tps": 46.86795397236946,
+    "usage": {
+     "prompt_tokens": 104,
+     "completion_tokens": 384,
+     "total_tokens": 488,
+     "prompt_tokens_details": {
+      "cached_tokens": 49
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 46.3,
+     "tok_verify": 5.33,
+     "accept_pct": 58,
+     "hist": "0:10% 1:8% 2:17% 3:8% 4:12% 5:6% 6:12% 7:26%",
+     "ms_cycle": 115,
+     "draft_ms": 13.1,
+     "verify_ms": 97.0,
+     "tree_cycles": 40,
+     "tree_tv": 3.85,
+     "tree_ms": 98.0,
+     "chain_cycles": 32,
+     "chain_tv": 6.53,
+     "chain_ms": 95.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple number theory. Need reason step by step. Problem: product 240*k perfect cube. Find smallest positive integer k.\n\nWe need factor 240. 240 = 24*10 = 2^3*3 * 2*5 = 2^4*3^1*5^1. For product to be cube, exponents of primes must multiples of 3. Existing exponents: 2:4, 3:1, 5:1. Need k provide exponents e2,e3,e5 nonnegative integers minimal such that 4+e2 \u22610 mod3 => e2\u22612 mod3 minimal 2. 1+e3\u22610 mod3 => e3\u22612 minimal 2. 1+e5 => e5\u22612 minimal 2. Could also include other primes? If\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nFactor \\(240\\) into primes:\n\n\\[\n240 = 24\\cdot 10 = (2^3\\cdot 3)(2\\cdot 5)=2^4\\cdot 3^1\\cdot 5^1.\n\\]\n\nFor \\(240k\\) to be a perfect cube, every prime exponent in its prime factorization must be a multiple of \\(3\\).\n\nSo we need:\n\n- The exponent of \\(2\\): \\(4 + e_2 \\equiv 0 \\pmod{3}\\). Since \\(4 \\equiv 1 \\pmod{3}\\), we need \\(e_2 \\equiv 2 \\pmod{3}\\). Smallest is \\(2\\).\n- The exponent of \\(3\\",
+    "seed": 5105,
+    "server_prefill": [
+     [
+      55,
+      0.3
+     ]
+    ],
+    "sha": "195695f59a56584b",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.171895027160645,
+     "mean_w": {
+      "system_power": 18.699244390457118,
+      "total_power": 23.62333815438407,
+      "cpu_power": 1.6488036607806766,
+      "gpu_power": 0.003561008504726743,
+      "ane_power": 0.0,
+      "dram_power": 3.2717290946415494
+     },
+     "energy_j": 193.04743958874548,
+     "net_total_w": 12.747473410197667,
+     "net_energy_j": 104.17101456965686
+    },
+    "cat": "math",
+    "set": "27b-prompts_math500128",
+    "index": 0
+   },
+   {
+    "t0": 1795300893.896054,
+    "t_first": 1795300894.712843,
+    "t_last": 1795300897.745576,
+    "t_end": 1795300897.7456288,
+    "ttft_s": 0.816788911819458,
+    "completion_tokens": 109,
+    "prompt_tokens": 199,
+    "tool_calls": 0,
+    "decode_tps": 35.61144396740807,
+    "usage": {
+     "prompt_tokens": 235,
+     "completion_tokens": 109,
+     "total_tokens": 344,
+     "prompt_tokens_details": {
+      "cached_tokens": 49
+     }
+    },
+    "server": {
+     "gen": 109,
+     "tps": 34.5,
+     "tok_verify": 3.89,
+     "accept_pct": 41,
+     "hist": "0:21% 1:11% 2:21% 3:11% 4:7% 5:7% 6:11% 7:11%",
+     "ms_cycle": 113,
+     "draft_ms": 13.2,
+     "verify_ms": 97.5,
+     "tree_cycles": 23,
+     "tree_tv": 3.39,
+     "tree_ms": 97.6,
+     "chain_cycles": 5,
+     "chain_tv": 6.2,
+     "chain_ms": 96.9,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: evaluate three movie reviews on scale 1-5, return JSON array of integers. Need produce final only JSON array likely [5,1,3]. Need ensure integers. Let's think: review1 very positive: phenomenal, everything top-notch -> 5. review2 very negative: worst, disappointed -> 1. review3 neutral: okay, some enjoyed lackluster, ordinary -> 3. Return JSON array. No extra text.\n[5, 1, 3]",
+    "seed": 5106,
+    "server_prefill": [
+     [
+      186,
+      0.7
+     ]
+    ],
+    "sha": "d868a6fa3e20b966",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 3.0327329635620117,
+     "mean_w": {
+      "system_power": 16.703825717270867,
+      "total_power": 20.88984966278076,
+      "cpu_power": 1.437134339440167,
+      "gpu_power": 0.004062454771205826,
+      "ane_power": 0.0,
+      "dram_power": 2.744827151298523
+     },
+     "energy_j": 63.35333567616999,
+     "net_total_w": 10.01398491859436,
+     "net_energy_j": 30.369742159233965
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795300898.05298,
+    "t_first": 1795300898.423261,
+    "t_last": 1795300907.140915,
+    "t_end": 1795300907.1409762,
+    "ttft_s": 0.3702809810638428,
+    "completion_tokens": 217,
+    "prompt_tokens": 53,
+    "tool_calls": 0,
+    "decode_tps": 24.7773082360151,
+    "usage": {
+     "prompt_tokens": 89,
+     "completion_tokens": 217,
+     "total_tokens": 306,
+     "prompt_tokens_details": {
+      "cached_tokens": 49
+     }
+    },
+    "server": {
+     "gen": 217,
+     "tps": 24.6,
+     "tok_verify": 2.75,
+     "accept_pct": 25,
+     "hist": "0:25% 1:22% 2:32% 3:11% 4:5% 5:0% 6:0% 7:5%",
+     "ms_cycle": 112,
+     "draft_ms": 12.9,
+     "verify_ms": 97.4,
+     "lookup_cycles": 2,
+     "lookup_tok_verify": 6.5,
+     "tree_cycles": 74,
+     "tree_tv": 2.43,
+     "tree_ms": 97.5,
+     "chain_cycles": 3,
+     "chain_tv": 8.0,
+     "chain_ms": 96.2,
+     "other_cycles": 0
+    },
+    "content": "We need to respond to user: \"Write a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an immersive experience for the reader.\" Need produce final paragraph. Simple. Ensure descriptive, sensory. Maybe one paragraph. No need analysis further.\nBeneath the fluttering canopy of striped awnings, the marketplace surged with life and color. Piles of ripe apricots, emerald grapes, and saffron-dusted spices glowed under the warm sun, while baskets of fresh bread floated with the sweet, yeasty scent of morning baking. The air shimmered with a mix of cinnamon, cumin, salted fish, and ripe citrus, and the constant chatter of vendors, haggling buyers, and laughing children swirled around like music. Bells chimed from silver trays, knives rang against cutting boards, and the rustle of silk and cotton fabrics added soft whispers to the noise, as paper lanterns bobbed overhead like tiny, glowing planets in the thick, golden air.",
+    "seed": 5107,
+    "server_prefill": [
+     [
+      40,
+      0.2
+     ]
+    ],
+    "sha": "b007c8536c03e2e9",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.71765398979187,
+     "mean_w": {
+      "system_power": 19.850571608923108,
+      "total_power": 24.682837350027903,
+      "cpu_power": 1.506840552783282,
+      "gpu_power": 0.011130441377627667,
+      "ane_power": 0.0,
+      "dram_power": 3.3142947469438826
+     },
+     "energy_j": 215.17643550385455,
+     "net_total_w": 13.806972605841501,
+     "net_energy_j": 120.36440982426122
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795300907.451951,
+    "t_first": 1795300907.817661,
+    "t_last": 1795300923.520598,
+    "t_end": 1795300923.5206609,
+    "ttft_s": 0.3657100200653076,
+    "completion_tokens": 384,
+    "prompt_tokens": 74,
+    "tool_calls": 0,
+    "decode_tps": 24.390341930177343,
+    "usage": {
+     "prompt_tokens": 110,
+     "completion_tokens": 384,
+     "total_tokens": 494,
+     "prompt_tokens_details": {
+      "cached_tokens": 49
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 24.3,
+     "tok_verify": 2.74,
+     "accept_pct": 22,
+     "hist": "0:27% 1:34% 2:20% 3:11% 4:3% 5:1% 6:1% 7:4%",
+     "ms_cycle": 113,
+     "draft_ms": 12.7,
+     "verify_ms": 97.1,
+     "lookup_cycles": 4,
+     "lookup_tok_verify": 7.0,
+     "tree_cycles": 132,
+     "tree_tv": 2.26,
+     "tree_ms": 97.2,
+     "chain_cycles": 4,
+     "chain_tv": 7.75,
+     "chain_ms": 98.2,
+     "other_cycles": 0
+    },
+    "content": "We need to respond to user: \"Picture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly, a bunch of deforesters shows up to chop you down. How do you feel when those guys start hacking away at you?\"\n\nNeed produce answer likely as creative/empathetic perspective. Need final only. Need maybe write first-person as tree. Ensure not too long? User asks how do you feel. Can answer emotionally. Need maybe mention pain? Since tree doesn't feel like humans? Could personify. Need maybe be poetic. Need consider safety? No issue. Final should be in English. Let's craft vivid: confusion, alarm, betrayal, rage, grief, awareness of rings, sap, memory, roots, birds, rain. The hacking causes sharp, searing, unraveling. As an AI picture yourself? Could say \"If I imagine...\" But prompt asks picture yourself\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nI feel a sudden, shocking violation.\n\nI\u2019ve been here for a hundred years, listening to rain, sunlight, wind, birds, insects, roots speaking to roots, soil holding the memory of seasons. I thought I was part of something old and quiet.\n\nThen the noise starts.\n\nThe first cut feels like betrayal\u2014sharp, hot, brutal. It tears through bark and heartwood that took decades to grow. Sap wells out, and it feels like my own life being pulled away. The chain saw or axe isn\u2019t just removing a branch; it\u2019s slicing through time.\n\nI feel afraid. Not in the way an animal feels at first, but like something deep inside me is being ripped open. My rings\u2014every drought, every storm, every quiet summer\u2014are being unwound.\n\nI feel anger at",
+    "seed": 5108,
+    "server_prefill": [
+     [
+      61,
+      0.2
+     ]
+    ],
+    "sha": "1d8f3f4abab24e6d",
+    "decode_power": {
+     "samples": 13,
+     "seconds": 15.702936887741089,
+     "mean_w": {
+      "system_power": 19.14805838352332,
+      "total_power": 23.99853207514836,
+      "cpu_power": 1.464280424116205,
+      "gpu_power": 0.0028165591113361987,
+      "ane_power": 0.0,
+      "dram_power": 3.3833767083974986
+     },
+     "energy_j": 376.8474345744849,
+     "net_total_w": 13.12266733096196,
+     "net_energy_j": 206.06441689691746
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ],
+  "8k": [
+   {
+    "t0": 1795300923.82955,
+    "t_first": 1795300936.791284,
+    "t_last": 1795300939.9032671,
+    "t_end": 1795300939.90333,
+    "ttft_s": 12.961734056472778,
+    "completion_tokens": 180,
+    "prompt_tokens": 7496,
+    "tool_calls": 0,
+    "decode_tps": 57.519593294915964,
+    "usage": {
+     "prompt_tokens": 7532,
+     "completion_tokens": 180,
+     "total_tokens": 7712,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 180,
+     "tps": 55.7,
+     "tok_verify": 6.21,
+     "accept_pct": 74,
+     "hist": "0:3% 1:7% 2:3% 3:10% 4:14% 5:3% 6:7% 7:52%",
+     "ms_cycle": 111,
+     "draft_ms": 13.2,
+     "verify_ms": 96.0,
+     "tree_cycles": 10,
+     "tree_tv": 3.9,
+     "tree_ms": 99.0,
+     "chain_cycles": 19,
+     "chain_tv": 7.42,
+     "chain_ms": 94.4,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple arithmetic. Let's reason: Carmen 100. Samantha = 100+25=125. Daisy = 125+50=175. Combined=100+125+175=400. Need final boxed.\nCarmen has \\$100.\n\nSamantha has \\$25 more than Carmen:  \n\\[\n100 + 25 = 125\n\\]\n\nDaisy has \\$50 more than Samantha:  \n\\[\n125 + 50 = 175\n\\]\n\nTogether, they have:  \n\\[\n100 + 125 + 175 = 400\n\\]\n\n\\[\n\\boxed{400}\n\\]",
+    "seed": 5203,
+    "server_prefill": [
+     [
+      7532,
+      12.8
+     ]
+    ],
+    "sha": "82c605c50d5bbc75",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.111983060836792,
+     "mean_w": {
+      "system_power": 30.77386826553034,
+      "total_power": 38.348601659139,
+      "cpu_power": 1.9786254010289728,
+      "gpu_power": 2.187654051234472,
+      "ane_power": 0.0,
+      "dram_power": 3.408453941345215
+     },
+     "energy_j": 119.34019877001826,
+     "net_total_w": 27.4727369149526,
+     "net_energy_j": 85.49469191415811
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795300940.21618,
+    "t_first": 1795300941.1036,
+    "t_last": 1795300947.666639,
+    "t_end": 1795300947.666701,
+    "ttft_s": 0.8874199390411377,
+    "completion_tokens": 326,
+    "prompt_tokens": 7507,
+    "tool_calls": 0,
+    "decode_tps": 49.519741816339156,
+    "usage": {
+     "prompt_tokens": 7543,
+     "completion_tokens": 326,
+     "total_tokens": 7869,
+     "prompt_tokens_details": {
+      "cached_tokens": 7424
+     }
+    },
+    "server": {
+     "gen": 326,
+     "tps": 48.7,
+     "tok_verify": 5.62,
+     "accept_pct": 60,
+     "hist": "0:9% 1:10% 2:12% 3:12% 4:10% 5:7% 6:7% 7:33%",
+     "ms_cycle": 115,
+     "draft_ms": 12.4,
+     "verify_ms": 96.6,
+     "lookup_cycles": 4,
+     "lookup_tok_verify": 6.5,
+     "tree_cycles": 27,
+     "tree_tv": 4.19,
+     "tree_ms": 98.4,
+     "chain_cycles": 27,
+     "chain_tv": 5.96,
+     "chain_ms": 95.2,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's math problem. Need reason step by step, final boxed. Need parse: \"A cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in 2/3 the amount of time the cat takes. Calculate the average time the two take the eat the sausages.\"\n\nNeed interpret. Cat takes 30 minutes to eat 9 sausages. Dog can eat same number of sausages (9) in 2/3 the amount of time cat takes: (2/3)*30 = 20 minutes. Calculate average time the two take the eat the sausages. Ambiguous: average time? Could mean average of their times: (30+20)/2 = 25 minutes. Or combined rate to eat 9 sausages together? \"the average time the two take the eat the sausages\" likely \"Calculate the average time the two take to eat\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nThe cat takes 30 minutes to eat the sausages.\n\nThe dog takes \\(\\frac{2}{3}\\) as long as the cat:\n\n\\[\n\\frac{2}{3}\\times 30 = 20 \\text{ minutes}\n\\]\n\nThe average of their times is:\n\n\\[\n\\frac{30+20}{2}=\\frac{50}{2}=25\n\\]\n\n\\[\n\\boxed{25}\n\\]",
+    "seed": 5204,
+    "server_prefill": [
+     [
+      119,
+      0.7
+     ]
+    ],
+    "sha": "26c3b3538da148c9",
+    "decode_power": {
+     "samples": 6,
+     "seconds": 6.563039064407349,
+     "mean_w": {
+      "system_power": 18.24785364820679,
+      "total_power": 23.07089614868164,
+      "cpu_power": 1.676619339779223,
+      "gpu_power": 0.00422680344541318,
+      "ane_power": 0.0,
+      "dram_power": 3.1421963572502136
+     },
+     "energy_j": 151.41519267468266,
+     "net_total_w": 12.19503140449524,
+     "net_energy_j": 80.03646749937667
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795300947.977503,
+    "t_first": 1795300948.4118872,
+    "t_last": 1795300956.117035,
+    "t_end": 1795300956.117097,
+    "ttft_s": 0.4343841075897217,
+    "completion_tokens": 384,
+    "prompt_tokens": 7488,
+    "tool_calls": 0,
+    "decode_tps": 49.707028698672296,
+    "usage": {
+     "prompt_tokens": 7524,
+     "completion_tokens": 384,
+     "total_tokens": 7908,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 49.1,
+     "tok_verify": 5.65,
+     "accept_pct": 61,
+     "hist": "0:7% 1:10% 2:10% 3:19% 4:4% 5:6% 6:4% 7:38%",
+     "ms_cycle": 115,
+     "draft_ms": 13.2,
+     "verify_ms": 96.4,
+     "tree_cycles": 29,
+     "tree_tv": 3.45,
+     "tree_ms": 98.3,
+     "chain_cycles": 39,
+     "chain_tv": 6.67,
+     "chain_ms": 95.0,
+     "other_cycles": 0
+    },
+    "content": "We need answer math. Need reason step by step. Problem: product of integers 240 and k is a perfect cube. Smallest possible positive k.\n\nWe need factor 240 prime powers: 240 = 24*10 = 2^3 * 3 * 2 *5? Let's compute: 240=24*10 = 2^3*3 *2*5 = 2^4*3^1*5^1. For product 240*k to be perfect cube, exponents multiples of 3. 2 exponent currently 4, need k contribute 2 mod 3 => 2^2. 3 exponent 1 => need 2 mod 3 => 3^2. 5 exponent 1 => need 3^2. So k = 2^2*3^2*5^2 = 4*9*\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nFactor 240 into primes:\n\n\\[\n240 = 24 \\cdot 10 = (2^3 \\cdot 3)(2 \\cdot 5)=2^4 \\cdot 3^1 \\cdot 5^1\n\\]\n\nFor \\(240k\\) to be a perfect cube, every prime exponent must be a multiple of 3.\n\n- \\(2\\)-exponent: currently \\(4\\), so we need two more factors of 2.\n- \\(3\\)-exponent: currently \\(1\\), so we need two more factors of 3.\n- \\(5\\)-exponent: currently \\(1\\), so we need two more factors of 5.\n\nThus the smallest positive \\(",
+    "seed": 5205,
+    "server_prefill": [
+     [
+      55,
+      0.2
+     ]
+    ],
+    "sha": "0901c49cbe900eb2",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 7.705147743225098,
+     "mean_w": {
+      "system_power": 18.522427518278285,
+      "total_power": 23.648186002458846,
+      "cpu_power": 1.6768813086625045,
+      "gpu_power": 0.002895128028345234,
+      "ane_power": 0.0,
+      "dram_power": 3.445982047489711
+     },
+     "energy_j": 182.21276700821312,
+     "net_total_w": 12.772321258272445,
+     "net_energy_j": 98.41262231892387
+    },
+    "cat": "math",
+    "set": "27b-prompts_math500128",
+    "index": 0
+   },
+   {
+    "t0": 1795300956.4284968,
+    "t_first": 1795300957.290952,
+    "t_last": 1795300960.547619,
+    "t_end": 1795300960.547671,
+    "ttft_s": 0.8624551296234131,
+    "completion_tokens": 124,
+    "prompt_tokens": 7619,
+    "tool_calls": 0,
+    "decode_tps": 37.768674175215814,
+    "usage": {
+     "prompt_tokens": 7655,
+     "completion_tokens": 124,
+     "total_tokens": 7779,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 124,
+     "tps": 36.7,
+     "tok_verify": 4.13,
+     "accept_pct": 45,
+     "hist": "0:7% 1:13% 2:27% 3:17% 4:10% 5:13% 6:3% 7:10%",
+     "ms_cycle": 113,
+     "draft_ms": 13.2,
+     "verify_ms": 97.5,
+     "tree_cycles": 20,
+     "tree_tv": 3.75,
+     "tree_ms": 98.2,
+     "chain_cycles": 10,
+     "chain_tv": 4.9,
+     "chain_ms": 96.1,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: evaluate three movie reviews scale 1 to 5. Need output JSON array of integers only likely. Need think about ratings.\nReview1: \"phenomenal... top-notch\" very positive => 5.\nReview2: \"so disappointed... worst... predictable... one-dimensional\" very negative => 1.\nReview3: \"okay... some parts enjoyed... lackluster... ordinary\" neutral => 3.\nReturn JSON array [5,1,3]. Ensure no extra text. Final only.\n[5, 1, 3]",
+    "seed": 5206,
+    "server_prefill": [
+     [
+      186,
+      0.7
+     ]
+    ],
+    "sha": "ce57f0c5b6850233",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.256667137145996,
+     "mean_w": {
+      "system_power": 17.264458777201828,
+      "total_power": 22.171407063802082,
+      "cpu_power": 1.5909907093592672,
+      "gpu_power": 0.0028583518788452365,
+      "ane_power": 0.0,
+      "dram_power": 3.313099225362142
+     },
+     "energy_j": 72.20489276897084,
+     "net_total_w": 11.29554231961568,
+     "net_energy_j": 36.785821468534245
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795300960.860676,
+    "t_first": 1795300961.277291,
+    "t_last": 1795300973.797863,
+    "t_end": 1795300973.7979279,
+    "ttft_s": 0.41661500930786133,
+    "completion_tokens": 286,
+    "prompt_tokens": 7473,
+    "tool_calls": 0,
+    "decode_tps": 22.762538421103194,
+    "usage": {
+     "prompt_tokens": 7509,
+     "completion_tokens": 286,
+     "total_tokens": 7795,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 286,
+     "tps": 22.6,
+     "tok_verify": 2.53,
+     "accept_pct": 22,
+     "hist": "0:24% 1:36% 2:18% 3:14% 4:4% 5:3% 6:1% 7:1%",
+     "ms_cycle": 112,
+     "draft_ms": 13.1,
+     "verify_ms": 97.2,
+     "tree_cycles": 109,
+     "tree_tv": 2.45,
+     "tree_ms": 97.2,
+     "chain_cycles": 4,
+     "chain_tv": 4.75,
+     "chain_ms": 98.1,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: write a descriptive paragraph about a bustling marketplace, incorporating sensory details smells, sounds, visual elements to create immersive experience. Need final only paragraph likely. Ensure no need use reference material. Final in English. Could just provide one paragraph. Need maybe not overdo? User asked one paragraph. Do that.\nThe marketplace roared with life, a swirl of color and noise that pulled the air close to the skin. Banners of saffron and crimson flapped overhead, casting quick patches of shade over stalls piled high with glossy oranges, purple grapes, silver fish glistening on crushed ice, and pyramids of spices that steamed like slow fires. The air was thick with the sweetness of baked bread, the sharp tang of lemon wedges, the warm smoke of cumin, and the brine of the harbor drifting in on the wind. Beneath the hum of conversations, sellers called out their wares in bright, urgent voices, brass bells jingled from the shoulders of passing merchants, and the soft clatter of wooden carts on stone joined the rustle of fabrics and the low laughter of children tugging at sleeves. Every step seemed to stir the scene: lanterns swung, coins flashed between fingers, steam rose from cups of tea, and the crowd moved like a living river, full of color, sound, and the warm, restless promise of the day.",
+    "seed": 5207,
+    "server_prefill": [
+     [
+      40,
+      0.2
+     ]
+    ],
+    "sha": "1d7b373304597537",
+    "decode_power": {
+     "samples": 11,
+     "seconds": 12.520571947097778,
+     "mean_w": {
+      "system_power": 19.2631183158566,
+      "total_power": 24.184635335748847,
+      "cpu_power": 1.5491833127459633,
+      "gpu_power": 0.0038172619863664024,
+      "ane_power": 0.0,
+      "dram_power": 3.368516445159912
+     },
+     "energy_j": 302.80546673556665,
+     "net_total_w": 13.308770591562446,
+     "net_energy_j": 166.63341971907667
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795300974.1100109,
+    "t_first": 1795300974.5304399,
+    "t_last": 1795300987.686702,
+    "t_end": 1795300987.686743,
+    "ttft_s": 0.420428991317749,
+    "completion_tokens": 384,
+    "prompt_tokens": 7494,
+    "tool_calls": 0,
+    "decode_tps": 29.111612049162325,
+    "usage": {
+     "prompt_tokens": 7530,
+     "completion_tokens": 384,
+     "total_tokens": 7914,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 28.9,
+     "tok_verify": 3.28,
+     "accept_pct": 29,
+     "hist": "0:10% 1:41% 2:23% 3:9% 4:8% 5:2% 6:1% 7:7%",
+     "ms_cycle": 113,
+     "draft_ms": 12.5,
+     "verify_ms": 97.2,
+     "lookup_cycles": 5,
+     "lookup_tok_verify": 6.8,
+     "tree_cycles": 107,
+     "tree_tv": 2.7,
+     "tree_ms": 97.3,
+     "chain_cycles": 5,
+     "chain_tv": 6.8,
+     "chain_ms": 99.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's creative/persona question. Need respond in English (user English). Need final only. Need likely answer as tree 100 years old feeling when deforesters start hacking. Need maybe not too long, evocative. Could mention fear, anger, grief, confusion. The prompt: \"Picture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly, a bunch of deforesters shows up to chop you down. How do you feel when those guys start hacking away at you?\" We can write first person. Ensure not claiming human? It's creative. Maybe concise. Need maybe include sensory details: cold rings, sap, sound of axe, betrayal? Need answer as if asked how do you feel. Could say: shock, cold dread, a kind of furious sorrow, helplessness, betrayal by the forest. Also maybe not human-like too much? Fine\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nIf I were a hundred-year-old tree in a lush forest, and then those deforesters arrived and began hacking at my trunk, I would probably feel a mix of:\n\n- **Shock** \u2014 like a sudden, deafening crack splitting the quiet of the woods.\n- **Dread** \u2014 a cold tightening in the roots, as if the earth itself recoils.\n- **Rage** \u2014 because I did nothing to deserve this; I gave shade, oxygen, shelter, fruit, fruit, shelter, oxygen, and quiet.\n- **Grief** \u2014 not just for myself, but for the birds I sheltered, the beetles that walked my bark, the moss, the fungi, the whole small world living in and around me.\n- **Helplessness** \u2014 I can\u2019t run.",
+    "seed": 5208,
+    "server_prefill": [
+     [
+      61,
+      0.2
+     ]
+    ],
+    "sha": "9c0bca34862d0c4f",
+    "decode_power": {
+     "samples": 11,
+     "seconds": 13.156262159347534,
+     "mean_w": {
+      "system_power": 19.10653509073829,
+      "total_power": 23.93941896611994,
+      "cpu_power": 1.490039761119508,
+      "gpu_power": 0.0038307761731505643,
+      "ane_power": 0.0,
+      "dram_power": 3.3390133380889893
+     },
+     "energy_j": 314.95327186073047,
+     "net_total_w": 13.06355422193354,
+     "net_energy_j": 171.86754407660894
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ],
+  "32k": [
+   {
+    "t0": 1795300987.9962611,
+    "t_first": 1795301036.3480802,
+    "t_last": 1795301040.9297411,
+    "t_end": 1795301040.929806,
+    "ttft_s": 48.35181903839111,
+    "completion_tokens": 209,
+    "prompt_tokens": 32072,
+    "tool_calls": 0,
+    "decode_tps": 45.39838295281976,
+    "usage": {
+     "prompt_tokens": 32108,
+     "completion_tokens": 209,
+     "total_tokens": 32317,
+     "prompt_tokens_details": {
+      "cached_tokens": 7424
+     }
+    },
+    "server": {
+     "gen": 209,
+     "tps": 44.1,
+     "tok_verify": 5.5,
+     "accept_pct": 64,
+     "hist": "0:5% 1:11% 2:8% 3:11% 4:16% 5:8% 6:5% 7:37%",
+     "ms_cycle": 125,
+     "draft_ms": 13.3,
+     "verify_ms": 109.0,
+     "tree_cycles": 18,
+     "tree_tv": 3.94,
+     "tree_ms": 110.9,
+     "chain_cycles": 20,
+     "chain_tv": 6.9,
+     "chain_ms": 107.3,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple arithmetic. Need final boxed. Compute Carmen 100. Samantha 125. Daisy 175. Sum 400. Need final only maybe with reasoning. Ensure no hidden trick? \"Samantha has $25 more than Carmen\" = 125. Daisy has $50 more than Samantha = 175. total 100+125+175=400.\nCarmen has \\$100.\n\nSamantha has \\$25 more than Carmen:\n\\[\n100 + 25 = 125\n\\]\n\nDaisy has \\$50 more than Samantha:\n\\[\n125 + 50 = 175\n\\]\n\nCombined total:\n\\[\n100 + 125 + 175 = 400\n\\]\n\n\\[\n\\boxed{400}\n\\]",
+    "seed": 5303,
+    "server_prefill": [
+     [
+      24684,
+      48.1
+     ]
+    ],
+    "sha": "1552a9671ad8062e",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.581660985946655,
+     "mean_w": {
+      "system_power": 25.920019747313486,
+      "total_power": 32.71090269088745,
+      "cpu_power": 1.7986418325414786,
+      "gpu_power": 1.44563850425911,
+      "ane_power": 0.0,
+      "dram_power": 3.5466026067733765
+     },
+     "energy_j": 149.8702666739365,
+     "net_total_w": 21.83503794670105,
+     "net_energy_j": 100.04074148706496
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795301041.242687,
+    "t_first": 1795301042.316841,
+    "t_last": 1795301048.6536388,
+    "t_end": 1795301048.653713,
+    "ttft_s": 1.0741539001464844,
+    "completion_tokens": 299,
+    "prompt_tokens": 32083,
+    "tool_calls": 0,
+    "decode_tps": 47.02690573798171,
+    "usage": {
+     "prompt_tokens": 32119,
+     "completion_tokens": 299,
+     "total_tokens": 32418,
+     "prompt_tokens_details": {
+      "cached_tokens": 32000
+     }
+    },
+    "server": {
+     "gen": 299,
+     "tps": 46.2,
+     "tok_verify": 5.98,
+     "accept_pct": 64,
+     "hist": "0:2% 1:16% 2:12% 3:12% 4:4% 5:8% 6:8% 7:38%",
+     "ms_cycle": 129,
+     "draft_ms": 12.3,
+     "verify_ms": 109.3,
+     "lookup_cycles": 4,
+     "lookup_tok_verify": 6.5,
+     "tree_cycles": 24,
+     "tree_tv": 3.83,
+     "tree_ms": 111.4,
+     "chain_cycles": 22,
+     "chain_tv": 7.05,
+     "chain_ms": 107.5,
+     "other_cycles": 0
+    },
+    "content": "We need answer arithmetic word problem. Let's solve carefully.\n\nProblem: \"A cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in 2/3 the amount of time the cat takes. Calculate the average time the two take the eat the sausages.\"\n\nAmbiguity: average time the two take to eat the sausages. Could mean if both eat together? Or average of their individual times? \"the average time the two take the eat the sausages\" likely average of cat time and dog time? Let's parse.\n\nCat eats 9 sausages in 30 min. Dog eats same number (9) in 2/3 the amount of time the cat takes. Cat time = 30. Dog time = 2/3 * 30 = 20 min. Average time the two take to eat the sausages = (30 +\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nCat\u2019s time: 30 minutes.\n\nDog\u2019s time: \\( \\frac{2}{3} \\times 30 = 20 \\) minutes.\n\nAverage time:\n\\[\n\\frac{30 + 20}{2} = \\frac{50}{2} = 25\n\\]\n\n\\[\n\\boxed{25}\n\\]",
+    "seed": 5304,
+    "server_prefill": [
+     [
+      119,
+      0.8
+     ]
+    ],
+    "sha": "020545890c8fa955",
+    "decode_power": {
+     "samples": 6,
+     "seconds": 6.3367979526519775,
+     "mean_w": {
+      "system_power": 18.635550241367284,
+      "total_power": 23.28202724456787,
+      "cpu_power": 1.6940078845469415,
+      "gpu_power": 0.004705695528698072,
+      "ane_power": 0.0,
+      "dram_power": 2.947763423124949
+     },
+     "energy_j": 147.53350257696525,
+     "net_total_w": 12.40616250038147,
+     "net_energy_j": 78.61534513268504
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795301048.968351,
+    "t_first": 1795301049.497621,
+    "t_last": 1795301059.1847308,
+    "t_end": 1795301059.184813,
+    "ttft_s": 0.5292701721191406,
+    "completion_tokens": 384,
+    "prompt_tokens": 32064,
+    "tool_calls": 0,
+    "decode_tps": 39.53707674567026,
+    "usage": {
+     "prompt_tokens": 32100,
+     "completion_tokens": 384,
+     "total_tokens": 32484,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 39.1,
+     "tok_verify": 4.99,
+     "accept_pct": 53,
+     "hist": "0:13% 1:18% 2:8% 3:12% 4:10% 5:5% 6:4% 7:30%",
+     "ms_cycle": 127,
+     "draft_ms": 13.1,
+     "verify_ms": 108.7,
+     "tree_cycles": 45,
+     "tree_tv": 3.18,
+     "tree_ms": 109.8,
+     "chain_cycles": 32,
+     "chain_tv": 6.81,
+     "chain_ms": 107.2,
+     "other_cycles": 0
+    },
+    "content": "We need answer math problem. Need provide step-by-step and boxed. Need solve: product of integers 240 and k is a perfect cube. smallest possible positive k.\n\nNeed factorize 240. 240=24*10=2^3*3 *2*5=2^4 *3^1*5^1. Need 240*k perfect cube. For integer k positive, prime exponents must be multiples of 3. So need add to exponent 2^4 => need 2 more to reach 6; 3^1 => need 2; 5^1 => need 2. k minimal =2^2 *3^2*5^2=4*9*25=900. Check 240*900=216000=60^3? 60^3=\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nFactor 240:\n\n\\[\n240 = 2^4 \\cdot 3^1 \\cdot 5^1\n\\]\n\nFor \\(240k\\) to be a perfect cube, the exponent of every prime factor must be a multiple of 3.\n\n- \\(2^4\\): needs exponent \\(6\\), so multiply by \\(2^2\\)\n- \\(3^1\\): needs exponent \\(3\\), so multiply by \\(3^2\\)\n- \\(5^1\\): needs exponent \\(3\\), so multiply by \\(5^2\\)\n\nThus the smallest positive \\(k\\) is\n\n\\[\nk = 2^2 \\cdot 3^2 \\cdot 5^2 = 4 \\cdot 9 \\cdot ",
+    "seed": 5305,
+    "server_prefill": [
+     [
+      55,
+      0.3
+     ]
+    ],
+    "sha": "dd19096b1529551a",
+    "decode_power": {
+     "samples": 9,
+     "seconds": 9.68710970878601,
+     "mean_w": {
+      "system_power": 19.01098263954886,
+      "total_power": 23.876802020602756,
+      "cpu_power": 1.6652947640042062,
+      "gpu_power": 0.0031207092738113145,
+      "ane_power": 0.0,
+      "dram_power": 3.197403907775879
+     },
+     "energy_j": 231.2972006685424,
+     "net_total_w": 13.000937276416355,
+     "net_energy_j": 125.94150571369083
+    },
+    "cat": "math",
+    "set": "27b-prompts_math500128",
+    "index": 0
+   },
+   {
+    "t0": 1795301059.498057,
+    "t_first": 1795301060.543849,
+    "t_last": 1795301063.412378,
+    "t_end": 1795301063.412438,
+    "ttft_s": 1.0457921028137207,
+    "completion_tokens": 104,
+    "prompt_tokens": 32195,
+    "tool_calls": 0,
+    "decode_tps": 35.9069045769337,
+    "usage": {
+     "prompt_tokens": 32231,
+     "completion_tokens": 104,
+     "total_tokens": 32335,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 104,
+     "tps": 34.6,
+     "tok_verify": 4.33,
+     "accept_pct": 48,
+     "hist": "0:8% 1:12% 2:12% 3:21% 4:12% 5:21% 6:8% 7:4%",
+     "ms_cycle": 125,
+     "draft_ms": 13.1,
+     "verify_ms": 109.6,
+     "tree_cycles": 21,
+     "tree_tv": 4.1,
+     "tree_ms": 109.6,
+     "chain_cycles": 3,
+     "chain_tv": 6.0,
+     "chain_ms": 109.8,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request. Need evaluate movie reviews scale 1-5, return JSON array of integers. Need likely final only JSON. Need determine ratings:\n1 very positive: phenomenal, top-notch -> 5.\n2 very negative: disappointed, worst -> 1.\n3 neutral: okay, some enjoyed but lackluster ordinary -> 3.\nReturn [5,1,3] as JSON array. Ensure no extra.\n[5, 1, 3]",
+    "seed": 5306,
+    "server_prefill": [
+     [
+      186,
+      0.8
+     ]
+    ],
+    "sha": "68ca13a3beb79037",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.8685290813446045,
+     "mean_w": {
+      "system_power": 20.124308072614376,
+      "total_power": 24.64676570892334,
+      "cpu_power": 1.5338457980702476,
+      "gpu_power": 0.0018129557542778843,
+      "ane_power": 0.0,
+      "dram_power": 2.986798882484436
+     },
+     "energy_j": 70.69996419713357,
+     "net_total_w": 13.770900964736938,
+     "net_energy_j": 39.50222989366438
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795301063.721691,
+    "t_first": 1795301064.19506,
+    "t_last": 1795301077.04333,
+    "t_end": 1795301077.04338,
+    "ttft_s": 0.47336912155151367,
+    "completion_tokens": 270,
+    "prompt_tokens": 32049,
+    "tool_calls": 0,
+    "decode_tps": 20.93667095011927,
+    "usage": {
+     "prompt_tokens": 32085,
+     "completion_tokens": 270,
+     "total_tokens": 32355,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 270,
+     "tps": 20.8,
+     "tok_verify": 2.57,
+     "accept_pct": 22,
+     "hist": "0:21% 1:32% 2:28% 3:11% 4:5% 5:2% 6:0% 7:1%",
+     "ms_cycle": 124,
+     "draft_ms": 12.9,
+     "verify_ms": 109.1,
+     "tree_cycles": 102,
+     "tree_tv": 2.5,
+     "tree_ms": 109.1,
+     "chain_cycles": 3,
+     "chain_tv": 5.0,
+     "chain_ms": 108.5,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: write a descriptive paragraph about a bustling marketplace, incorporating sensory details smells, sounds, visual elements to create immersive experience. Need final only paragraph. Need maybe no analysis visible. Final in English.\nBeneath a canopy of striped awnings in faded saffron, teal, and crimson, the marketplace swirled with the press of bodies, baskets, and birds. The air was thick with competing scents\u2014cinnamon and cardamom from a spice stall, warm yeast and butter drifting from a bakery, sharp citrus from cut oranges, and the briny tang of fresh fish on crushed ice. Woven through it all came a constant symphony: the clatter of carts, the hiss of oil in a flat pan, the rhythmic chopping of a knife, the bright calls of vendors, and the low hum of a hundred conversations in more than a dozen languages. Color leapt from every corner\u2014pyramids of scarlet pomegranates, mounds of emerald herbs, paper lanterns glowing like fireflies, and silk scarves that shimmered as the breeze lifted them. Children darted between legs, merchants haggled over copper coins, and a fiddle player tucked into a shadow played a fast, wandering tune that seemed to belong to the city itself.\n",
+    "seed": 5307,
+    "server_prefill": [
+     [
+      40,
+      0.3
+     ]
+    ],
+    "sha": "548a6f461e8e23fa",
+    "decode_power": {
+     "samples": 11,
+     "seconds": 12.848269939422607,
+     "mean_w": {
+      "system_power": 18.908649277693698,
+      "total_power": 23.744895761663262,
+      "cpu_power": 1.5095022230360895,
+      "gpu_power": 0.0032593199711183195,
+      "ane_power": 0.0,
+      "dram_power": 3.323484940962358
+     },
+     "energy_j": 305.0808304293014,
+     "net_total_w": 12.86903101747686,
+     "net_energy_j": 165.34478437134507
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795301077.356748,
+    "t_first": 1795301077.878456,
+    "t_last": 1795301093.58058,
+    "t_end": 1795301093.580653,
+    "ttft_s": 0.5217080116271973,
+    "completion_tokens": 384,
+    "prompt_tokens": 32070,
+    "tool_calls": 0,
+    "decode_tps": 24.39160478656065,
+    "usage": {
+     "prompt_tokens": 32106,
+     "completion_tokens": 384,
+     "total_tokens": 32490,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 24.2,
+     "tok_verify": 3.0,
+     "accept_pct": 28,
+     "hist": "0:17% 1:30% 2:23% 3:16% 4:6% 5:2% 6:0% 7:5%",
+     "ms_cycle": 124,
+     "draft_ms": 12.5,
+     "verify_ms": 109.4,
+     "lookup_cycles": 5,
+     "lookup_tok_verify": 6.8,
+     "tree_cycles": 120,
+     "tree_tv": 2.71,
+     "tree_ms": 109.5,
+     "chain_cycles": 3,
+     "chain_tv": 8.0,
+     "chain_ms": 112.1,
+     "other_cycles": 0
+    },
+    "content": "We need respond to user: \"Picture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly, a bunch of deforesters shows up to chop you down. How do you feel when those guys start hacking away at you?\"\n\nWe need answer empathetically, imaginative, maybe from tree's perspective. User asks feelings. Need likely no safety issue. Need final answer in English. Could be poetic. Need maybe avoid too much? It's a creative prompt. We can respond in first person as tree. Need perhaps express fear, shock, betrayal, grief, but also dignity. Let's craft a vivid but concise answer. Ensure not claim to be literal? User says picture yourself. Can say \"If I were that tree...\". Need maybe address \"deforesters\" (fellows? deforesters). Let's answer.\nIf I were that tree, the first thing I\u2019d feel would be a kind of confusion\u2014because for a hundred years I\u2019ve been part of the forest\u2019s quiet rhythm: light through the canopy, roots holding the soil, birds nesting, rain soaking down through the bark.\n\nThen, when the hacking starts, the feeling would turn sharp and sudden.\n\nNot just pain\u2014because a tree isn\u2019t supposed to feel pain the way animals do\u2014but something like:\n\n- **Shock** \u2014 \u201cThis isn\u2019t part of the story.\u201d  \n- **Betrayal** \u2014 \u201cI gave the forest oxygen, shade, home, coolness, life. Why am I being torn from it?\u201d  \n- **Fear** \u2014 not for my own sake, but for the birds, the roots, the soil, the moss, the slow living things that depended on me.  \n- **Grief** \u2014 because a tree doesn\u2019t just die when it\u2019s cut; it\u2019s been living so long that",
+    "seed": 5308,
+    "server_prefill": [
+     [
+      61,
+      0.3
+     ]
+    ],
+    "sha": "b1d996643351f99e",
+    "decode_power": {
+     "samples": 13,
+     "seconds": 15.702123880386353,
+     "mean_w": {
+      "system_power": 18.907320414299825,
+      "total_power": 23.769441311176006,
+      "cpu_power": 1.5728641544115596,
+      "gpu_power": 0.004753896920538464,
+      "ane_power": 0.0,
+      "dram_power": 3.2845028455440817
+     },
+     "energy_j": 373.23071203565866,
+     "net_total_w": 12.893576566989605,
+     "net_energy_j": 202.45653651611735
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ]
+ },
+ "idle": {
+  "samples": 2,
+  "seconds": 5.005075931549072,
+  "mean_w": {
+   "system_power": 10.546439410898085,
+   "total_power": 10.875864744186401,
+   "cpu_power": 0.25910757966069864,
+   "gpu_power": 0.005765021815617782,
+   "ane_power": 0.0,
+   "dram_power": 0.06455273181200027
+  },
+  "energy_j": 54.434528865910465
+ },
+ "ended": "2026-11-21 14:44:53"
+}

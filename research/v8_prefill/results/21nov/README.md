@@ -323,3 +323,70 @@ children were re-ranked by a calibrated edge value:
   unaffected.
 - **No Pi traffic** in any arm. Served config restored 13:29:58: forge pid 45775, smoke 29aef2ec9db18a3f, banner
   tree8 sampled=on, lookup off, ring fix.
+
+## 13:40 to 15:16: lookup gate (LOOKUP_GATE) and a combined lookup + drafter tree (`lookup_gate/`)
+
+**Result:** `NGRAM_DRAFT=6 LOOKUP_GATE=yield:1.25` keeps 97% / 106% of ungated lookup's code gain (greedy / sampled),
+removes the math loss, and turns agent positive. Fresh-process A/B, defaults unchanged. A combined lookup + drafter
+tree does not pay (offline).
+
+**Data.** `serve_t/lookup_observe.sh`, 13:53-14:10: one launch of the served config with NGRAM_DRAFT=6
+LOOKUP_OBSERVE=1 TREE_LOG TREE_LOG_DIST=1.
+- **New research switch:** LOOKUP_OBSERVE in `pipe/tree_verify.py`, off by default. It never takes a lookup cycle
+  and records each cycle's lookup proposal (drafts, match length) next to the tree.
+- **Workloads:** code / agent and math / chat, greedy and sampled, the seeds of the earlier lookup A/Bs.
+- **Size:** 4,397 cycles, 72 requests, 0 lookup cycles taken, 0 Pi, 0 errors.
+- **Estimate of a lookup cycle's tokens:** 1 + the draft's match length against the realized continuation. Under
+  lossless speculative sampling, P(accept m drafts) = P(the target's sample starts with them), so this is unbiased for
+  sampled and exact for greedy.
+- **Expected tokens per lookup cycle by match length (greedy / sampled):** 6: 4.0 / 4.8; 8: 5.4 / 6.0; 12: 6.8 / 6.7;
+  16: 7.2 / 7.0; 48+: 8.0 / 7.9 (`e_table.json`).
+
+**Offline gate screen.** `serve_t/lookup_gate_sim.py`, `sim.log`. Fixed anchors; per-cycle costs from the clean
+lookup-off runs; a lookup cycle = chain cycle minus the drafter.
+- **Calibration vs the measured ungated A/B:** greedy code +98.7% vs +94.9%, but sampled code +43.8% vs +26.0% and
+  sampled math −1.3% vs −4.2%. Good for ranking gates, not for absolute gains.
+- **Ranking:**
+  - min match 16-24 removes the math loss and keeps 90-94% of the code gain, but drops agent;
+  - the yield gate ×1.25 is best overall.
+
+**Combined tree** (offline, not built; one lookup arm of m nodes + the drafter's best-first 7 - m nodes, verified
+together; sampled values exact for drafter nodes, the unbiased indicator for lookup-only nodes):
+- m = 1-4: −2..−15% on agent / math, −2..−6% overall.
+- m = 7 (all lookup): code +71% greedy / +36% sampled, math −9% / −4%.
+- A match-length rule for m: +19.5% / +7.1% overall, agent −8% / −5%.
+- **Why it loses:** it still pays the drafter call and the tree verify, which lookup-only cycles skip. So a separate
+  lookup cycle with a good gate is better than a shared tree.
+
+**The gate.** `LOOKUP_GATE` in `pipe/tree_verify.py` (research, default off; with NGRAM_DRAFT > 0):
+- `len:L` takes a lookup draft only when its match is >= L tokens.
+- `yield:M` takes it only when E(lookup tokens | match length) / (cycle - drafter ms) > M x the request's running
+  tree / chain tokens per ms. Without tree history yet: match >= 16.
+- The per-request tree line counts gated proposals; the banner shows `lookup_gate=`.
+
+**A/B.** `serve_t/lookup_gate_ab.sh`, 14:14-15:16. Fresh launches off1 / len:16 / yield:1.25 / off2, banner first;
+the same prompts and seeds; the ungated column is from the earlier lk_* / lkc2_* A/Bs.
+- **Noise:** off1 vs off2 within ±0.1%, identical texts 9/9 per stratum.
+- **No Pi** in any arm; 0 errors. Gated proposals: 318 (len:16), 196 (yield).
+
+| stratum | off tok/s | len:16 | **yield:1.25** | ungated (earlier) | yield keeps |
+|---|---|---|---|---|---|
+| greedy code | 40.84 | +85.2% | **+92.1%** | +94.9% | 97% |
+| greedy agent | 54.03 | −1.7% | **+10.9%** | +0.3% | |
+| greedy math | 58.02 | −0.2% | **−0.0%** | | |
+| greedy chat | 25.42 | −2.9% | −2.7% * | | |
+| sampled code | 37.59 | +20.1% | **+27.4%** | +26.0% | 106% |
+| sampled agent | 45.98 | −1.3% | **+4.6%** | +6.6% | 70% |
+| sampled math | 45.97 | +3.4% | **+0.5%** | −4.2% | |
+| sampled chat | 24.83 | +3.3% | −1.0% | +4.0% | |
+
+\* No overhead from the gate. The yield arm took 0 lookup cycles in greedy chat and math, and on the requests with
+identical texts it runs at the off arm's speed (chat −0.0%, math −0.1%, same ms / cycle). The changed texts (2 of 9
+chat) come from server history: the arm's earlier code / agent requests took lookup cycles, which changes the stale KV
+rows a later cold request sees (the 10:56 finding; COLD_SCRUB off).
+
+**Candidate default** (Anemll's call; not applied): `NGRAM_DRAFT=6 LOOKUP_GATE=yield:1.25` in the serving launcher.
+Before that, a repeat in the reverse order and a check on long Pi-like agent sessions (6-57K context) would be
+prudent.
+
+Served config restored 15:15:16: forge pid 93698, smoke 29aef2ec9db18a3f, tree8 sampled=on, lookup off, ring fix.

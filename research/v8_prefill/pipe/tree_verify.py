@@ -38,6 +38,16 @@ LOGDIR = os.environ.get("TREE_LOG")
 # no RNG use) for offline sampled tree studies (serve_t/fork_rank_sim.py)
 LOG_DIST = os.environ.get("TREE_LOG_DIST", "0") == "1"
 NDIST = 20
+# research: LOOKUP_OBSERVE=1 (with NGRAM_DRAFT > 0 and TREE_LOG) never takes a lookup cycle; it records the lookup proposal
+# of each cycle (drafts + match length at the base minimum, ngram_draft.lookup) next to the tree's, for offline gates
+LOOKUP_OBSERVE = os.environ.get("LOOKUP_OBSERVE", "0") == "1"
+# 21 Nov 2026 (research, default off): LOOKUP_GATE gates the prompt-lookup cycles (NGRAM_DRAFT > 0): len:L = take a lookup
+# draft only when its match is >= L tokens; yield:M = only when E(lookup tokens | match length) / (cycle - drafter ms) > M x
+# the request's running tree / chain tokens per ms (no tree history yet: match >= 16). E from the observe-mode logs
+# (results/21nov/lookup_gate/e_table.json). Anything else: the served lookup rule unchanged.
+LOOKUP_GATE = os.environ.get("LOOKUP_GATE", "")
+LK_E = {"greedy": {6: 4.0, 8: 5.38, 12: 6.837, 16: 7.194, 24: 7.528, 32: 7.72, 48: 7.967},
+        "sampled": {6: 4.842, 8: 5.974, 12: 6.721, 16: 6.965, 24: 6.872, 32: 7.422, 48: 7.889}}
 CAP = int(os.environ.get("TREE_CAP", "7"))   # D4 control (TREE_POLICY=cap): the served chain, at most CAP drafts accepted per cycle
 SAMPLED = os.environ.get("TREE_SAMPLED", "0") == "1"   # 21 Nov 2026: the tree for sampled requests too (Pi: temperature 1.0)
 N = 7   # nodes besides the root (8 verify rows)
@@ -172,13 +182,13 @@ class Tree:
         self.req = self._req_stats()
         self.rec = [] if LOGDIR else None
         self.log(f"tree: BANNER mode=tree8 policy={POLICY}{f' cap={CAP}' if POLICY == 'cap' else ''} topc={TOPC} tau={TAU} "
-                 f"sampled={'on' if SAMPLED else 'off'} t8 contexts "
+                 f"sampled={'on' if SAMPLED else 'off'}{(' lookup_gate=' + LOOKUP_GATE) if LOOKUP_GATE else ''} t8 contexts "
                  f"{[c // 1024 for c in self.ctx_t8]}K | split tree {'on (tdva/tdvba + dec_set_tree)' if self.split_ok else 'OFF'}"
                  f" | build {mb.root} | lookup {'on (NGRAM_DRAFT=' + str(eng.ngram.base) + ': lookup cycles keep the chain)' if eng.ngram is not None else 'off'}")
 
     def _req_stats(self):
         return {"cycles": 0, "tree": 0, "chain": 0, "other": 0, "lookup": 0, "tok": 0, "tree_tok": 0, "chain_tok": 0,
-                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0, "sampled": 0}
+                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0, "sampled": 0, "gated": 0}
 
     # ---- split path (dec8): tdva / tdvba + GPU attention with the tree mask ----
     def _init_split(self):
@@ -350,7 +360,34 @@ class Tree:
         if self._dl is not None:
             a, c_, u_, h_ = self._dl
             rec.update(anchor=a, cand=c_, unary=u_, hp=h_, dist_ids=dl[0], dist_p=dl[1])
+        if LOOKUP_OBSERVE:
+            lk = getattr(self, "_lk", None)
+            rec.update(lk_drafts=lk[0] if lk else np.full(7, -1, np.int32), lk_len=lk[1] if lk else 0)
         self.rec.append(rec)
+
+    def _gate(self, L, temp):
+        """LOOKUP_GATE: take this lookup proposal (match length L)?"""
+        kind, _, arg = LOOKUP_GATE.partition(":")
+        if kind == "len":
+            return L >= int(arg or 16)
+        if kind == "yield":
+            ref = getattr(self, "_yield_ema", None)
+            if ref is None or getattr(self, "_cyc_ema", None) is None:
+                return L >= 16
+            tab = LK_E["sampled" if temp > 0 else "greedy"]
+            e = tab[max(b for b in tab if b <= max(L, 6))]
+            c_l = max(self._cyc_ema - self._draft_ema, 1.0)
+            return e / c_l > float(arg or 1.25) * ref
+        return True
+
+    def _note(self, t0, t1, t4, ntok):
+        """per cycle wall time (ms), drafter time and tokens: the yield gate's running references"""
+        w, dr = 1e3 * (t4 - t0), 1e3 * (t1 - t0)
+        a = 0.2
+        self._cyc_ema = w if getattr(self, "_cyc_ema", None) is None else (1 - a) * self._cyc_ema + a * w
+        self._draft_ema = dr if getattr(self, "_draft_ema", None) is None else (1 - a) * self._draft_ema + a * dr
+        y = ntok / max(w, 1e-3)
+        self._yield_ema = y if getattr(self, "_yield_ema", None) is None else (1 - a) * self._yield_ema + a * y
 
     # ---- the cycle ----
     def cycle(self, eng, anchor, samp, rng, seen, hist, dry, orig):
@@ -366,9 +403,22 @@ class Tree:
         # U1 (20 Nov 2026): prompt lookup per cycle. When the ngram drafter (NGRAM_DRAFT) has a proposal for this anchor
         # (its propose() is pure: the same answer the served cycle will get), the cycle is the served lookup chain
         # (lookup drafts, no drafter call); otherwise the tree. Before U1 any ngram drafter turned the tree off.
-        if eng.ngram is not None and eng.tokens is not None and eng.ngram.propose(eng.tokens, anchor) is not None:
-            self.req["lookup"] += 1
-            return orig(anchor, samp, rng, seen, hist, dry)
+        self._lk = None
+        if LOOKUP_OBSERVE and eng.ngram is not None and eng.tokens is not None:   # research: record, never take
+            import ngram_draft as NG
+            hit = NG.lookup(eng.tokens.with_anchor(anchor), eng.ngram.k, eng.ngram.base, eng.ngram.max_match)
+            self._lk = (np.array(hit[0] + [-1] * (7 - len(hit[0])), np.int32), int(hit[1])) if hit is not None else None
+        elif eng.ngram is not None and eng.tokens is not None:
+            if not LOOKUP_GATE:
+                take = eng.ngram.propose(eng.tokens, anchor) is not None
+            else:
+                import ngram_draft as NG
+                hit = NG.lookup(eng.tokens.with_anchor(anchor), eng.ngram.k, eng.ngram.need, eng.ngram.max_match)
+                take = hit is not None and self._gate(hit[1], temp)
+                self.req["gated"] += int(hit is not None and not take)
+            if take:
+                self.req["lookup"] += 1
+                return orig(anchor, samp, rng, seen, hist, dry)
         p = mb.pos
         t0 = time.perf_counter()
         now = time.perf_counter()
@@ -446,6 +496,7 @@ class Tree:
         eng.cycles += 1
         eng.acc_hist[min(k, 7)] += 1
         self._account("tree", mb.ctx, 1e3 * (t2 - t1), k + 1, moved)
+        self._note(t0, t1, t4, k + 1)
         if self.rec is not None:
             self._logrec({"p0": p, "parent": parent, "tok": tok, "prob": prob, "ctok": ctok, "cprob": cprob,
                           "tree": 1, "path": path + [-1] * (8 - len(path)), "nxt": nxt, "ms": 1e3 * (t2 - t1)}, dl)
@@ -508,6 +559,7 @@ class Tree:
         eng.cycles += 1
         eng.acc_hist[k] += 1
         self._account("chain", mb.ctx, 1e3 * (t2 - t1), k + 1, False)
+        self._note(t0, t1, t4, k + 1)
         if self.rec is not None:
             self._logrec({"p0": p, "parent": np.arange(-1, 7), "tok": np.array([anchor] + drafts), "prob": np.zeros(8),
                           "ctok": drafts, "cprob": [0.0] * 7, "tree": 0, "path": list(range(k + 1)) + [-1] * (7 - k),
@@ -530,7 +582,7 @@ class Tree:
             self.log(f"tree: {q['cycles']} cycles: tree {q['tree']} ({tv('tree'):.2f} tok/verify, "
                      f"{q['tree_ms'] / max(1, q['tree']):.1f} ms), chain {q['chain']} ({tv('chain'):.2f} tok/verify, "
                      f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}, lookup {q['lookup']}; accepted path off the chain rows "
-                     f"in {q['nonprefix']}; sampled {q['sampled']}")
+                     f"in {q['nonprefix']}; sampled {q['sampled']}; lookup gated {q['gated']}")
         if self.rec is not None:   # one file per request (an empty one too: files stay aligned with requests)
             od = Path(LOGDIR); od.mkdir(parents=True, exist_ok=True)
             fn = od / f"tree_{int(time.time() * 1e3)}.npz"
@@ -546,11 +598,15 @@ class Tree:
                                anchor=np.array([r.get("anchor", -1) for r in R]),
                                **{k_: np.stack([r.get(k_, np.zeros_like(z7[k_])) for r in R])
                                   for k_ in ("cand", "unary", "hp", "dist_ids", "dist_p")})
+                if any("lk_len" in r for r in R):
+                    arr.update(lk_drafts=np.stack([r.get("lk_drafts", np.full(7, -1, np.int32)) for r in R]),
+                               lk_len=np.array([r.get("lk_len", 0) for r in R]))
             else:
                 arr = dict(p0=np.zeros(0, np.int64))
             np.savez(fn, **arr)
             self.rec.clear()
         self.req = self._req_stats()
+        self._yield_ema = None   # per request (the cycle / drafter ms references carry over)
 
 
 def install(eng, log=print):
