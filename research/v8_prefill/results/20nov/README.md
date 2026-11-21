@@ -1290,3 +1290,40 @@ no draft / verify split per request (its cycle = its measured step).
 
 **Served state:** forge restored 21:25 (pid 15812, `v8_server_dec8_qk.sh`), `bench/final_served5` smoke
 byte-identical. Tree8 stays behind the flag.
+
+### T4 stage 1. Offline trajectory replay: lookup vs tree breadth (`t/replay_sim.*`, `pipe/unit/power/t4_replay_sim.py`)
+
+The chain run's 27 requests at 2K / 8K / 32K (1,197 logged cycles), replayed along the true token stream (greedy:
+the text does not depend on the policy), cycle by cycle: a lookup jump that lands where the chain run never drafted
+takes the nearest logged cycle's draft values (`near`; `prev` / `next` = the previous / next logged cycle: the
+range). Costs measured: the rung's served chain cycle, + 16 x the t/probe16 per-group deltas (tree8 +3.7 ms at 8K /
++3.4 at 32K, tree16 +10.4 / +18.9). Tokens per cycle vs the chain (tok/s in brackets), all nine prompts:
+
+| rung | chain | tree8 (have) | tree16 breadth, every cycle | lookup 16 rows, chain elsewhere | lookup 16 rows, tree8 elsewhere | range of the last, prev..next |
+|---|---|---|---|---|---|---|
+| 2K | 4.58 | +11% (+9%) | +18% (+8%) | +4% (+2%) | **+15% (+11%)** | +9..+20% tokens, +6..+16% tok/s |
+| 8K | 5.11 | +7% (+5%) | +15% (+5%) | +7% (+5%) | **+13% (+10%)** | +9..+15%, +6..+11% |
+| 32K | 5.19 | +6% (+5%) | +14% (-2%) | +7% (+3%) | **+15% (+9%)** | +8..+16%, +3..+10% |
+
+By category (`near`, tokens per cycle vs the chain, 2K / 8K / 32K):
+
+| | lookup, 16 rows (alone) | tree16 breadth | tree8 | lookup proposals / cycle | proposals that miss (L = 0) | proposals that beat the chain |
+|---|---|---|---|---|---|---|
+| code | **+26 / +27 / +32%** | +8 / +5 / +8% | +3 / 0 / +1% | 37 / 33 / 42% | 12 / 8 / 15% | 77 / 80 / 77% |
+| math | -1 / +3 / +4% | +11 / +14 / +12% | +4 / +5 / +3% | 30 / 31 / 40% | 53 / 44 / 39% | 7 / 8 / 12% |
+| chat | 0 / 0 / 0% | +27 / +25 / +19% | +20 / +16 / +13% | 1 / 0 / 1% | all | 0 |
+
+- **The +15-18% of T3 is not confirmed for lookup:** along the real trajectory lookup alone adds +4-7% tokens per
+  cycle overall (code +26-32%). T3's per-cycle count credited the same copied span at several consecutive chain
+  cycles.
+- **Lookup + tree8 reaches +13-15% (`near`), +8-10% at the conservative `next` estimate**, of which tree8 (already
+  built, behind the flag) gives +6-11% (`near`) / +1-5% (`next`). The new build's own increment over tree8: about
+  +4-9 points of tokens per cycle, +2-5 points of tok/s.
+- **Splash, the same split by category** (measured, tokens per cycle vs its own chain, 2K / 8K / 32K): code +20 / +13 /
+  +20% with 16 rows but -0 / -2 / -3% with 8 (its code gain needs depth past the 8-token block: lookup); chat +36 /
+  +28 / +25% with 16 rows, +21 / +6 / +13% with 8 (breadth: lookup makes no chat proposals); math +5 / +9 / +9%.
+- **A match-length threshold for the 16-row cycles** (M = 3..16) moves tok/s by under 1.5%.
+
+**Decision per the T4 gate (Anemll: build only if the replay confirms at least +10% tokens per cycle overall):**
+stopped before the build and reported. The lookup lever by itself is +4-7%; the full policy clears +10% only in the
+central estimate, and most of it is tree8.
