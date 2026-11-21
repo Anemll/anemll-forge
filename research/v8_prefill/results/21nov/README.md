@@ -1,0 +1,90 @@
+# 21 Nov 2026: tree8 is the served default
+
+Decision (Anemll, 21 Nov 02:30): serve tree8 (v8_dec8tx, corrx0, TREE=1, policy branched). Prompt lookup stays off
+(NGRAM_DRAFT=0). No new package builds (no 16-row entry, no GPU attention split).
+
+## Result
+
+- Forge on 127.0.0.1:8765 serves tree8 from the standard serving launcher `pipe/v8_server_dec8_qk.sh`, using the
+  launcher defaults only (no tree or lookup env). pid 55758 since 02:43:29.
+- Decode tok/s, realistic 2K rung: **45.80** vs chain 42.74 (+7.2%). The U1 tree8 arm gave 44.70.
+- Code set: **40.66** vs chain 39.46 (+3.0%). Agent set: **54.04** vs chain 54.48 (-0.8%).
+- Smoke (realistic 2K, positions 1 and 8): a fresh launch reproduces itself and the U1 tree8 arm exactly (checksum
+  29aef2ec9db18a3f). The second run on the same server also reproduces exactly (f7f2e615cb9623bf). The chain
+  behaves the same way: a second run on one server changes the chat reply. Tree8 did not introduce this.
+
+## Launcher
+
+`pipe/v8_server_dec8_qk.sh` (backup of the 19 Nov chain version: `v8_server_dec8_qk.pre_tree8.sh`):
+
+- Sets defaults `PORT=8765`, `V8_SRV_DYLIB=libgpu_v8_f8q.dylib`, `QKE=tg` and `NGRAM_DRAFT=0`.
+- Then sets `BUILD=v8_dec8tx`, `GM=w_dec8tx/manifest_best.json` and `TREE=1`, and execs `v8_server_tree.sh`.
+  That script loads libdec_gpu_tree.dylib and dec_kernels_tree.metal, with F8=x, the INT8 KV flags and the
+  keep-alive as in v8_server_dec8.sh.
+- Rollback to the 19-20 Nov served chain: `SERVED_TREE=0 v8_server_dec8_qk.sh`. This execs v8_server_dec8.sh on
+  v8_dec8 with libdec_gpu_clk.dylib, and was used for det_chain_fresh1 below.
+- `TREE=0` keeps this build and its binaries with the chain only.
+- `bench_tree/run_arm.sh` now takes `RDIR`, the results directory (default results/20nov).
+
+## Banner (server log of the running instance, pid 55758)
+
+```
+[qwen38-27b-ane] started 2026-11-21 02:43:29  pid 55758  listen 127.0.0.1:8765
+[qwen38-27b-ane] model dir  /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx  (max ctx 98304; verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [same], KV kv8, one weight copy)
+[qwen38-27b-ane] speculative   ON  drafter .../drafter/all3/dflash2_lut4_gptq_nohead.aimodel   (no prompt-lookup line: lookup off)
+v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 | dylib engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d
+dec8: BANNER decode GPU dylib engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels dec_kernels_tree.metal sha256 674918fb1e682a2c... | attn=dec_attn_r4 | V8_DEC8=auto
+dec8: keep-alive hold 60 ms (DEC_KA_HOLD_MS), switch /Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka
+tree: BANNER mode=tree8 policy=branched topc=4 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off
+serving OpenAI API on http://127.0.0.1:8765/v1 (V8 prefill, speculative ON, ctx 98304)
+```
+
+Every bench below checked these banner parts before timing (tree_bench `--expect`): qk=attn_qk8isk_tg, F8=x,
+KV8=true, libgpu_v8_f8q.dylib, libdec_gpu_tree.dylib, mode=tree8, policy=branched, v8_dec8tx, lookup off. The chain
+arm checked libdec_gpu_clk.dylib and mode=chain instead. The keep-alive hold of 60 ms was checked by grep.
+
+## Smoke determinism (realistic_v1 2K, positions 1 = code:1 and 8 = chat:2, greedy, gen 320)
+
+| run | server state | code:1 | chat:2 | checksum |
+|---|---|---|---|---|
+| U1 tree8 (20 Nov, 2K rung of 9) | fresh launch, 9-prompt rung | 1681b92d273f64ad | a773ceabaa6312d7 | |
+| served_tree8_smoke1 | fresh launch | 1681b92d273f64ad | a773ceabaa6312d7 | 29aef2ec9db18a3f |
+| served_tree8_smoke2 | 2nd run, same server | 1681b92d273f64ad | 13dd26d24dd1cf65 | f7f2e615cb9623bf |
+| served_tree8_smoke2b | 3rd run (after 2K + code/agent sets) | 1681b92d273f64ad | 6f98638c8ba91bc7 | acbaaf3f8b265563 |
+| served_tree8_smoke3 | fresh launch | 1681b92d273f64ad | a773ceabaa6312d7 | 29aef2ec9db18a3f |
+| served_tree8_smoke3b | 2nd run, same server | 1681b92d273f64ad | 13dd26d24dd1cf65 | f7f2e615cb9623bf |
+| chain final_served3-7 (20 Nov) | fresh launch | 1681b92d273f64ad | 3b060108f4af10b0 | |
+| det_chain_fresh1 | fresh launch (SERVED_TREE=0) | 1681b92d273f64ad | 3b060108f4af10b0 | c4c4be331d40e7f1 |
+| det_chain_same2 | 2nd run, same server | 1681b92d273f64ad | 764b46dd5fc2b4ae | fce3854ba8d742dd |
+
+- A given request sequence on a given server gives the same text. This holds across launches (smoke1 = smoke3 =
+  U1) and for the second run on a server (smoke2 = smoke3b).
+- What a server ran before changes the low-acceptance chat reply (2.2-2.9 tok/verify). The chain has the same
+  property (det_chain_same2), so tree8 did not add it.
+- The replies split at near-tie greedy tokens. Chat:2 is identical for its first 35 tokens, then continues "been
+  the anchor of" in smoke1 and "watched the seasons turn" in smoke2.
+- The source of the history dependence is not found. The tree code keeps no cross-request numeric state: plans are
+  keyed by (entry, parity), and anc / ctap are rewritten on every call. The prefill split alone does not explain it:
+  U1's chat:2 restored 11 cached tokens and still matched smoke1, which had 0 cached. Open item.
+- The same history effect is visible at the rung level. served_tree8_2k ran after two smoke runs and matches U1
+  tree8 (a fresh launch) on 4 of 9 replies. The code set matches 9/9 and agent 8/9.
+- serve_tree8.log's "vs u1_tree8" column keyed rows by index alone, which repeats across categories, so it reported
+  code:1 as DIFFER. Keyed by (cat, index), smoke1 = U1 on both. The driver is fixed (ops.log 02:45).
+
+## Decode check (tok/s, token-weighted client times; served_tree8_2k, served_tree8_ca)
+
+| set | chain (U1, 20 Nov) | tree8 (U1, 20 Nov) | tree8 served (21 Nov) | vs chain | tok/verify served |
+|---|---|---|---|---|---|
+| realistic 2K | 42.74 | 44.70 | **45.80** | +7.2% | 5.007 |
+| code (2.1-4.6K prompts) | 39.46 | 41.01 | **40.66** | +3.0% | 4.491 |
+| agent (3.2-4.5K prompts) | 54.48 | 54.71 | **54.04** | -0.8% | 5.562 |
+
+The 54.5 / 39.5 chain baselines in the request are read as U1's agent (54.48) and code (39.46) sets. The realistic
+2K chain is 42.74.
+
+## Files
+
+- Drivers: `serve_t/serve_tree8.sh` (restart, banner, smoke x2, 2K + code / agent) and `serve_t/det_tree8.sh`
+  (third same-server run, chain fresh + same, tree8 fresh + same; leaves tree8 serving).
+- Raw output: `serve_tree8.log`, `det_tree8.log`, `bench/*.json|log`, `ops.log`, `*.driver.log`. Server logs are
+  in coreai_seg_logs/v8_server.<timestamp>.log; the live one is v8_server.log.

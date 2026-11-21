@@ -4,7 +4,7 @@
 #   LAUNCHER=v8_server_tree.sh|v8_server_dec8_qk.sh ARM=<label> [RUNGS=2k,8k,...] [TASKS=0,1] [EXPECT="k=v k=v"] [env...] run_arm.sh
 set -u
 P=/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe; T=${0:a:h}
-R=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/v8_prefill/results/20nov
+R=${RDIR:-/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/v8_prefill/results/20nov}   # 21 Nov: RDIR overrides
 L=/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs/v8_server.log
 PY=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
 cd $P && PORT=8765 zsh srv_stop.sh
