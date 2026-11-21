@@ -1,0 +1,98 @@
+{
+ "label": "lkc2_on2_b",
+ "banner": "BANNER [lkc2_on2_b] prompts realistic_v1.json sha 693e3097d942e5a5 gen 320 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)",
+ "banner_parts": {
+  "lookup": "on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off)",
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)"
+ },
+ "prompts_sha": "693e3097d942e5a5",
+ "gen": 320,
+ "temp": 0.0,
+ "think": 0,
+ "seed": -1,
+ "started": "2026-11-21 13:21:16",
+ "rungs": {
+  "2k": [
+   {
+    "t0": 1795296096.892291,
+    "t_first": 1795296097.924355,
+    "t_last": 1795296102.1614132,
+    "t_end": 1795296102.161471,
+    "ttft_s": 1.0320639610290527,
+    "completion_tokens": 320,
+    "prompt_tokens": 279,
+    "decode_tps": 75.28808615587533,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 279,
+     "completion_tokens": 320,
+     "total_tokens": 599,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 73.4,
+     "tok_verify": 7.44,
+     "accept_pct": 93,
+     "hist": "0:2% 1:2% 2:0% 3:0% 4:2% 5:5% 6:0% 7:88%",
+     "ms_cycle": 101,
+     "draft_ms": 4.6,
+     "verify_ms": 95.1,
+     "lookup_cycles": 30,
+     "lookup_tok_verify": 7.7,
+     "tree_cycles": 2,
+     "tree_tv": 6.0,
+     "tree_ms": 100.0,
+     "chain_cycles": 11,
+     "chain_tv": 7.36,
+     "chain_ms": 95.3,
+     "other_cycles": 0
+    },
+    "content": "```python\ndef get_odd_collatz(n):\n    \"\"\"\n    Given a positive integer n, return a sorted list that has the odd numbers in collatz sequence.\n\n    The Collatz conjecture is a conjecture in mathematics that concerns a sequence defined\n    as follows: start with any positive integer n. Then each term is obtained from the \n    previous term as follows: if the previous term is even, the next term is one half of \n    the previous term. If the previous term is odd, the next term is 3 times the previous\n    term plus 1. The conjecture is that no matter what value of n, the sequence will always reach 1.\n\n    Note: \n        1. Collatz(1) is [1].\n        2. returned list sorted in increasing order.\n\n    For example:\n    get_odd_collatz(5) returns [1, 5] # The collatz sequence for 5 is [5, 16, 8, 4, 2, 1], so the odd numbers are only 1, and 5.\n    \"\"\"\n    odd_numbers = set()\n    current = n\n    while True:\n        if current % 2 == 1:\n            odd_numbers.add(current)\n        if current == 1:\n            break\n        if current % 2 == 0:\n            current = current // 2\n        else:\n            current = 3 * current + 1\n    return",
+    "server_prefill": [
+     [
+      279,
+      0.9
+     ]
+    ],
+    "sha": "1681b92d273f64ad",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.237058162689209,
+     "mean_w": {
+      "system_power": 11.91820239621109,
+      "total_power": 18.608867450601778,
+      "cpu_power": 1.8315698316562825,
+      "gpu_power": 1.6412157485713506,
+      "ane_power": 0.0,
+      "dram_power": 3.2178794741630554
+     },
+     "energy_j": 78.84685372997379,
+     "net_total_w": 13.420643230325899,
+     "net_energy_j": 56.864045947592025
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   }
+  ]
+ },
+ "idle": {
+  "samples": 15,
+  "seconds": 20.004987239837646,
+  "mean_w": {
+   "system_power": 4.875321501937091,
+   "total_power": 5.188224220275879,
+   "cpu_power": 0.2681206731822921,
+   "gpu_power": 0.0038297956642887225,
+   "ane_power": 0.0,
+   "dram_power": 0.040952249492208166
+  },
+  "energy_j": 103.79035932403559
+ },
+ "ended": "2026-11-21 13:21:42"
+}

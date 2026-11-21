@@ -1,0 +1,236 @@
+[13:12:29] drafter ring snapshot: fix (DRAFT_RING_SNAP; 'system' keys ('system',))
+[qwen38-27b-ane] started 2026-11-21 13:12:29  pid 37307  listen 127.0.0.1:8765
+[qwen38-27b-ane] model dir     /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx  (max ctx 98304; Core AI: verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [8192, 16384, 32768, 65536, 98304], KV kv8, one weight copy)
+[qwen38-27b-ane] checkpoint    /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model
+[qwen38-27b-ane] speculative   ON  drafter /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel
+[qwen38-27b-ane] thinking      default off (clients override via chat_template_kwargs.enable_thinking); context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)
+[qwen38-27b-ane] think budget  low=2048,medium=6144,xhigh=12288 tokens per reasoning_effort (request field thinking_budget overrides; then closed with Qwen's budget phrase)
+[qwen38-27b-ane] sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, min_p 0.0 / 0; max_tokens 4096
+[qwen38-27b-ane] repetition    presence_penalty 0.0 thinking / 1.5 non-thinking; DRY multiplier 0.0 base 1.75 allowed 8 tokens; loop guard 3+ periods over 1536+ tokens
+[qwen38-27b-ane] python        /Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+drafter: body-only package built beside release_u15_data600_mat, drafting for release_vq3pA_mixh_s600_k1_mat with its head
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+[13:12:30] ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+[13:12:30] model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+[13:12:30] target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx
+[13:12:30] KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+[13:12:30] KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[13:12:30] [ANE compile] all 18 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+[13:12:30] loaded chunk_L00-07.aimodel (30 entries, 0s, bridge)
+[13:12:30] loaded chunk_L00-07.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L08-15.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L08-15.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L16-23.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L16-23.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L24-31.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L24-31.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L32-39.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L32-39.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L40-47.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L40-47.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L48-55.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L48-55.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L56-63.aimodel (30 entries, 0s, bridge)
+[13:12:31] loaded chunk_L56-63.aimodel (30 entries, 0s, bridge)
+[13:12:31] drafter: Core AI dflash2_lut4_gptq_nohead.aimodel (body only, drafting with the target's head)
+[qwen38-27b-ane] loaded batched prefill + head + DFlash2 drafter dflash2_lut4_gptq_nohead.aimodel from v8_dec8tx (ctx 98304) in 1s
+[13:12:32] v8: GPU engine libgpu_v8_f8q.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+[13:12:32] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d
+[13:12:32] v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+[13:12:32] v8: prefill engine ready in 0s (V8 for new spans >= 256 tokens)
+dec_init: attention kernel dec_attn_r4
+[13:12:32] dec8: BANNER decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto
+[13:12:32] dec8: decode GPU engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a, kernels dec_kernels_tree.metal 674918fb1e682a2c; keep-alive hold 60 ms (DEC_KA_HOLD_MS), switch /Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka
+[13:12:32] dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode auto, 64K entry up to 0 keys
+[13:12:32] v8: text-level prompt match on; decode snapshots every 256 tokens (last 3); V8 rest >= 128, tail <= 8 rows on the bridge
+[13:12:32] tree: BANNER mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off
+[qwen38-27b-ane] serving OpenAI API on http://127.0.0.1:8765/v1 (V8 prefill, speculative ON, ctx 98304)
+[13:12:34] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[13:12:34] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[13:12:34] prefill: 15 tok in 0.2s (61 tok/s) | decoding ...
+[13:12:34] tree: 1 cycles: tree 1 (1.00 tok/verify, 104.1 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0; sampled 0
+[13:12:34] prompt 15 (cached 0, prefill 15 in 0.2s) | gen 1 in 0.1s (8.4 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 119 (draft 14.4 verify 104.1 sample 0.1 ctx 0.5 host 0.2)) | stop | ctx 16/98304 (8K entry)
+[13:12:54] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16 tok, prompt 279 tok, first difference at 1:
+[13:12:54] request: prompt 279 tok | cache: cold (no reusable state), reused 0 | prefilling 279 tok ...
+[13:12:54] v8: 16 ANE KV segments registered (ctx 8192)
+[13:12:55] v8: snapshot 'turn' at 256 (cut 272), taken during the run
+[13:12:55] v8: 279 tok (105 pad) in 0.7s (373 tok/s) + 48 ms handover / drafter context | setup 48 ms (V fill 0 ms, 0 rows)
+[13:12:55] prefill: 279 tok in 0.8s (330 tok/s) | decoding ...
+[13:13:00] decode snapshots: 1 taken (4 ms); kept: dec0, gen, turn
+[13:13:00] tree: 41 cycles: tree 2 (5.50 tok/verify, 101.8 ms), chain 39 (7.90 tok/verify, 94.1 ms), other 0, lookup 0; accepted path off the chain rows in 1; sampled 0
+[13:13:00] prompt 279 (cached 0, prefill 279 in 0.9s) | gen 320 in 4.5s (71.5 tok/s, 7.80 tok/verify, accept 97% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:2% 4:2% 5:2% 6:0% 7:93%), ms/cycle 109 (draft 13.1 verify 94.5 sample 0.7 ctx 0.7 host 0.1)) | length | ctx 598/98304 (8K entry)
+[13:13:01] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 598 tok, prompt 15 tok, first difference at 1:
+[13:13:01] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[13:13:01] snapshots dropped (their KV rows were rewritten): dec0, turn
+[13:13:01] prefill: 15 tok in 0.2s (68 tok/s) | decoding ...
+[13:13:01] tree: 1 cycles: tree 1 (1.00 tok/verify, 103.7 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0; sampled 0
+[13:13:01] prompt 15 (cached 0, prefill 15 in 0.2s) | gen 1 in 0.1s (8.5 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 118 (draft 13.7 verify 103.7 sample 0.1 ctx 0.6 host 0.1)) | stop | ctx 16/98304 (8K entry)
+[13:13:06] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 16 tok, prompt 112 tok, first difference at 1:
+[13:13:06] request: prompt 112 tok | cache: cold (no reusable state), reused 0 | prefilling 112 tok ...
+[13:13:07] prefill: 112 tok in 0.4s (251 tok/s) | decoding ...
+[13:13:12] tree: 42 cycles: tree 25 (3.96 tok/verify, 98.0 ms), chain 17 (7.24 tok/verify, 95.0 ms), other 0, lookup 0; accepted path off the chain rows in 12; sampled 42
+[13:13:12] prompt 112 (cached 0, prefill 112 in 0.5s) | gen 222 in 4.7s (47.1 tok/s, 5.29 tok/verify, accept 61% (accepted/7 per cycle: 0:0% 1:21% 2:12% 3:7% 4:12% 5:5% 6:10% 7:33%), ms/cycle 112 (draft 13.2 verify 96.8 sample 1.2 ctx 0.9 host 0.1)) | thinking 99 + answer 122 tok | stop | ctx 334/98304 (8K entry)
+[13:13:12] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 334 tok, prompt 123 tok, first difference at 52:
+[13:13:12] drafter ring (fix): snapshot slots 41, kept by position 41 (0 hold another prompt's rows), hidden 0 -> all written back
+[13:13:12] request: prompt 123 tok | cache: restore 'system' snapshot, reused 49 | prefilling 74 tok ...
+[13:13:12] prefill: 74 tok in 0.4s (171 tok/s) | decoding ...
+[13:13:17] [think] reasoning budget 192 reached at 198 tokens: thinking closed
+[13:13:19] decode snapshots: 1 taken (2 ms); kept: dec1, gen, system
+[13:13:19] tree: 58 cycles: tree 31 (3.77 tok/verify, 97.7 ms), chain 27 (7.44 tok/verify, 95.2 ms), other 0, lookup 0; accepted path off the chain rows in 18; sampled 58
+[13:13:19] prompt 123 (cached 49, prefill 74 in 0.4s) | gen 344 in 6.7s (51.4 tok/s, 5.93 tok/verify, accept 64% (accepted/7 per cycle: 0:0% 1:16% 2:16% 3:7% 4:9% 5:10% 6:7% 7:36%), ms/cycle 115 (draft 13.1 verify 96.5 sample 1.2 ctx 0.9 host 3.6)) | THINK closed at 198 (budget) | thinking 221 + answer 122 tok | stop | ctx 467/98304 (8K entry)
+[13:13:19] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 467 tok, prompt 104 tok, first difference at 52:
+[13:13:19] drafter ring (fix): snapshot slots 41, kept by position 41 (0 hold another prompt's rows), hidden 0 -> all written back
+[13:13:19] request: prompt 104 tok | cache: restore 'system' snapshot, reused 49 | prefilling 55 tok ...
+[13:13:20] snapshots dropped (their KV rows were rewritten): dec1
+[13:13:20] prefill: 55 tok in 0.2s (236 tok/s) | decoding ...
+[13:13:25] [think] reasoning budget 192 reached at 192 tokens: thinking closed
+[13:13:27] decode snapshots: 1 taken (2 ms); kept: dec2, gen, system
+[13:13:27] tree: 66 cycles: tree 34 (3.82 tok/verify, 97.9 ms), chain 32 (7.25 tok/verify, 94.8 ms), other 0, lookup 0; accepted path off the chain rows in 11; sampled 66
+[13:13:27] prompt 104 (cached 49, prefill 55 in 0.2s) | gen 384 in 7.6s (50.7 tok/s, 5.82 tok/verify, accept 64% (accepted/7 per cycle: 0:9% 1:6% 2:11% 3:11% 4:9% 5:11% 6:8% 7:36%), ms/cycle 115 (draft 13.1 verify 96.4 sample 1.2 ctx 0.8 host 3.2)) | THINK closed at 192 (budget) | thinking 215 + answer 168 tok | length | ctx 492/98304 (8K entry)
+[13:13:28] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 492 tok, prompt 235 tok, first difference at 52:
+[13:13:28] drafter ring (fix): snapshot slots 41, kept by position 41 (0 hold another prompt's rows), hidden 0 -> all written back
+[13:13:28] request: prompt 235 tok | cache: restore 'system' snapshot, reused 49 | prefilling 186 tok ...
+[13:13:28] snapshots dropped (their KV rows were rewritten): dec2
+[13:13:28] prefill: 186 tok in 0.6s (291 tok/s) | decoding ...
+[13:13:31] tree: 22 cycles: tree 19 (3.63 tok/verify, 97.8 ms), chain 3 (6.33 tok/verify, 98.8 ms), other 0, lookup 0; accepted path off the chain rows in 9; sampled 22
+[13:13:31] prompt 235 (cached 49, prefill 186 in 0.7s) | gen 88 in 2.5s (35.4 tok/s, 4.00 tok/verify, accept 43% (accepted/7 per cycle: 0:9% 1:18% 2:18% 3:18% 4:14% 5:9% 6:5% 7:9%), ms/cycle 113 (draft 13.0 verify 97.9 sample 0.9 ctx 1.0 host 0.1)) | thinking 77 + answer 10 tok | stop | ctx 323/98304 (8K entry)
+[13:13:31] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 323 tok, prompt 89 tok, first difference at 52:
+[13:13:31] drafter ring (fix): snapshot slots 41, kept by position 41 (0 hold another prompt's rows), hidden 0 -> all written back
+[13:13:31] request: prompt 89 tok | cache: restore 'system' snapshot, reused 49 | prefilling 40 tok ...
+[13:13:31] prefill: 40 tok in 0.3s (158 tok/s) | decoding ...
+[13:13:41] decode: 237 tok, 10s, 23.6 tok/s, 2.66 tok/verify, accept 24%, ms/cycle 113 (draft 13.2 verify 98.0 sample 0.6 ctx 0.8 host 0.1)
+[13:13:42] decode snapshots: 1 taken (2 ms); kept: dec0, gen, system
+[13:13:42] tree: 99 cycles: tree 94 (2.32 tok/verify, 98.0 ms), chain 5 (7.60 tok/verify, 95.9 ms), other 0, lookup 0; accepted path off the chain rows in 30; sampled 99
+[13:13:42] prompt 89 (cached 49, prefill 40 in 0.3s) | gen 256 in 11.1s (23.0 tok/s, 2.59 tok/verify, accept 23% (accepted/7 per cycle: 0:25% 1:32% 2:22% 3:13% 4:1% 5:2% 6:0% 7:4%), ms/cycle 113 (draft 13.2 verify 97.9 sample 0.6 ctx 0.7 host 0.1)) | thinking 58 + answer 197 tok | stop | ctx 345/98304 (8K entry)
+[13:13:43] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 345 tok, prompt 110 tok, first difference at 52:
+[13:13:43] drafter ring (fix): snapshot slots 41, kept by position 41 (0 hold another prompt's rows), hidden 0 -> all written back
+[13:13:43] request: prompt 110 tok | cache: restore 'system' snapshot, reused 49 | prefilling 61 tok ...
+[13:13:43] snapshots dropped (their KV rows were rewritten): dec0
+[13:13:43] prefill: 61 tok in 0.2s (254 tok/s) | decoding ...
+[13:13:53] decode: 246 tok, 10s, 24.4 tok/s, 2.73 tok/verify, accept 25%, ms/cycle 112 (draft 13.2 verify 97.3 sample 0.6 ctx 0.8 host 0.0)
+[13:14:00] decode snapshots: 1 taken (2 ms); kept: dec1, gen, system
+[13:14:00] tree: 150 cycles: tree 143 (2.34 tok/verify, 97.3 ms), chain 7 (7.00 tok/verify, 96.4 ms), other 0, lookup 0; accepted path off the chain rows in 52; sampled 150
+[13:14:00] prompt 110 (cached 49, prefill 61 in 0.3s) | gen 384 in 16.8s (22.9 tok/s, 2.56 tok/verify, accept 22% (accepted/7 per cycle: 0:27% 1:36% 2:17% 3:9% 4:6% 5:1% 6:1% 7:4%), ms/cycle 112 (draft 13.3 verify 97.2 sample 0.6 ctx 0.8 host 0.0)) | thinking 124 + answer 259 tok | length | ctx 494/98304 (8K entry)
+[13:14:00] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 494 tok, prompt 7532 tok, first difference at 47:
+[13:14:00] snapshot 'system' (49 tok) kept as 'sysk' with its KV rows (2 MB, 1 ms): this prompt rewrites them
+[13:14:00] request: prompt 7532 tok | cache: cold (no reusable state), reused 0 | prefilling 7532 tok ...
+[13:14:11] v8: snapshot 'system' at 7424 (cut 7469), taken during the run
+[13:14:11] v8: snapshot 'turn' at 7424 (cut 7527), taken during the run
+[13:14:11] v8: 7532 tok (20 pad) in 11.1s (680 tok/s) + 191 ms handover / drafter context | setup 46 ms (V fill 0 ms, 0 rows)
+[13:14:11] snapshots dropped (their KV rows were rewritten): dec1
+[13:14:11] prefill: 7532 tok in 11.3s (665 tok/s) | decoding ...
+[13:14:15] tree: 29 cycles: tree 10 (3.90 tok/verify, 99.2 ms), chain 19 (7.42 tok/verify, 94.4 ms), other 0, lookup 0; accepted path off the chain rows in 3; sampled 29
+[13:14:15] prompt 7532 (cached 0, prefill 7532 in 11.3s) | gen 180 in 3.2s (55.6 tok/s, 6.21 tok/verify, accept 74% (accepted/7 per cycle: 0:3% 1:7% 2:3% 3:10% 4:14% 5:3% 6:7% 7:52%), ms/cycle 112 (draft 13.2 verify 96.1 sample 1.4 ctx 0.8 host 0.1)) | thinking 67 + answer 112 tok | stop | ctx 7712/98304 (8K entry)
+[13:14:15] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 7712 tok, prompt 7543 tok, first difference at 7472:
+[13:14:15] drafter ring (fix): snapshot slots 2048, kept by position 1757 (0 hold another prompt's rows), hidden 291 -> all written back
+[13:14:15] request: prompt 7543 tok | cache: restore 'system' snapshot, reused 7424 | prefilling 119 tok ...
+[13:14:16] prefill: 119 tok in 0.6s (188 tok/s) | decoding ...
+[13:14:20] [think] reasoning budget 192 reached at 193 tokens: thinking closed
+[13:14:22] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system, turn
+[13:14:22] tree: 56 cycles: tree 27 (3.96 tok/verify, 98.2 ms), chain 29 (7.03 tok/verify, 95.6 ms), other 0, lookup 0; accepted path off the chain rows in 12; sampled 56
+[13:14:22] prompt 7543 (cached 7424, prefill 119 in 0.7s) | gen 337 in 6.5s (51.7 tok/s, 6.02 tok/verify, accept 65% (accepted/7 per cycle: 0:2% 1:9% 2:16% 3:14% 4:7% 5:7% 6:5% 7:39%), ms/cycle 116 (draft 13.3 verify 96.9 sample 1.3 ctx 0.8 host 3.9)) | THINK closed at 193 (budget) | thinking 216 + answer 120 tok | stop | ctx 7880/98304 (8K entry)
+[13:14:23] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 7880 tok, prompt 7524 tok, first difference at 7472:
+[13:14:23] drafter ring (fix): snapshot slots 2048, kept by position 1632 (0 hold another prompt's rows), hidden 416 -> all written back
+[13:14:23] request: prompt 7524 tok | cache: restore 'system' snapshot, reused 7469 | prefilling 55 tok ...
+[13:14:23] snapshots dropped (their KV rows were rewritten): dec2
+[13:14:23] prefill: 55 tok in 0.2s (247 tok/s) | decoding ...
+[13:14:28] [think] reasoning budget 192 reached at 197 tokens: thinking closed
+[13:14:31] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system, turn
+[13:14:31] tree: 67 cycles: tree 30 (3.67 tok/verify, 98.3 ms), chain 37 (6.68 tok/verify, 94.7 ms), other 0, lookup 0; accepted path off the chain rows in 12; sampled 67
+[13:14:31] prompt 7524 (cached 7469, prefill 55 in 0.3s) | gen 384 in 7.7s (49.9 tok/s, 5.73 tok/verify, accept 62% (accepted/7 per cycle: 0:10% 1:6% 2:10% 3:15% 4:9% 5:4% 6:10% 7:34%), ms/cycle 115 (draft 13.3 verify 96.3 sample 1.2 ctx 0.8 host 3.2)) | THINK closed at 197 (budget) | thinking 220 + answer 163 tok | length | ctx 7907/98304 (8K entry)
+[13:14:31] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 7907 tok, prompt 7655 tok, first difference at 7472:
+[13:14:31] drafter ring (fix): snapshot slots 2048, kept by position 1610 (0 hold another prompt's rows), hidden 438 -> all written back
+[13:14:31] request: prompt 7655 tok | cache: restore 'system' snapshot, reused 7469 | prefilling 186 tok ...
+[13:14:32] snapshots dropped (their KV rows were rewritten): dec0
+[13:14:32] prefill: 186 tok in 0.6s (294 tok/s) | decoding ...
+[13:14:35] tree: 29 cycles: tree 23 (3.39 tok/verify, 97.9 ms), chain 6 (5.83 tok/verify, 99.8 ms), other 0, lookup 0; accepted path off the chain rows in 7; sampled 29
+[13:14:35] prompt 7655 (cached 7469, prefill 186 in 0.7s) | gen 113 in 3.3s (34.5 tok/s, 3.90 tok/verify, accept 41% (accepted/7 per cycle: 0:10% 1:17% 2:28% 3:7% 4:10% 5:17% 6:3% 7:7%), ms/cycle 113 (draft 13.0 verify 98.3 sample 0.9 ctx 0.8 host 0.1)) | thinking 102 + answer 10 tok | stop | ctx 7768/98304 (8K entry)
+[13:14:35] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 7768 tok, prompt 7509 tok, first difference at 7472:
+[13:14:35] drafter ring (fix): snapshot slots 2048, kept by position 1749 (0 hold another prompt's rows), hidden 299 -> all written back
+[13:14:35] request: prompt 7509 tok | cache: restore 'system' snapshot, reused 7469 | prefilling 40 tok ...
+[13:14:35] prefill: 40 tok in 0.2s (179 tok/s) | decoding ...
+[13:14:45] tree: 89 cycles: tree 86 (2.59 tok/verify, 97.5 ms), chain 3 (5.00 tok/verify, 102.4 ms), other 0, lookup 0; accepted path off the chain rows in 28; sampled 89
+[13:14:45] prompt 7509 (cached 7469, prefill 40 in 0.3s) | gen 238 in 10.0s (23.8 tok/s, 2.67 tok/verify, accept 24% (accepted/7 per cycle: 0:19% 1:37% 2:19% 3:16% 4:3% 5:3% 6:1% 7:1%), ms/cycle 112 (draft 13.1 verify 97.7 sample 0.6 ctx 0.8 host 0.1)) | thinking 52 + answer 185 tok | stop | ctx 7747/98304 (8K entry)
+[13:14:46] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 7747 tok, prompt 7530 tok, first difference at 7472:
+[13:14:46] drafter ring (fix): snapshot slots 2048, kept by position 1763 (0 hold another prompt's rows), hidden 285 -> all written back
+[13:14:46] request: prompt 7530 tok | cache: restore 'system' snapshot, reused 7469 | prefilling 61 tok ...
+[13:14:46] prefill: 61 tok in 0.2s (270 tok/s) | decoding ...
+[13:14:56] decode: 266 tok, 10s, 26.6 tok/s, 2.99 tok/verify, accept 28%, ms/cycle 112 (draft 13.2 verify 97.5 sample 0.7 ctx 0.9 host 0.1)
+[13:15:02] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, system, turn
+[13:15:02] tree: 143 cycles: tree 136 (2.40 tok/verify, 97.5 ms), chain 7 (8.00 tok/verify, 96.3 ms), other 0, lookup 0; accepted path off the chain rows in 56; sampled 143
+[13:15:02] prompt 7530 (cached 7469, prefill 61 in 0.3s) | gen 384 in 16.0s (23.9 tok/s, 2.69 tok/verify, accept 24% (accepted/7 per cycle: 0:25% 1:29% 2:25% 3:9% 4:5% 5:1% 6:0% 7:5%), ms/cycle 112 (draft 13.1 verify 97.4 sample 0.6 ctx 0.9 host 0.1)) | thinking 138 + answer 245 tok | length | ctx 7913/98304 (8K entry)
+[13:15:02] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 7913 tok, prompt 32108 tok, first difference at 7467:
+[13:15:02] snapshot 'system' (7469 tok) kept as 'sysk' with its KV rows (235 MB, 18 ms): this prompt rewrites them
+[13:15:02] request: prompt 32108 tok | cache: restore 'turn' snapshot, reused 7424 | prefilling 24684 tok ...
+[13:15:02] v8: sync at 7424 in 7 ms
+[13:15:03] [ctx] 8192 -> 32768 at pos 7424: segments bound, no KV rows copied (97 ms)
+[13:15:03] v8: 48 ANE KV segments registered (ctx 32768)
+[13:15:49] v8: snapshot 'system' at 32000 (cut 32045), taken during the run
+[13:15:49] v8: snapshot 'turn' at 32000 (cut 32103), taken during the run
+[13:15:49] v8: 24684 tok (20 pad) in 46.7s (528 tok/s) + 201 ms handover / drafter context | setup 99 ms (V fill 0 ms, 0 rows)
+[13:15:49] snapshots dropped (their KV rows were rewritten): dec1
+[13:15:49] prefill: 24684 tok in 47.0s (525 tok/s) | decoding ...
+[13:15:54] tree: 38 cycles: tree 18 (3.94 tok/verify, 110.7 ms), chain 20 (6.90 tok/verify, 107.1 ms), other 0, lookup 0; accepted path off the chain rows in 9; sampled 38
+[13:15:54] prompt 32108 (cached 7424, prefill 24684 in 47.1s) | gen 209 in 4.7s (44.2 tok/s, 5.50 tok/verify, accept 64% (accepted/7 per cycle: 0:5% 1:11% 2:8% 3:11% 4:16% 5:8% 6:5% 7:37%), ms/cycle 124 (draft 13.3 verify 108.8 sample 1.3 ctx 1.0 host 0.1)) | thinking 98 + answer 110 tok | stop | ctx 32317/98304 (32K entry)
+[13:15:55] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 32317 tok, prompt 32119 tok, first difference at 32048:
+[13:15:55] drafter ring (fix): snapshot slots 2048, kept by position 1730 (0 hold another prompt's rows), hidden 318 -> all written back
+[13:15:55] request: prompt 32119 tok | cache: restore 'system' snapshot, reused 32000 | prefilling 119 tok ...
+[13:15:55] prefill: 119 tok in 0.8s (142 tok/s) | decoding ...
+[13:16:01] [think] reasoning budget 192 reached at 194 tokens: thinking closed
+[13:16:03] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system, turn
+[13:16:03] tree: 59 cycles: tree 26 (3.15 tok/verify, 111.1 ms), chain 33 (7.06 tok/verify, 106.8 ms), other 0, lookup 0; accepted path off the chain rows in 15; sampled 59
+[13:16:03] prompt 32119 (cached 32000, prefill 119 in 0.9s) | gen 341 in 7.6s (44.8 tok/s, 5.78 tok/verify, accept 62% (accepted/7 per cycle: 0:5% 1:10% 2:22% 3:8% 4:5% 5:3% 6:3% 7:42%), ms/cycle 129 (draft 13.2 verify 108.7 sample 1.2 ctx 0.9 host 4.8)) | THINK closed at 194 (budget) | thinking 217 + answer 123 tok | stop | ctx 32460/98304 (32K entry)
+[13:16:03] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 32460 tok, prompt 32100 tok, first difference at 32048:
+[13:16:03] drafter ring (fix): snapshot slots 2048, kept by position 1631 (0 hold another prompt's rows), hidden 417 -> all written back
+[13:16:03] request: prompt 32100 tok | cache: restore 'system' snapshot, reused 32045 | prefilling 55 tok ...
+[13:16:04] snapshots dropped (their KV rows were rewritten): dec2
+[13:16:04] prefill: 55 tok in 0.3s (195 tok/s) | decoding ...
+[13:16:10] [think] reasoning budget 192 reached at 193 tokens: thinking closed
+[13:16:14] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system, turn
+[13:16:14] tree: 77 cycles: tree 45 (3.18 tok/verify, 109.9 ms), chain 32 (6.81 tok/verify, 107.2 ms), other 0, lookup 0; accepted path off the chain rows in 20; sampled 77
+[13:16:14] prompt 32100 (cached 32045, prefill 55 in 0.3s) | gen 384 in 9.8s (39.1 tok/s, 4.99 tok/verify, accept 53% (accepted/7 per cycle: 0:13% 1:18% 2:8% 3:12% 4:10% 5:5% 6:4% 7:30%), ms/cycle 128 (draft 13.1 verify 108.8 sample 1.1 ctx 0.9 host 3.7)) | THINK closed at 193 (budget) | thinking 216 + answer 167 tok | length | ctx 32487/98304 (32K entry)
+[13:16:14] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 32487 tok, prompt 32231 tok, first difference at 32048:
+[13:16:14] drafter ring (fix): snapshot slots 2048, kept by position 1606 (0 hold another prompt's rows), hidden 442 -> all written back
+[13:16:14] request: prompt 32231 tok | cache: restore 'system' snapshot, reused 32045 | prefilling 186 tok ...
+[13:16:15] snapshots dropped (their KV rows were rewritten): dec0
+[13:16:15] prefill: 186 tok in 0.8s (229 tok/s) | decoding ...
+[13:16:18] tree: 24 cycles: tree 21 (4.10 tok/verify, 109.7 ms), chain 3 (6.00 tok/verify, 109.3 ms), other 0, lookup 0; accepted path off the chain rows in 11; sampled 24
+[13:16:18] prompt 32231 (cached 32045, prefill 186 in 0.8s) | gen 104 in 3.0s (34.6 tok/s, 4.33 tok/verify, accept 48% (accepted/7 per cycle: 0:8% 1:12% 2:12% 3:21% 4:12% 5:21% 6:8% 7:4%), ms/cycle 125 (draft 13.1 verify 109.7 sample 1.0 ctx 1.2 host 0.1)) | thinking 93 + answer 10 tok | stop | ctx 32335/98304 (32K entry)
+[13:16:18] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 32335 tok, prompt 32085 tok, first difference at 32048:
+[13:16:18] drafter ring (fix): snapshot slots 2048, kept by position 1751 (0 hold another prompt's rows), hidden 297 -> all written back
+[13:16:18] request: prompt 32085 tok | cache: restore 'system' snapshot, reused 32045 | prefilling 40 tok ...
+[13:16:18] prefill: 40 tok in 0.3s (139 tok/s) | decoding ...
+[13:16:29] decode: 220 tok, 10s, 21.8 tok/s, 2.72 tok/verify, accept 24%, ms/cycle 124 (draft 13.1 verify 109.8 sample 0.7 ctx 0.8 host 0.1)
+[13:16:31] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, system, turn
+[13:16:31] tree: 105 cycles: tree 102 (2.50 tok/verify, 109.6 ms), chain 3 (5.00 tok/verify, 115.3 ms), other 0, lookup 0; accepted path off the chain rows in 28; sampled 105
+[13:16:31] prompt 32085 (cached 32045, prefill 40 in 0.3s) | gen 270 in 13.1s (20.7 tok/s, 2.57 tok/verify, accept 22% (accepted/7 per cycle: 0:21% 1:32% 2:28% 3:11% 4:5% 5:2% 6:0% 7:1%), ms/cycle 124 (draft 13.1 verify 109.7 sample 0.6 ctx 0.8 host 0.1)) | thinking 46 + answer 223 tok | stop | ctx 32355/98304 (32K entry)
+[13:16:32] thinking on (effort none, budget 192, max_tokens 384) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 32355 tok, prompt 32106 tok, first difference at 32048:
+[13:16:32] drafter ring (fix): snapshot slots 2048, kept by position 1731 (0 hold another prompt's rows), hidden 317 -> all written back
+[13:16:32] request: prompt 32106 tok | cache: restore 'system' snapshot, reused 32045 | prefilling 61 tok ...
+[13:16:32] snapshots dropped (their KV rows were rewritten): dec1
+[13:16:32] prefill: 61 tok in 0.3s (208 tok/s) | decoding ...
+[13:16:40] [think] reasoning budget 192 reached at 193 tokens: thinking closed
+[13:16:42] decode: 259 tok, 10s, 25.6 tok/s, 3.28 tok/verify, accept 28%, ms/cycle 128 (draft 13.2 verify 109.6 sample 0.7 ctx 0.9 host 3.5)
+[13:16:49] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system, turn
+[13:16:49] tree: 132 cycles: tree 125 (2.45 tok/verify, 109.6 ms), chain 7 (7.57 tok/verify, 108.5 ms), other 0, lookup 0; accepted path off the chain rows in 52; sampled 132
+[13:16:49] prompt 32106 (cached 32045, prefill 61 in 0.3s) | gen 384 in 16.7s (23.0 tok/s, 2.91 tok/verify, accept 25% (accepted/7 per cycle: 0:23% 1:31% 2:23% 3:11% 4:5% 5:2% 6:0% 7:5%), ms/cycle 126 (draft 13.2 verify 109.5 sample 0.7 ctx 0.9 host 2.1)) | THINK closed at 193 (budget) | thinking 216 + answer 167 tok | length | ctx 32491/98304 (32K entry)

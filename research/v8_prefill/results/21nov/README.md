@@ -254,3 +254,72 @@ exact somewhere; which kernel leaks (bridge prefill, chain verify, tree entry, G
   fix: `COLD_SCRUB=kv` in the launcher (cold starts). Fuller fix: also reset rows [n, high-water mark) after a
   restore. Better still: find the kernel whose mask leaks (a one-layer probe, zero vs stale rows past the position).
 - Served restart 10:55:50, forge pid 73029; smoke (positions 1, 8) 29aef2ec9db18a3f.
+
+## 12:55 to 13:35: M6 ANE bot batch: fork-aware tree ranking, sampled lookup on chat / math (`forkrank/`, `lookup_cm/`)
+
+**Fork-aware ranking at 8 rows: no gain, greedy or sampled.** `serve_t/fork_rank_sim.py`. The served tree's top-4
+children were re-ranked by a calibrated edge value:
+- **Features:** rank among the top 4, softmax(s) bucket, depth, and the fork distance of the parent's path (spine / +1 / +2..).
+- **Smoothing:** 20 pseudo-counts toward the served edge probability.
+- **Fit / score:** fit on one half of the requests, scored on the other.
+- **Tree:** best first on the product of edge values, 7 nodes.
+- **Replica check:** the served replica equals `tree_verify.build_tree` (0 mismatches).
+
+| | 2K | 8K | 32K |
+|---|---|---|---|
+| greedy (chainlog_v1, 1,174 cycles): tok/verify served -> fork-aware | 4.866 -> 4.838 | 5.299 -> 5.291 | 5.407 -> 5.395 |
+| greedy projected tok/s | −0.50% | −0.08% | −0.18% |
+| sampled (1,887 logged cycles): expected tok/verify served -> fork-aware | 4.110 -> 4.106 | 4.190 -> 4.186 | 3.951 -> 3.947 |
+| sampled projected tok/s | −0.09% | −0.11% | −0.13% |
+
+- **Sampled data:** the served config plus `TREE_LOG` + `TREE_LOG_DIST=1`. This new research switch in
+  `pipe/tree_verify.py` (off by default) records per cycle the drafter's cand / unary / hp and the target's sampling
+  distribution of every verified row. It runs before the accept walk and uses no RNG (`serve_t/tree_logdist_unit.py`).
+  The workload was realistic 2K / 8K / 32K, all 9 tasks, thinking on, temperature 1.0, seed 6100.
+- **Sampled metric:** expected tok/verify = 1 + sum over nodes of the product of target probabilities along the
+  path (the walk's acceptance law). It is exact for 99.8% of the fork-aware tree's expectation; 0.2% comes from nodes
+  without a verified parent.
+- **Calibration check:** expected 4.110 / 4.190 / 3.951 against the logged realized 3.980 / 4.260 / 3.944 tokens
+  per cycle, within the sampling error of about ±0.1. The server's gen / cycles is about 0.16 higher (tokens outside
+  draft cycles).
+- **Sampled tau sweep:** best-first order, expected tok/verify (unmeasured nodes 0):
+
+  | tau | 2K | 8K | 32K |
+  |---|---|---|---|
+  | 1.0 | 4.068 | 4.144 | 3.892 |
+  | 1.25 | 4.110 | 4.183 | 3.939 |
+  | 1.5 | 4.110 | 4.190 | 3.951 |
+  | 2.0 | 4.069 | 4.161 | 3.911 |
+  | 3.0 | 3.800 | 3.961 | 3.704 |
+
+  The served 1.5 is best under sampling as well.
+- **Why:** the served path probability is already about as calibrated as these bins can make it. Dropping
+  post-fork continuations (inventory: kept 14-24% one step after a fork) is the correct trade for the 7-node budget,
+  because after a fork the true continuation is less likely. Re-weighting cannot recover it. Better post-fork
+  candidates could, for example context n-gram continuations as children (the review's merged lookup + neural trie).
+
+**Sampled prompt lookup on math and chat: neutral overall.** `serve_t/lookup_chatmath2.sh`, `lookup_cm/run.log`.
+- **Setup:** fresh launches off1 / on1 / on2 / off2, NGRAM_DRAFT=6 when on; tree8 sampled, banner checked first.
+  realistic_v1 math + chat tasks (3-8) at 2K / 8K / 32K, Pi settings, seed 5100, 384 tokens.
+- **Determinism:** the two orders gave byte-identical outputs per config (a fixed seed is deterministic on a fresh
+  process).
+
+| stratum | off tok/s | on tok/s | change (both orders) | tok/verify | lookup cycles | faster |
+|---|---|---|---|---|---|---|
+| 2K math | 50.76 | 48.04 | **−5.4%** | 5.72 -> 5.39 | 6% | 0/6 |
+| 2K chat | 24.17 | 25.79 | +6.7% | 2.69 -> 2.85 | 4% | 5/6 |
+| 8K math | 52.56 | 50.93 | −3.1% | 5.93 -> 5.72 | 4% | 1/6 |
+| 8K chat | 25.35 | 26.49 | +4.5% | 2.82 -> 2.96 | 3% | 4/6 |
+| 32K math | 42.81 | 40.82 | **−4.7%** | 5.37 -> 5.10 | 6% | 0/6 |
+| 32K chat | 23.38 | 23.62 | +1.0% | 2.90 -> 2.90 | 3% | 2/6 |
+| all | 33.56 | 33.58 | +0.1% | 3.90 -> 3.88 | 4% | 12/36 |
+
+- **Math loses:** a lookup cycle there replaces a DFlash2 / tree cycle that accepts more.
+- **With the code / agent result** (sampled +26.0% / +6.6%, `yolo/`): a global default would help code-heavy Pi
+  traffic and cost math 3-5%. The candidate is a per-cycle gate (take a lookup proposal only when its match is long or
+  the request's lookup cycles have been accepting), not a global switch. Defaults not changed.
+- **Run notes:** the first run of these arms failed at argument parsing (zsh does not split `${3:+--tasks $3}`;
+  `lookup_cm/run.log` 13:01-13:04); rerun 13:12-13:30 as `lkc2_*`. The sampled tree-log launch of the first run was
+  unaffected.
+- **No Pi traffic** in any arm. Served config restored 13:29:58: forge pid 45775, smoke 29aef2ec9db18a3f, banner
+  tree8 sampled=on, lookup off, ring fix.

@@ -33,6 +33,11 @@ POLICY = os.environ.get("TREE_POLICY", "branched")
 TOPC = int(os.environ.get("TREE_TOPC", "4"))
 TAU = float(os.environ.get("TREE_TAU", "1.5"))
 LOGDIR = os.environ.get("TREE_LOG")
+# 21 Nov 2026 (research): with TREE_LOG, TREE_LOG_DIST=1 also records per cycle the drafter's cand / unary / hp and
+# the target's sampling distribution of every verified row (top NDIST ids / probs; computed before the accept walk,
+# no RNG use) for offline sampled tree studies (serve_t/fork_rank_sim.py)
+LOG_DIST = os.environ.get("TREE_LOG_DIST", "0") == "1"
+NDIST = 20
 CAP = int(os.environ.get("TREE_CAP", "7"))   # D4 control (TREE_POLICY=cap): the served chain, at most CAP drafts accepted per cycle
 SAMPLED = os.environ.get("TREE_SAMPLED", "0") == "1"   # 21 Nov 2026: the tree for sampled requests too (Pi: temperature 1.0)
 N = 7   # nodes besides the root (8 verify rows)
@@ -321,12 +326,39 @@ class Tree:
                         ow[n][:, dst] = ow[n][:, idx]
         return True
 
+    def _row_dists(self, eng, lg, parent, tok, samp, seen, hist, dry):
+        """each verified row's sampling distribution (research log): row r's context = output + the tokens of its path"""
+        temp, top_p, top_k, presence = samp
+        ids = np.full((len(tok), NDIST), -1, np.int32)
+        ps = np.zeros((len(tok), NDIST), np.float32)
+        if temp <= 0:
+            return ids, ps
+        for r in range(len(tok)):
+            path, j = [], r
+            while j > 0:
+                path.append(int(tok[j])); j = int(parent[j])
+            path.reverse()
+            s2 = seen
+            if presence and path:
+                s2 = seen.copy(); s2[path] = 1.0
+            dd = eng.dist(lg[r], temp, top_p, top_k, s2, presence, None if hist is None else hist + path, dry)
+            o = np.argsort(-dd[1])[:NDIST]
+            ids[r, :len(o)] = dd[0][o]; ps[r, :len(o)] = dd[1][o]
+        return ids, ps
+
+    def _logrec(self, rec, dl):
+        if self._dl is not None:
+            a, c_, u_, h_ = self._dl
+            rec.update(anchor=a, cand=c_, unary=u_, hp=h_, dist_ids=dl[0], dist_p=dl[1])
+        self.rec.append(rec)
+
     # ---- the cycle ----
     def cycle(self, eng, anchor, samp, rng, seen, hist, dry, orig):
         """eng.draft_cycle replacement: (new tokens, committed) or orig(...) for a chain cycle."""
         import qwen38_server as S
         mb, d = self.mb, eng.drafter
         temp = samp[0]
+        self._dl = None
         lazy = hasattr(d, "flush")
         if (temp > 0 and not SAMPLED) or not lazy:   # sampling without TREE_SAMPLED: the served chain
             self.req["other"] += 1
@@ -350,6 +382,8 @@ class Tree:
         cand = info["cand"].numpy()
         unary = np.take_along_axis(raw, cand, 1).astype(np.float32) * (1.0 if rr is None else np.asarray(rr, np.float32)[:, None])
         hp = info["hp"].numpy().astype(np.float32)
+        if LOG_DIST and self.rec is not None:
+            self._dl = (int(anchor), np.asarray(cand, np.int32), np.asarray(unary, np.float32), hp.astype(np.float16))
         parent, tok, depth, prob, ctok, cprob = build_tree(anchor, cand, unary, hp, self.pc, self.sc)
         chain_like = is_chain(parent, tok, ctok)
         use_tree = not chain_like
@@ -372,6 +406,7 @@ class Tree:
             return self._chain(eng, anchor, drafts, samp, rng, seen, hist, dry, t0, t1, p)
         lg, split = out
         t2 = eng.verify_end = time.perf_counter()
+        dl = self._row_dists(eng, lg, parent, tok, samp, seen, hist, dry) if self._dl is not None else None
         kids = {}
         for r_ in range(1, len(tok)):
             kids.setdefault(int(parent[r_]), {})[int(tok[r_])] = r_
@@ -412,8 +447,8 @@ class Tree:
         eng.acc_hist[min(k, 7)] += 1
         self._account("tree", mb.ctx, 1e3 * (t2 - t1), k + 1, moved)
         if self.rec is not None:
-            self.rec.append({"p0": p, "parent": parent, "tok": tok, "prob": prob, "ctok": ctok, "cprob": cprob,
-                             "tree": 1, "path": path + [-1] * (8 - len(path)), "nxt": nxt, "ms": 1e3 * (t2 - t1)})
+            self._logrec({"p0": p, "parent": parent, "tok": tok, "prob": prob, "ctok": ctok, "cprob": cprob,
+                          "tree": 1, "path": path + [-1] * (8 - len(path)), "nxt": nxt, "ms": 1e3 * (t2 - t1)}, dl)
         committed = [anchor] + [int(tok[r_]) for r_ in path[1:]]
         return [int(tok[r_]) for r_ in path[1:]] + [nxt], committed
 
@@ -424,6 +459,8 @@ class Tree:
         mb, d = self.mb, eng.drafter
         lg = mb.call([anchor] + drafts)
         t2 = eng.verify_end = time.perf_counter()
+        dl = (self._row_dists(eng, lg, np.arange(-1, 7), np.array([anchor] + drafts), samp, seen, hist, dry)
+              if getattr(self, "_dl", None) is not None else None)
         k, nxt = 0, None
         kmax = CAP if POLICY == "cap" else 7   # cap: a different cycle split, the same greedy text if verify is split-invariant
         if samp[0] > 0:
@@ -472,9 +509,9 @@ class Tree:
         eng.acc_hist[k] += 1
         self._account("chain", mb.ctx, 1e3 * (t2 - t1), k + 1, False)
         if self.rec is not None:
-            self.rec.append({"p0": p, "parent": np.arange(-1, 7), "tok": np.array([anchor] + drafts), "prob": np.zeros(8),
-                             "ctok": drafts, "cprob": [0.0] * 7, "tree": 0, "path": list(range(k + 1)) + [-1] * (7 - k),
-                             "nxt": nxt, "ms": 1e3 * (t2 - t1)})
+            self._logrec({"p0": p, "parent": np.arange(-1, 7), "tok": np.array([anchor] + drafts), "prob": np.zeros(8),
+                          "ctok": drafts, "cprob": [0.0] * 7, "tree": 0, "path": list(range(k + 1)) + [-1] * (7 - k),
+                          "nxt": nxt, "ms": 1e3 * (t2 - t1)}, dl)
         return drafts[:k] + [nxt], [anchor] + drafts[:k]
 
     def _account(self, kind, ctx, ms, ntok, moved):
@@ -494,14 +531,24 @@ class Tree:
                      f"{q['tree_ms'] / max(1, q['tree']):.1f} ms), chain {q['chain']} ({tv('chain'):.2f} tok/verify, "
                      f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}, lookup {q['lookup']}; accepted path off the chain rows "
                      f"in {q['nonprefix']}; sampled {q['sampled']}")
-        if self.rec:
+        if self.rec is not None:   # one file per request (an empty one too: files stay aligned with requests)
             od = Path(LOGDIR); od.mkdir(parents=True, exist_ok=True)
             fn = od / f"tree_{int(time.time() * 1e3)}.npz"
             R = self.rec
-            np.savez(fn, p0=np.array([r["p0"] for r in R]), parent=np.stack([r["parent"] for r in R]),
-                     tok=np.stack([r["tok"] for r in R]), prob=np.stack([r["prob"] for r in R]),
-                     tree=np.array([r["tree"] for r in R]), path=np.array([r["path"] for r in R]),
-                     nxt=np.array([r["nxt"] for r in R]), ms=np.array([r["ms"] for r in R]))
+            if R:
+                arr = dict(p0=np.array([r["p0"] for r in R]), parent=np.stack([r["parent"] for r in R]),
+                           tok=np.stack([r["tok"] for r in R]), prob=np.stack([r["prob"] for r in R]),
+                           tree=np.array([r["tree"] for r in R]), path=np.array([r["path"] for r in R]),
+                           nxt=np.array([r["nxt"] for r in R]), ms=np.array([r["ms"] for r in R]))
+                if any("cand" in r for r in R):
+                    z7 = next(r for r in R if "cand" in r)
+                    arr.update(has_draft=np.array([int("cand" in r) for r in R]),
+                               anchor=np.array([r.get("anchor", -1) for r in R]),
+                               **{k_: np.stack([r.get(k_, np.zeros_like(z7[k_])) for r in R])
+                                  for k_ in ("cand", "unary", "hp", "dist_ids", "dist_p")})
+            else:
+                arr = dict(p0=np.zeros(0, np.int64))
+            np.savez(fn, **arr)
             self.rec.clear()
         self.req = self._req_stats()
 
