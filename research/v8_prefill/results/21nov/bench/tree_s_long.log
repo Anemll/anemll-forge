@@ -1,0 +1,23 @@
+BANNER [tree_s_long] prompts realistic_v1.json sha 693e3097d942e5a5 gen 384 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off | lookup: off (no prompt-lookup line)
+[tree_s_long] warmup ttft 0.36s
+[tree_s_long] idle 10.0 W
+[tree_s_long] 8k code humaneval-t0:0 prompt 7562 ttft 12.2s | gen 370 49.1 tok/s | 5.61 tok/verify, cycle 116 ms (verify 96.7) | 30.0 W | sha b79e3702b275d46f
+[tree_s_long] 8k code humaneval-t0:1 prompt 7699 ttft 1.0s | gen 332 37.2 tok/s | 4.26 tok/verify, cycle 116 ms (verify 97.6) | 26.0 W | sha 5b66e324386a27d5
+[tree_s_long] 8k code mbpp-t0:0 prompt 7453 ttft 0.6s | gen 236 53.6 tok/s | 5.90 tok/verify, cycle 113 ms (verify 96.9) | 24.9 W | sha 16c46bcff550b388
+[tree_s_long] 8k math gsm8k-t0:0 prompt 7496 ttft 0.4s | gen 200 46.7 tok/s | 5.13 tok/verify, cycle 112 ms (verify 96.6) | 23.2 W | sha 6eae72c17effd1dc
+[tree_s_long] 8k math gsm8k-t0:1 prompt 7507 ttft 0.6s | gen 321 45.1 tok/s | 5.18 tok/verify, cycle 116 ms (verify 97.3) | 23.9 W | sha 7c3b74bc7a7a72fa
+[tree_s_long] 8k math 27b-prompts_math500128:0 prompt 7488 ttft 0.4s | gen 384 46.1 tok/s | 5.26 tok/verify, cycle 115 ms (verify 97.0) | 24.0 W | sha f8005ac4875f14b4
+[tree_s_long] 8k chat mt-bench-t0:0 prompt 7619 ttft 0.8s | gen 92 44.5 tok/s | 4.84 tok/verify, cycle 114 ms (verify 98.6) | 21.3 W | sha acd7c14303b35f1a
+[tree_s_long] 8k chat mt-bench-t0:1 prompt 7473 ttft 0.4s | gen 248 23.8 tok/s | 2.67 tok/verify, cycle 113 ms (verify 97.9) | 24.2 W | sha b913e519fe01e4d1
+[tree_s_long] 8k chat mt-bench-t0:2 prompt 7494 ttft 0.4s | gen 384 23.3 tok/s | 2.65 tok/verify, cycle 114 ms (verify 97.6) | 25.2 W | sha 1d0bb7b1b2bb63e0
+[tree_s_long] 8k SUMMARY tok/s 36.91 (token-weighted), tok/verify 4.176, output checksum 602b053acb4047cd
+[tree_s_long] 32k code humaneval-t0:0 prompt 32138 ttft 61.2s | gen 362 39.3 tok/s | 5.03 tok/verify, cycle 130 ms (verify 110.2) | 29.2 W | sha 7bbc092ffb91ae73
+[tree_s_long] 32k code humaneval-t0:1 prompt 32275 ttft 1.2s | gen 340 37.2 tok/s | 4.72 tok/verify, cycle 129 ms (verify 109.6) | 26.3 W | sha a38a3ece2c310b4c
+[tree_s_long] 32k code mbpp-t0:0 prompt 32029 ttft 0.8s | gen 346 36.5 tok/s | 4.49 tok/verify, cycle 124 ms (verify 109.1) | 23.8 W | sha 8a1ce660b0ff8bef
+[tree_s_long] 32k math gsm8k-t0:0 prompt 32072 ttft 0.5s | gen 173 42.1 tok/s | 5.09 tok/verify, cycle 124 ms (verify 108.6) | 22.5 W | sha b3d6550296f62945
+[tree_s_long] 32k math gsm8k-t0:1 prompt 32083 ttft 0.8s | gen 323 41.0 tok/s | 5.21 tok/verify, cycle 129 ms (verify 109.0) | 23.1 W | sha d22a7d0bf4549a62
+[tree_s_long] 32k math 27b-prompts_math500128:0 prompt 32064 ttft 0.5s | gen 384 47.7 tok/s | 5.82 tok/verify, cycle 124 ms (verify 108.2) | 23.2 W | sha dfa09c798c6a1558
+[tree_s_long] 32k chat mt-bench-t0:0 prompt 32195 ttft 1.0s | gen 51 33.3 tok/s | 3.92 tok/verify, cycle 126 ms (verify 110.5) | 20.6 W | sha 095d3f14ddeb6c22
+[tree_s_long] 32k chat mt-bench-t0:1 prompt 32049 ttft 0.5s | gen 283 21.4 tok/s | 2.67 tok/verify, cycle 125 ms (verify 110.4) | 24.3 W | sha 53e2a3ce65fcd9c2
+[tree_s_long] 32k chat mt-bench-t0:2 prompt 32070 ttft 0.5s | gen 384 20.2 tok/s | 2.56 tok/verify, cycle 127 ms (verify 110.5) | 25.4 W | sha 6f3c9666d49c9f77
+[tree_s_long] 32k SUMMARY tok/s 32.44 (token-weighted), tok/verify 4.058, output checksum 67315814f140c9a2

@@ -36,11 +36,17 @@ def banner(log):
     return keep
 
 
-def chat_tools(url, model, messages, tools, max_tokens, timeout=3600.0):
-    """U1: chat() with a tools list (the agent set); streamed tool-call arguments count as reply text (checksums)"""
+def chat_tools(url, model, messages, tools, max_tokens, timeout=3600.0, temp=0.0, seed=None, think=False):
+    """U1: chat() with a tools list (the agent set); streamed tool-call arguments count as reply text (checksums).
+    21 Nov: temp / seed / think (Pi-like sampled requests: the server's thinking defaults for top_p / top_k / min_p);
+    streamed reasoning counts as reply text too (timing, checksum). tools None: a plain chat request."""
     import urllib.request, urllib.error
-    body = {"model": model, "messages": messages, "tools": tools, "max_tokens": max_tokens, "temperature": 0, "stream": True,
-            "stream_options": {"include_usage": True}, "chat_template_kwargs": {"enable_thinking": False}}
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temp, "stream": True,
+            "stream_options": {"include_usage": True}, "chat_template_kwargs": {"enable_thinking": bool(think)}}
+    if tools:
+        body["tools"] = tools
+    if seed is not None:
+        body["seed"] = seed
     req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     t0 = time.time(); first = last = None; parts, usage, ntc = [], None, 0
     try:
@@ -57,7 +63,7 @@ def chat_tools(url, model, messages, tools, max_tokens, timeout=3600.0):
             usage = d.get("usage") or usage
             for c in d.get("choices", []):
                 delta = c.get("delta", {})
-                text = (delta.get("content") or "")
+                text = (delta.get("reasoning_content") or delta.get("reasoning") or "") + (delta.get("content") or "")
                 for tc in delta.get("tool_calls") or []:
                     fn = tc.get("function") or {}
                     if fn.get("name"):
@@ -84,6 +90,9 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=0)
     ap.add_argument("--idle-s", type=float, default=20.0)
     ap.add_argument("--tasks", default="", help="comma list of task indices per rung (default all)")
+    ap.add_argument("--temp", type=float, default=0.0, help="21 Nov: > 0 = sampled requests (Pi-like with --think 1)")
+    ap.add_argument("--think", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=-1, help="per request seed = SEED + 100 * rung + task (-1: none)")
     a = ap.parse_args()
     if a.out.exists():
         raise SystemExit(f"refusing to overwrite {a.out}")
@@ -100,6 +109,7 @@ def main():
             raise SystemExit(f"ABORT banner {k} lacks {v!r}: {b.get(k)!r}")
     power = Power(1000)
     rec = {"label": a.label, "banner": line, "banner_parts": b, "prompts_sha": psha, "gen": gen,
+           "temp": a.temp, "think": a.think, "seed": a.seed,
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "rungs": {}}
     save = lambda: a.out.write_text(json.dumps(rec, indent=1) + "\n")  # noqa: E731
     try:
@@ -116,7 +126,12 @@ def main():
                 if sel is not None and ti not in sel:
                     continue
                 off = a.log.stat().st_size
-                r = chat_tools(url, "x", q["messages"], q["tools"], gen) if q.get("tools") else chat(url, "x", q["messages"], gen)
+                if a.temp > 0 or a.think:
+                    sd = None if a.seed < 0 else a.seed + 100 * a.rungs.split(",").index(rung) + ti
+                    r = chat_tools(url, "x", q["messages"], q.get("tools"), gen, temp=a.temp, seed=sd, think=a.think)
+                    r["seed"] = sd
+                else:
+                    r = chat_tools(url, "x", q["messages"], q["tools"], gen) if q.get("tools") else chat(url, "x", q["messages"], gen)
                 time.sleep(0.3)
                 with open(a.log, "rb") as f:
                     f.seek(off)
@@ -131,6 +146,12 @@ def main():
                 lk = re.findall(r"lookup (\d+)/(\d+) cycles, ([\d.]+) tok/verify", new)   # U1: lookup cycles of the request
                 if srv is not None and lk:
                     srv["lookup_cycles"], srv["lookup_tok_verify"] = int(lk[-1][0]), float(lk[-1][2])
+                tl = re.findall(r"tree: (\d+) cycles: tree (\d+) \(([\d.]+) tok/verify, ([\d.]+) ms\), chain (\d+) "
+                                r"\(([\d.]+) tok/verify, ([\d.]+) ms\), other (\d+)", new)   # 21 Nov: tree / chain cycles
+                if srv is not None and tl:
+                    g = tl[-1]
+                    srv.update(tree_cycles=int(g[1]), tree_tv=float(g[2]), tree_ms=float(g[3]), chain_cycles=int(g[4]),
+                               chain_tv=float(g[5]), chain_ms=float(g[6]), other_cycles=int(g[7]))
                 r["server"] = srv
                 r["server_prefill"] = [(int(x), float(y)) for x, y in pre]
                 r["sha"] = hashlib.sha256(r["content"].encode()).hexdigest()[:16]

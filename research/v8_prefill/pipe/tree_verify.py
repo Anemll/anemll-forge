@@ -1,7 +1,7 @@
 """Tree verify for the V8 server (20 Nov 2026, research/v8_prefill/results/20nov): DFlash2's draft as a dynamic tree
 in the 8 verify rows, on a dec8t build (v8/build_dec8t_chunk.py: every served entry unchanged + t8_<ctx>k and
 tdva / tdvba with ancestor-mask inputs on the same weight constants).
-Per cycle (greedy requests only; sampling and prompt-lookup cycles keep the served chain):
+Per cycle (greedy requests; sampled ones too with TREE_SAMPLED=1, 21 Nov 2026; prompt-lookup cycles keep the served chain):
   tree     best-first by path probability under the served selector score s_i(c | parent) (the drafter's own chain
            rule, top TREE_TOPC children per node, softmax(s / TREE_TAU)): the anchor + 7 nodes, rows in pop order
            (topological). The drafter's chain is the tree whose 7 nodes are the argmax child at every depth.
@@ -13,6 +13,10 @@ Per cycle (greedy requests only; sampling and prompt-lookup cycles keep the serv
            refused with a dylib that lacks it). dvb (no DeltaNet layer) serves both.
   accept   greedy: from the root, the child whose token is the row's argmax, until none; the next token is the last
            accepted row's argmax; an accepted stop token ends the walk as in the chain (uncommitted).
+           sampled (TREE_SAMPLED=1): per node the served chain's rule child by child (walk_sampled: accept child c with
+           probability r(c), r = the row's sampling distribution with the rejected siblings removed, renormalized; all
+           rejected: the next token from r). The output has the distribution of plain sampling; a one-child node makes
+           exactly the chain's random draws. Chain-shaped cycles run the release chain accept (_chain).
   commit   the accepted rows are moved to rows 0..k in place: every DeltaNet layer's pending tape (k / u / wk rows, cum
            columns) and conv rows, the new K / V rows (non-split: the entry outputs before accept(); split: the cache rows
            the GPU wrote at p0 + row), the drafter's tap features. The rest of the runtime then sees a chain of k + 1
@@ -30,7 +34,44 @@ TOPC = int(os.environ.get("TREE_TOPC", "4"))
 TAU = float(os.environ.get("TREE_TAU", "1.5"))
 LOGDIR = os.environ.get("TREE_LOG")
 CAP = int(os.environ.get("TREE_CAP", "7"))   # D4 control (TREE_POLICY=cap): the served chain, at most CAP drafts accepted per cycle
+SAMPLED = os.environ.get("TREE_SAMPLED", "0") == "1"   # 21 Nov 2026: the tree for sampled requests too (Pi: temperature 1.0)
 N = 7   # nodes besides the root (8 verify rows)
+
+
+def walk_sampled(row_dist, kids, rng, stops, on_accept):
+    """The sampled accept walk. row_dist(v, toks) -> (ids, probs): row v's sampling distribution (toks: the tokens
+    accepted before it); kids: {row: {token: child row}}; siblings are tried best first (row order). Per node the
+    served chain's rule child by child (recursive rejection sampling): accept child c with probability r(c), where r is
+    the row's distribution with the rejected siblings set to 0 and renormalized; all rejected: the next token from r.
+    Every token then has its plain-sampling probability; one child per node = the chain's exact draws.
+    Returns (path rows from the root, next token, accepted tokens); an accepted stop token ends it uncommitted."""
+    v, path, toks = 0, [0], []
+    while True:
+        ids_, pr = row_dist(v, toks)
+        res, acc = pr, None
+        for t, c in sorted(kids.get(v, {}).items(), key=lambda kv: kv[1]):
+            hit = np.nonzero(ids_ == t)[0]
+            if not len(hit):        # outside top-k / top-p: no draw (as the chain)
+                continue
+            if rng.random() < float(res[hit[0]]):
+                acc = (t, c)
+                break
+            res = res.copy()
+            res[hit[0]] = 0.0
+            s_ = res.sum()
+            if s_ <= 0:             # float edge: the whole support was siblings
+                acc = (t, c)
+                break
+            res /= s_
+        if acc is None:
+            return path, int(ids_[rng.choice(len(ids_), p=res)]), toks
+        t, c = acc
+        if t in stops:
+            return path, t, toks
+        on_accept(t)
+        toks.append(t)
+        path.append(c)
+        v = c
 
 
 def build_tree(anchor, cand, unary, hp, pc, sc, n=N, topc=TOPC, tau=TAU):
@@ -125,13 +166,14 @@ class Tree:
         self.lam = 0.05       # running tok/ms (dink)
         self.req = self._req_stats()
         self.rec = [] if LOGDIR else None
-        self.log(f"tree: BANNER mode=tree8 policy={POLICY}{f' cap={CAP}' if POLICY == 'cap' else ''} topc={TOPC} tau={TAU} t8 contexts "
+        self.log(f"tree: BANNER mode=tree8 policy={POLICY}{f' cap={CAP}' if POLICY == 'cap' else ''} topc={TOPC} tau={TAU} "
+                 f"sampled={'on' if SAMPLED else 'off'} t8 contexts "
                  f"{[c // 1024 for c in self.ctx_t8]}K | split tree {'on (tdva/tdvba + dec_set_tree)' if self.split_ok else 'OFF'}"
                  f" | build {mb.root} | lookup {'on (NGRAM_DRAFT=' + str(eng.ngram.base) + ': lookup cycles keep the chain)' if eng.ngram is not None else 'off'}")
 
     def _req_stats(self):
         return {"cycles": 0, "tree": 0, "chain": 0, "other": 0, "lookup": 0, "tok": 0, "tree_tok": 0, "chain_tok": 0,
-                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0}
+                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0, "sampled": 0}
 
     # ---- split path (dec8): tdva / tdvba + GPU attention with the tree mask ----
     def _init_split(self):
@@ -278,7 +320,7 @@ class Tree:
         mb, d = self.mb, eng.drafter
         temp = samp[0]
         lazy = hasattr(d, "flush")
-        if temp > 0 or not lazy:   # sampling: the served chain
+        if (temp > 0 and not SAMPLED) or not lazy:   # sampling without TREE_SAMPLED: the served chain
             self.req["other"] += 1
             return orig(anchor, samp, rng, seen, hist, dry)
         # U1 (20 Nov 2026): prompt lookup per cycle. When the ngram drafter (NGRAM_DRAFT) has a proposal for this anchor
@@ -325,19 +367,30 @@ class Tree:
         kids = {}
         for r_ in range(1, len(tok)):
             kids.setdefault(int(parent[r_]), {})[int(tok[r_])] = r_
-        v, path, nxt = 0, [0], None
-        while True:
-            a = S.argmax(lg[v])
-            c = kids.get(v, {}).get(a)
-            if c is None:
-                nxt = a
-                break
-            if a in eng.stops:
-                nxt = a
-                break
-            seen[a] = 1.0
-            path.append(c)
-            v = c
+        if temp > 0:   # sampled: the chain's rule per child (walk_sampled); the row contexts as the chain's (hist + accepted)
+            top_p, top_k, presence = samp[1], samp[2], samp[3]
+
+            def row_dist(v_, toks_):
+                return eng.dist(lg[v_], temp, top_p, top_k, seen, presence, None if hist is None else hist + toks_, dry)
+
+            def on_accept(t_):
+                seen[t_] = 1.0
+            path, nxt, _ = walk_sampled(row_dist, kids, rng, eng.stops, on_accept)
+            self.req["sampled"] += 1
+        else:
+            v, path, nxt = 0, [0], None
+            while True:
+                a = S.argmax(lg[v])
+                c = kids.get(v, {}).get(a)
+                if c is None:
+                    nxt = a
+                    break
+                if a in eng.stops:
+                    nxt = a
+                    break
+                seen[a] = 1.0
+                path.append(c)
+                v = c
         k = len(path) - 1
         t3 = time.perf_counter()
         moved = self.compact(path, split)
@@ -357,14 +410,38 @@ class Tree:
         return [int(tok[r_]) for r_ in path[1:]] + [nxt], committed
 
     def _chain(self, eng, anchor, drafts, samp, rng, seen, hist, dry, t0, t1, p):
-        """the release chain cycle's verify / accept / commit (draft_cycle after propose), greedy"""
+        """the release chain cycle's verify / accept / commit (draft_cycle after propose): greedy, or sampled as the
+        release's loop line for line (the same random draws)"""
         import qwen38_server as S
         mb, d = self.mb, eng.drafter
         lg = mb.call([anchor] + drafts)
         t2 = eng.verify_end = time.perf_counter()
         k, nxt = 0, None
         kmax = CAP if POLICY == "cap" else 7   # cap: a different cycle split, the same greedy text if verify is split-invariant
-        while k < kmax:
+        if samp[0] > 0:
+            temp, top_p, top_k, presence = samp
+            self.req["sampled"] += 1
+            while k < kmax:
+                h = None if hist is None else hist + drafts[:k]
+                dk, dist = drafts[k], eng.dist(lg[k], temp, top_p, top_k, seen, presence, h, dry)
+                hit = np.where(dist[0] == dk)[0]
+                ok = bool(len(hit)) and rng.random() < float(dist[1][hit[0]])
+                if not ok:
+                    ids_, pr = dist
+                    if len(hit):
+                        pr = pr.copy()
+                        pr[hit[0]] = 0.0
+                        pr /= pr.sum()
+                    nxt = int(ids_[rng.choice(len(ids_), p=pr)])
+                    break
+                if dk in eng.stops:
+                    nxt = dk
+                    break
+                seen[dk] = 1.0
+                k += 1
+            if nxt is None:
+                nxt = eng.sample(lg[k], *samp[:3], rng, seen, samp[3], None if hist is None else hist + drafts, dry)
+        while nxt is None and k < kmax:
             dk = drafts[k]
             top = S.argmax(lg[k])
             if top != dk:
@@ -408,7 +485,7 @@ class Tree:
             self.log(f"tree: {q['cycles']} cycles: tree {q['tree']} ({tv('tree'):.2f} tok/verify, "
                      f"{q['tree_ms'] / max(1, q['tree']):.1f} ms), chain {q['chain']} ({tv('chain'):.2f} tok/verify, "
                      f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}, lookup {q['lookup']}; accepted path off the chain rows "
-                     f"in {q['nonprefix']}")
+                     f"in {q['nonprefix']}; sampled {q['sampled']}")
         if self.rec:
             od = Path(LOGDIR); od.mkdir(parents=True, exist_ok=True)
             fn = od / f"tree_{int(time.time() * 1e3)}.npz"

@@ -1,0 +1,158 @@
+{
+ "label": "tree_s_smoke",
+ "banner": "BANNER [tree_s_smoke] prompts realistic_v1.json sha 693e3097d942e5a5 gen 320 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "693e3097d942e5a5",
+ "gen": 320,
+ "temp": 0.0,
+ "think": 0,
+ "seed": -1,
+ "started": "2026-11-21 10:32:42",
+ "rungs": {
+  "2k": [
+   {
+    "t0": 1795285983.300116,
+    "t_first": 1795285984.346932,
+    "t_last": 1795285988.7227242,
+    "t_end": 1795285988.722784,
+    "ttft_s": 1.0468158721923828,
+    "completion_tokens": 320,
+    "prompt_tokens": 279,
+    "decode_tps": 72.90108412047618,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 279,
+     "completion_tokens": 320,
+     "total_tokens": 599,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 71.1,
+     "tok_verify": 7.8,
+     "accept_pct": 97,
+     "hist": "0:0% 1:0% 2:0% 3:2% 4:2% 5:2% 6:0% 7:93%",
+     "ms_cycle": 110,
+     "draft_ms": 13.2,
+     "verify_ms": 95.1,
+     "tree_cycles": 2,
+     "tree_tv": 5.5,
+     "tree_ms": 102.1,
+     "chain_cycles": 39,
+     "chain_tv": 7.9,
+     "chain_ms": 94.7,
+     "other_cycles": 0
+    },
+    "content": "```python\ndef get_odd_collatz(n):\n    \"\"\"\n    Given a positive integer n, return a sorted list that has the odd numbers in collatz sequence.\n\n    The Collatz conjecture is a conjecture in mathematics that concerns a sequence defined\n    as follows: start with any positive integer n. Then each term is obtained from the \n    previous term as follows: if the previous term is even, the next term is one half of \n    the previous term. If the previous term is odd, the next term is 3 times the previous\n    term plus 1. The conjecture is that no matter what value of n, the sequence will always reach 1.\n\n    Note: \n        1. Collatz(1) is [1].\n        2. returned list sorted in increasing order.\n\n    For example:\n    get_odd_collatz(5) returns [1, 5] # The collatz sequence for 5 is [5, 16, 8, 4, 2, 1], so the odd numbers are only 1, and 5.\n    \"\"\"\n    odd_numbers = set()\n    current = n\n    while True:\n        if current % 2 == 1:\n            odd_numbers.add(current)\n        if current == 1:\n            break\n        if current % 2 == 0:\n            current = current // 2\n        else:\n            current = 3 * current + 1\n    return",
+    "server_prefill": [
+     [
+      279,
+      0.9
+     ]
+    ],
+    "sha": "1681b92d273f64ad",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.3757922649383545,
+     "mean_w": {
+      "system_power": 16.77853998063254,
+      "total_power": 23.16621150827553,
+      "cpu_power": 1.8108826596720644,
+      "gpu_power": 1.6778612091746146,
+      "ane_power": 0.0,
+      "dram_power": 2.8989276587963104
+     },
+     "energy_j": 101.37052912583796,
+     "net_total_w": 18.58610528167234,
+     "net_energy_j": 81.32893572687172
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795285989.0343528,
+    "t_first": 1795285989.615177,
+    "t_last": 1795286002.872811,
+    "t_end": 1795286002.872852,
+    "ttft_s": 0.5808241367340088,
+    "completion_tokens": 320,
+    "prompt_tokens": 74,
+    "decode_tps": 24.06160828397404,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 74,
+     "completion_tokens": 320,
+     "total_tokens": 394,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 23.9,
+     "tok_verify": 2.67,
+     "accept_pct": 24,
+     "hist": "0:18% 1:33% 2:24% 3:17% 4:7% 5:2% 6:0% 7:0%",
+     "ms_cycle": 111,
+     "draft_ms": 13.0,
+     "verify_ms": 97.1,
+     "tree_cycles": 119,
+     "tree_tv": 2.68,
+     "tree_ms": 97.1,
+     "chain_cycles": 1,
+     "chain_tv": 1.0,
+     "chain_ms": 99.3,
+     "other_cycles": 0
+    },
+    "content": "The first blow doesn\u2019t feel like pain, exactly. It feels like a sudden, violent tearing of the air.\n\nFor a century, I have been still. I have been the anchor of this small ecosystem. My roots are tangled with the mycorrhizal networks that whisper secrets to the ferns below; my bark is home to lichen, moss, and the slow, deliberate crawl of beetles. I have watched the seasons turn a thousand times, feeling the sun\u2019s warmth in my canopy and the rain\u2019s kiss on my leaves. I am not just wood; I am a living, breathing archive of this forest\u2019s history.\n\nWhen the chainsaw roars to life, the sound is a scream that vibrates through my trunk, shaking the leaves loose. It is a noise I have never heard before\u2014a mechanical, hungry, unnatural shriek. It is the sound of the forest\u2019s heart being ripped out.\n\nAs the blade bites into my bark, I feel a profound, deep-seated violation. It is not just the loss of flesh; it is the severing of my connection to the earth. I feel the shockwave of the cut traveling down my trunk, a jolt of cold electricity that races to my roots. I can feel the soil beneath me trembling, as if the ground itself is recoiling in horror.\n\nThere is a terrible confusion in my mind. I am trying to understand why this is happening. I have given shade to the deer, fruit to the birds, and air to the humans who once walked here in peace. I have",
+    "server_prefill": [
+     [
+      74,
+      0.4
+     ]
+    ],
+    "sha": "a773ceabaa6312d7",
+    "decode_power": {
+     "samples": 11,
+     "seconds": 13.257634162902832,
+     "mean_w": {
+      "system_power": 19.61088177378948,
+      "total_power": 24.496624166315254,
+      "cpu_power": 1.4859296032107692,
+      "gpu_power": 0.0051306420288498075,
+      "ane_power": 0.0,
+      "dram_power": 3.394682147286155
+     },
+     "energy_j": 324.7672814231322,
+     "net_total_w": 19.916517939712065,
+     "net_energy_j": 264.0459086435938
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ]
+ },
+ "idle": {
+  "samples": 15,
+  "seconds": 20.00510597229004,
+  "mean_w": {
+   "system_power": 4.237179810097113,
+   "total_power": 4.58010622660319,
+   "cpu_power": 0.28096687654259694,
+   "gpu_power": 0.007551935179706806,
+   "ane_power": 0.0,
+   "dram_power": 0.05440760478377342
+  },
+  "energy_j": 91.62551042754228
+ },
+ "ended": "2026-11-21 10:33:23"
+}

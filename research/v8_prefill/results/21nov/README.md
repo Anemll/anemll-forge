@@ -191,3 +191,38 @@ restored `system` snapshot can still pair with another prompt's target KV rows t
 
 Files: `serve_t/ringfix_serve.sh`, `ringfix_serve.log`, `ringfix_server_0731.log` (server log 07:31-07:40, prompt
 excerpts removed), `bench/served_ringfix_*`, `sysk_fix_repro.log`.
+
+## 10:22 to 10:42: tree8 for sampled requests (Pi), served (`tree_sampled/`)
+
+Pi samples at temperature 1.0, and until now `tree_verify.py` sent every sampled cycle to the chain, so Pi never
+used tree8 (`pi_decode/`: per-cycle cost equal to the 19 Nov chain, all differences were content).
+
+**Change** (`pipe/tree_verify.py`, backup `tree_verify.pre_sampled.py`; switch `TREE_SAMPLED`, launcher default 1,
+backup `v8_server_dec8_qk.pre_treesampled.sh`):
+- `walk_sampled`: per node the served chain's rule child by child. Accept child c with probability r(c), where r is
+  the row's sampling distribution with the rejected siblings removed and renormalized; all rejected: the next token
+  from r. Every token keeps its plain-sampling probability. A one-child node makes exactly the chain's draws.
+- `_chain` (chain-shaped cycles) runs the release chain's sampled accept line for line.
+- Unit checks (`serve_t/tree_sampled_unit.py`, `tree_sampled/unit.log`), all pass: (A) lossless on a synthetic
+  tree with a child outside the support and a stop-token child (66 sequences, chi2 z +1.11, 400k walks); (B) a
+  chain-shaped walk = the release loop with the release `dist()` (2000/2000 identical incl. RNG state, 396 cases
+  with all 7 accepted); (C) `Tree._chain` sampled = the release `draft_cycle` (2000/2000).
+
+**A/B** (`serve_t/tree_sampled_ab.sh`; two fresh launches, the same prompts and seeds; thinking on, temperature 1.0,
+the server's thinking defaults, 384 tokens; Pi idle by agreement, checked in the server logs):
+
+| set | chain_s tok/s, tok/verify, ms/cycle | tree_s tok/s, tok/verify, ms/cycle | tree cycles | tok/s | paired (geo mean) | faster |
+|---|---|---|---|---|---|---|
+| 8K | 33.87, 3.75, 111.7 | 36.91, 4.18, 114.4 | 70% | +9.0% | +7.5% | 7/9 |
+| 32K | 29.06, 3.60, 125.1 | 32.44, 4.06, 126.6 | 74% | +11.6% | +8.6% | 8/9 |
+| code | 32.73, 3.60, 110.6 | 36.32, 4.13, 114.9 | 82% | +10.9% | +10.9% | 8/9 |
+| agent | 48.09, 5.24, 112.1 | 47.34, 5.27, 114.2 | 52% | -1.6% | -2.4% | 4/9 |
+| all | 34.52, 3.91, 114.8 | 37.47, 4.35, 117.6 | 72% | **+8.5%** | +6.0% | 27/36 |
+
+- Sampled gains are larger than greedy ones (+1.9-6.5%): at temperature 1.0 the target's mass is spread, and
+  siblings catch more of it. Agent edits already accept 5.2 per verify; the tree adds nothing there.
+- Greedy is unchanged: both arms' fresh smoke = 29aef2ec9db18a3f (the clean fresh check, ring fix on).
+- The comparison first keyed requests by (rung, cat, index), which repeats inside a rung (humaneval:0 and mbpp:0);
+  it now keys by set too.
+- Served: forge pid 61702 since 10:32 (banner `sampled=on`, ring fix, tree8, lookup off).
+- Not done yet: the 9-prompt used-vs-fresh greedy check of 07:27 (stopped twice by live Pi traffic).

@@ -1,0 +1,1170 @@
+{
+ "label": "tree_s_long",
+ "banner": "BANNER [tree_s_long] prompts realistic_v1.json sha 693e3097d942e5a5 gen 384 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "693e3097d942e5a5",
+ "gen": 384,
+ "temp": 1.0,
+ "think": 1,
+ "seed": 2100,
+ "started": "2026-11-21 10:33:24",
+ "rungs": {
+  "8k": [
+   {
+    "t0": 1795286009.831292,
+    "t_first": 1795286021.982243,
+    "t_last": 1795286029.505079,
+    "t_end": 1795286029.505135,
+    "ttft_s": 12.150951147079468,
+    "completion_tokens": 370,
+    "prompt_tokens": 7562,
+    "tool_calls": 0,
+    "decode_tps": 49.05065077521322,
+    "usage": {
+     "prompt_tokens": 7598,
+     "completion_tokens": 370,
+     "total_tokens": 7968,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 370,
+     "tps": 48.4,
+     "tok_verify": 5.61,
+     "accept_pct": 60,
+     "hist": "0:3% 1:14% 2:18% 3:12% 4:8% 5:3% 6:8% 7:35%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 96.7,
+     "tree_cycles": 36,
+     "tree_tv": 3.64,
+     "tree_ms": 97.6,
+     "chain_cycles": 30,
+     "chain_tv": 7.1,
+     "chain_ms": 95.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer user: \"Write a solution to the following problem and make sure that it passes the tests:\n```python\n\ndef special_factorial(n):\n    \"\"\"...\n    \"\"\"\n\n```\"\nNeed provide code likely only function. Need think. Problem: Brazilian factorial defined as product n! * (n-1)! * ... * 1! for n>0. Example special_factorial(4)=288. Need implement.\nNeed maybe tests? Could be from HumanEval? Function name special_factorial. Need return int. Could implement iterative. Edge cases: n positive. For n=1: 1! = 1. For n=2: 2!*1=2. For n=3: 6*2*1=12. For 4: 24*6*2*1=288.\nNeed maybe efficient. Could compute product of factorials. Simple:\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\ndef special_factorial(n):\n    \"\"\"\n    The Brazilian factorial is defined as:\n    brazilian_factorial(n) = n! * (n-1)! * (n-2)! * ... * 1!\n    where n > 0\n\n    For example:\n    >>> special_factorial(4)\n    288\n\n    The function will receive an integer as input and should return the special\n    factorial of this integer.\n    \"\"\"\n    result = 1\n    current_factorial = 1\n\n    for i in range(1, n + 1):\n        current_factorial *= i\n        result *= current_factorial\n\n    return result\n```",
+    "seed": 2100,
+    "server_prefill": [
+     [
+      7598,
+      12.0
+     ]
+    ],
+    "sha": "b79e3702b275d46f",
+    "decode_power": {
+     "samples": 6,
+     "seconds": 7.522835969924927,
+     "mean_w": {
+      "system_power": 24.047272350751985,
+      "total_power": 29.979963620503742,
+      "cpu_power": 1.9094242363206166,
+      "gpu_power": 0.5842133390239943,
+      "ane_power": 0.0,
+      "dram_power": 3.439053694407145
+     },
+     "energy_j": 225.5343487013663,
+     "net_total_w": 19.94812734921773,
+     "net_energy_j": 150.06648995533834
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286029.8140092,
+    "t_first": 1795286030.78712,
+    "t_last": 1795286039.67905,
+    "t_end": 1795286039.679112,
+    "ttft_s": 0.9731109142303467,
+    "completion_tokens": 332,
+    "prompt_tokens": 7699,
+    "tool_calls": 0,
+    "decode_tps": 37.22476504309895,
+    "usage": {
+     "prompt_tokens": 7735,
+     "completion_tokens": 332,
+     "total_tokens": 8067,
+     "prompt_tokens_details": {
+      "cached_tokens": 7424
+     }
+    },
+    "server": {
+     "gen": 332,
+     "tps": 36.8,
+     "tok_verify": 4.26,
+     "accept_pct": 42,
+     "hist": "0:9% 1:22% 2:23% 3:18% 4:6% 5:3% 6:3% 7:17%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 97.6,
+     "tree_cycles": 56,
+     "tree_tv": 3.05,
+     "tree_ms": 97.9,
+     "chain_cycles": 22,
+     "chain_tv": 6.14,
+     "chain_ms": 97.0,
+     "other_cycles": 0
+    },
+    "content": "We need solve programming problem. Need provide final answer likely code only? User: \"Write a solution to the following problem and make sure that it passes the tests:\" with function get_odd_collatz. Need likely provide Python function. Need ensure passes tests. We need think edge cases. Need produce final with code. Let's analyze fully.\n\nFunction: Given positive integer n, return sorted list of odd numbers in Collatz sequence. Sequence starts with n, repeatedly if even next n/2, if odd next 3n+1 until 1. Include all odd terms (including n if odd, including 1). Return sorted increasing.\n\nImplement while loop. Could collect odds in set to avoid duplicates (sequence ends at 1; could odd repeat? Collatz can repeat? For positive, sequence strictly? It can have cycles only 1-4-2, no repeated odds except 1? For positive, no repeats before 1?\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\ndef get_odd_collatz(n):\n    \"\"\"\n    Return a sorted list of the odd numbers in the Collatz sequence for n.\n    \"\"\"\n    odds = set()\n\n    while True:\n        if n % 2 == 1:\n            odds.add(n)\n\n        if n == 1:\n            break\n\n        if n % 2 == 0:\n            n //= 2\n        else:\n            n = 3 * n + 1\n\n    return sorted(odds)\n```",
+    "seed": 2101,
+    "server_prefill": [
+     [
+      311,
+      0.8
+     ]
+    ],
+    "sha": "5b66e324386a27d5",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.891929864883423,
+     "mean_w": {
+      "system_power": 20.77151971049631,
+      "total_power": 26.012146268572128,
+      "cpu_power": 1.7523075524754006,
+      "gpu_power": 0.011060153050453292,
+      "ane_power": 0.0,
+      "dram_power": 3.4772588525499617
+     },
+     "energy_j": 231.29818025523238,
+     "net_total_w": 15.980309997286117,
+     "net_energy_j": 142.09579571496354
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795286039.990727,
+    "t_first": 1795286040.625493,
+    "t_last": 1795286045.013279,
+    "t_end": 1795286045.0133078,
+    "ttft_s": 0.6347661018371582,
+    "completion_tokens": 236,
+    "prompt_tokens": 7453,
+    "tool_calls": 0,
+    "decode_tps": 53.5577634681011,
+    "usage": {
+     "prompt_tokens": 7489,
+     "completion_tokens": 236,
+     "total_tokens": 7725,
+     "prompt_tokens_details": {
+      "cached_tokens": 7424
+     }
+    },
+    "server": {
+     "gen": 236,
+     "tps": 52.4,
+     "tok_verify": 5.9,
+     "accept_pct": 70,
+     "hist": "0:2% 1:10% 2:8% 3:12% 4:5% 5:12% 6:5% 7:45%",
+     "ms_cycle": 113,
+     "draft_ms": 13.3,
+     "verify_ms": 96.9,
+     "tree_cycles": 17,
+     "tree_tv": 4.35,
+     "tree_ms": 99.1,
+     "chain_cycles": 23,
+     "chain_tv": 7.04,
+     "chain_ms": 95.3,
+     "other_cycles": 0
+    },
+    "content": "We need respond to user: \"Write a function to sort a dictionary by value.\" Need likely provide code. Simple. Need final answer. Could be Python? They didn't specify language. \"dictionary\" likely Python. Provide function using sorted. Maybe include ascending/descending. Need concise but enough.\n```python\ndef sort_dict_by_value(d, reverse=False):\n    \"\"\"Sort a dictionary by its values.\n\n    Args:\n        d: dict to sort\n        reverse: if True, sort descending\n\n    Returns:\n        list of (key, value) pairs sorted by value\n    \"\"\"\n    return sorted(d.items(), key=lambda item: item[1], reverse=reverse)\n```\n\nExample:\n\n```python\ndata = {\"a\": 3, \"b\": 1, \"c\": 2}\n\nprint(sort_dict_by_value(data))\n# [('b', 1), ('c', 2), ('a', 3)]\n\nprint(sort_dict_by_value(data, reverse=True))\n# [('a', 3), ('c', 2), ('b', 1)]\n```",
+    "seed": 2102,
+    "server_prefill": [
+     [
+      65,
+      0.4
+     ]
+    ],
+    "sha": "16c46bcff550b388",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.387785911560059,
+     "mean_w": {
+      "system_power": 19.860613359127008,
+      "total_power": 24.943708419799805,
+      "cpu_power": 1.9091845866447579,
+      "gpu_power": 0.012247895445276326,
+      "ane_power": 0.0,
+      "dram_power": 3.1616625785827637
+     },
+     "energy_j": 109.4476523864596,
+     "net_total_w": 14.911872148513794,
+     "net_energy_j": 65.43010252823365
+    },
+    "cat": "code",
+    "set": "mbpp-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286045.324081,
+    "t_first": 1795286045.759966,
+    "t_last": 1795286050.0183449,
+    "t_end": 1795286050.0183759,
+    "ttft_s": 0.435884952545166,
+    "completion_tokens": 200,
+    "prompt_tokens": 7496,
+    "tool_calls": 0,
+    "decode_tps": 46.73139727951548,
+    "usage": {
+     "prompt_tokens": 7532,
+     "completion_tokens": 200,
+     "total_tokens": 7732,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 200,
+     "tps": 45.7,
+     "tok_verify": 5.13,
+     "accept_pct": 59,
+     "hist": "0:10% 1:10% 2:18% 3:13% 4:3% 5:3% 6:0% 7:44%",
+     "ms_cycle": 112,
+     "draft_ms": 13.4,
+     "verify_ms": 96.6,
+     "tree_cycles": 15,
+     "tree_tv": 3.07,
+     "tree_ms": 98.5,
+     "chain_cycles": 24,
+     "chain_tv": 6.42,
+     "chain_ms": 95.5,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple arithmetic. Need reason step by step and put final within \\boxed{}. Problem: Carmen 100, Samantha 25 more than Carmen => 125, Daisy 50 more than Samantha => 175. Sum = 100+125+175=400. Final boxed. Need ensure no hidden traps. Just answer.\nCarmen has \\(100\\).\n\nSamantha has \\(25\\) more than Carmen:\n\\[\n100 + 25 = 125\n\\]\n\nDaisy has \\(50\\) more than Samantha:\n\\[\n125 + 50 = 175\n\\]\n\nCombined, they have:\n\\[\n100 + 125 + 175 = 400\n\\]\n\n\\[\n\\boxed{400}\n\\]",
+    "seed": 2103,
+    "server_prefill": [
+     [
+      63,
+      0.2
+     ]
+    ],
+    "sha": "6eae72c17effd1dc",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.258378982543945,
+     "mean_w": {
+      "system_power": 18.082675212947382,
+      "total_power": 23.230682373046875,
+      "cpu_power": 2.0042287245290074,
+      "gpu_power": 0.013822160345801063,
+      "ane_power": 0.0,
+      "dram_power": 3.1299562752246857
+     },
+     "energy_j": 98.92504956753692,
+     "net_total_w": 13.198846101760864,
+     "net_energy_j": 56.20568883357055
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286050.329025,
+    "t_first": 1795286050.9668312,
+    "t_last": 1795286058.059913,
+    "t_end": 1795286058.059971,
+    "ttft_s": 0.6378061771392822,
+    "completion_tokens": 321,
+    "prompt_tokens": 7507,
+    "tool_calls": 0,
+    "decode_tps": 45.11438228972038,
+    "usage": {
+     "prompt_tokens": 7543,
+     "completion_tokens": 321,
+     "total_tokens": 7864,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 321,
+     "tps": 44.5,
+     "tok_verify": 5.18,
+     "accept_pct": 54,
+     "hist": "0:5% 1:19% 2:15% 3:16% 4:10% 5:2% 6:5% 7:29%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 97.3,
+     "tree_cycles": 36,
+     "tree_tv": 3.69,
+     "tree_ms": 98.5,
+     "chain_cycles": 26,
+     "chain_tv": 6.23,
+     "chain_ms": 95.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple math. Need reason step by step. User: \"A cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in 2/3 the amount of time the cat takes. Calculate the average time the two take the eat the sausages.\"\nInterpretation: cat time = 30 min for nine sausages. Dog eats same number (nine) in 2/3 of cat's time = 20 min. \"average time the two take the eat the sausages\" likely average of their individual times? Could be (30+20)/2 = 25 minutes. But phrase \"the two take\" maybe together? Could ask average time the two take to eat the sausages? Maybe average time for the cat and dog individually to eat nine sausages: average = (30+20)/2 = 25 minutes. If combined\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nThe cat takes 30 minutes.\n\nThe dog takes \\(\\frac{2}{3}\\) of the cat\u2019s time:\n\n\\[\n\\frac{2}{3} \\times 30 = 20 \\text{ minutes}\n\\]\n\nThe average time for the two animals is:\n\n\\[\n\\frac{30 + 20}{2} = 25 \\text{ minutes}\n\\]\n\n\\[\n\\boxed{25}\n\\]",
+    "seed": 2104,
+    "server_prefill": [
+     [
+      74,
+      0.4
+     ]
+    ],
+    "sha": "7c3b74bc7a7a72fa",
+    "decode_power": {
+     "samples": 6,
+     "seconds": 7.093081712722778,
+     "mean_w": {
+      "system_power": 18.613227074355937,
+      "total_power": 23.877988815307617,
+      "cpu_power": 2.0792575273973246,
+      "gpu_power": 0.012205795032475444,
+      "ane_power": 0.0,
+      "dram_power": 3.173298418521881
+     },
+     "energy_j": 169.3685258024575,
+     "net_total_w": 13.846152544021606,
+     "net_energy_j": 98.21189140156963
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795286058.370364,
+    "t_first": 1795286058.798228,
+    "t_last": 1795286067.111239,
+    "t_end": 1795286067.1112928,
+    "ttft_s": 0.42786407470703125,
+    "completion_tokens": 384,
+    "prompt_tokens": 7488,
+    "tool_calls": 0,
+    "decode_tps": 46.072356114806155,
+    "usage": {
+     "prompt_tokens": 7524,
+     "completion_tokens": 384,
+     "total_tokens": 7908,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 45.6,
+     "tok_verify": 5.26,
+     "accept_pct": 57,
+     "hist": "0:10% 1:12% 2:15% 3:10% 4:11% 5:7% 6:1% 7:34%",
+     "ms_cycle": 115,
+     "draft_ms": 13.2,
+     "verify_ms": 97.0,
+     "tree_cycles": 37,
+     "tree_tv": 3.05,
+     "tree_ms": 98.3,
+     "chain_cycles": 36,
+     "chain_tv": 6.94,
+     "chain_ms": 95.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer math. Need reason step by step. Problem: product of integers 240 and k is a perfect cube. Smallest possible positive value of k. Need ensure positive integer? \"integers 240 and k\" likely k positive integer? asks smallest possible positive value. Factor 240 = 24*10=2^4 *3*5? 240=24*10=2^3*3 *2*5=2^4*3^1*5^1. To be cube, each exponent multiple of 3. Need multiply by k (positive integer) minimal to bring exponents to next multiples of 3: 2^4 -> exponent 6 need 2^2, 3^1 -> 3 need 3^2, 5^1 -> 3 need 5^2. k=2^2*3^2*\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nFactorize \\(240\\):\n\n\\[\n240 = 2^4 \\cdot 3^1 \\cdot 5^1\n\\]\n\nFor \\(240k\\) to be a perfect cube, every prime exponent must be a multiple of \\(3\\).\n\nWe need to raise each exponent to the next multiple of \\(3\\):\n\n- \\(2^4\\) needs one more factor of \\(2\\): multiply by \\(2^2\\)\n- \\(3^1\\) needs two more factors of \\(3\\): multiply by \\(3^2\\)\n- \\(5^1\\) needs two more factors of \\(5\\): multiply by \\(5^2\\)\n\nThus the smallest positive \\(k\\) is\n\n\\[\nk = 2^2",
+    "seed": 2105,
+    "server_prefill": [
+     [
+      55,
+      0.2
+     ]
+    ],
+    "sha": "f8005ac4875f14b4",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.313010931015015,
+     "mean_w": {
+      "system_power": 18.50498744684964,
+      "total_power": 23.97400038582938,
+      "cpu_power": 1.9633336755828072,
+      "gpu_power": 0.013415026674261364,
+      "ane_power": 0.0,
+      "dram_power": 3.4922642367226735
+     },
+     "energy_j": 199.29612726755784,
+     "net_total_w": 13.94216411454337,
+     "net_energy_j": 115.90136268620431
+    },
+    "cat": "math",
+    "set": "27b-prompts_math500128",
+    "index": 0
+   },
+   {
+    "t0": 1795286067.42187,
+    "t_first": 1795286068.2699862,
+    "t_last": 1795286070.315451,
+    "t_end": 1795286070.3155122,
+    "ttft_s": 0.8481161594390869,
+    "completion_tokens": 92,
+    "prompt_tokens": 7619,
+    "tool_calls": 0,
+    "decode_tps": 44.48866685059774,
+    "usage": {
+     "prompt_tokens": 7655,
+     "completion_tokens": 92,
+     "total_tokens": 7747,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 92,
+     "tps": 42.5,
+     "tok_verify": 4.84,
+     "accept_pct": 55,
+     "hist": "0:5% 1:11% 2:11% 3:26% 4:11% 5:5% 6:16% 7:16%",
+     "ms_cycle": 114,
+     "draft_ms": 13.2,
+     "verify_ms": 98.6,
+     "tree_cycles": 14,
+     "tree_tv": 3.93,
+     "tree_ms": 98.4,
+     "chain_cycles": 5,
+     "chain_tv": 7.4,
+     "chain_ms": 99.3,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: evaluate movie reviews 1-5, return JSON array of integers. Need analyze. Review1 positive \"phenomenal\", \"top-notch\" => 5. Review2 very negative \"worst\" => 1. Review3 neutral \"okay\", mixed => 3. Need final only JSON array maybe [5,1,3]. Ensure no extra.\n[5, 1, 3]",
+    "seed": 2106,
+    "server_prefill": [
+     [
+      186,
+      0.7
+     ]
+    ],
+    "sha": "acd7c14303b35f1a",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 2.0454647541046143,
+     "mean_w": {
+      "system_power": 16.34710754666021,
+      "total_power": 21.282262802124023,
+      "cpu_power": 1.8967583016391882,
+      "gpu_power": 0.01445138383255924,
+      "ane_power": 0.0,
+      "dram_power": 3.0239455699920654
+     },
+     "energy_j": 43.532118449336394,
+     "net_total_w": 11.250426530838013,
+     "net_energy_j": 23.012350937472604
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286070.626343,
+    "t_first": 1795286071.069821,
+    "t_last": 1795286081.4340858,
+    "t_end": 1795286081.434149,
+    "ttft_s": 0.4434778690338135,
+    "completion_tokens": 248,
+    "prompt_tokens": 7473,
+    "tool_calls": 0,
+    "decode_tps": 23.831887821543425,
+    "usage": {
+     "prompt_tokens": 7509,
+     "completion_tokens": 248,
+     "total_tokens": 7757,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 248,
+     "tps": 23.6,
+     "tok_verify": 2.67,
+     "accept_pct": 24,
+     "hist": "0:19% 1:40% 2:20% 3:11% 4:3% 5:2% 6:0% 7:4%",
+     "ms_cycle": 113,
+     "draft_ms": 13.5,
+     "verify_ms": 97.9,
+     "tree_cycles": 86,
+     "tree_tv": 2.44,
+     "tree_ms": 98.0,
+     "chain_cycles": 7,
+     "chain_tv": 5.43,
+     "chain_ms": 96.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer user: \"Write a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an immersive experience for the reader.\" Need produce final only. No need reference. Just paragraph. Ensure descriptive, immersive. Could be one paragraph. Need maybe no extra. Final in English.\nThe marketplace erupted in a whirl of color and sound\u2014canopies of crimson, saffron, and emerald swaying above rows of glistening fruit, stacked spices glowing like jewels, and silks that shimmered as the crowd pressed through. The air was thick with the scent of cumin, cinnamon, and warm bread, mingling with the sharp tang of citrus and the smoky sweetness of charcoal grills. Voices rose and fell in a lively hum: vendors calling out their prices, coins clinking in fast exchange, children laughing, donkeys braying, and the rhythmic thud of a wooden mallet chopping vegetables. Every step stirred dust and petal fragrances into the sun-warmed air, while flashes of embroidered fabrics, mirrored trinkets, and baskets overflowing with bright produce created a living tapestry so vivid it seemed to pulse with its own breath.",
+    "seed": 2107,
+    "server_prefill": [
+     [
+      40,
+      0.2
+     ]
+    ],
+    "sha": "b913e519fe01e4d1",
+    "decode_power": {
+     "samples": 9,
+     "seconds": 10.364264965057373,
+     "mean_w": {
+      "system_power": 19.13636124052305,
+      "total_power": 24.164442274305557,
+      "cpu_power": 1.6877829169648915,
+      "gpu_power": 0.012975209899615446,
+      "ane_power": 0.0,
+      "dram_power": 3.327322906917996
+     },
+     "energy_j": 250.44668246373638,
+     "net_total_w": 14.132606003019546,
+     "net_energy_j": 146.474073262055
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795286081.746923,
+    "t_first": 1795286082.180554,
+    "t_last": 1795286098.600467,
+    "t_end": 1795286098.600532,
+    "ttft_s": 0.43363094329833984,
+    "completion_tokens": 384,
+    "prompt_tokens": 7494,
+    "tool_calls": 0,
+    "decode_tps": 23.325336666022604,
+    "usage": {
+     "prompt_tokens": 7530,
+     "completion_tokens": 384,
+     "total_tokens": 7914,
+     "prompt_tokens_details": {
+      "cached_tokens": 7469
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 23.2,
+     "tok_verify": 2.65,
+     "accept_pct": 21,
+     "hist": "0:28% 1:34% 2:21% 3:10% 4:3% 5:3% 6:1% 7:2%",
+     "ms_cycle": 114,
+     "draft_ms": 13.3,
+     "verify_ms": 97.6,
+     "tree_cycles": 135,
+     "tree_tv": 2.28,
+     "tree_ms": 97.7,
+     "chain_cycles": 10,
+     "chain_tv": 5.1,
+     "chain_ms": 96.3,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's creative question in English. Need produce final answer. User asks: Picture yourself as a 100-years-old tree in lush forest, minding your business, when suddenly deforesters show up to chop you down. How do you feel when those guys start hacking away at you?\n\nWe need likely respond empathetically, imaginative. Maybe mention feeling: shock, confusion, fear? Trees don't feel pain like animals but personification: ancient tree senses vibrations, cuts, loss of neighbors, fear of dying, indignation, grief, determination? Keep concise but vivid. Could say if I'm a 100-year-old tree: the first axe blow is like a jolt; not just pain, but betrayal and panic, awareness of time lost, roots trembling, sap rushing, thinking of birds, shade, slow life interrupted. Need not be too dark? The question asks how do you feel. Answer from perspective.\n\nNeed ensure\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nIf I were that tree, the first axe blow would hit me less like pain and more like a jolt \u2014 as if something had struck deep into my rings.\n\nAt first I\u2019d feel confused. I\u2019ve stood here for a hundred years. I\u2019ve weathered storms, fed birds, let roots tangle with neighbors, watched seasons repeat themselves. I was never supposed to be sudden.\n\nThen, when the chopping keeps coming, the feeling becomes fear \u2014 but not just fear of the cut. It\u2019s fear of the loss of time. Every ring I have is a year, a memory, a slow promise I made with the forest. To be felled feels like all of it is being undone at once.\n\nThere\u2019d be a kind of betrayal, too. The forest is quiet and ancient,",
+    "seed": 2108,
+    "server_prefill": [
+     [
+      61,
+      0.2
+     ]
+    ],
+    "sha": "1d0bb7b1b2bb63e0",
+    "decode_power": {
+     "samples": 14,
+     "seconds": 16.419913053512573,
+     "mean_w": {
+      "system_power": 19.85863188715144,
+      "total_power": 25.178536415100098,
+      "cpu_power": 1.8282101125971657,
+      "gpu_power": 0.013120531068696864,
+      "ane_power": 0.0,
+      "dram_power": 3.478573884282793
+     },
+     "energy_j": 413.42937875064376,
+     "net_total_w": 15.146700143814087,
+     "net_energy_j": 248.7074994090537
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ],
+  "32k": [
+   {
+    "t0": 1795286098.912993,
+    "t_first": 1795286160.0649002,
+    "t_last": 1795286169.246436,
+    "t_end": 1795286169.246494,
+    "ttft_s": 61.151907205581665,
+    "completion_tokens": 362,
+    "prompt_tokens": 32138,
+    "tool_calls": 0,
+    "decode_tps": 39.31804020617628,
+    "usage": {
+     "prompt_tokens": 32174,
+     "completion_tokens": 362,
+     "total_tokens": 32536,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 362,
+     "tps": 38.8,
+     "tok_verify": 5.03,
+     "accept_pct": 52,
+     "hist": "0:10% 1:17% 2:17% 3:10% 4:8% 5:7% 6:4% 7:28%",
+     "ms_cycle": 130,
+     "draft_ms": 13.3,
+     "verify_ms": 110.2,
+     "tree_cycles": 45,
+     "tree_tv": 3.31,
+     "tree_ms": 110.6,
+     "chain_cycles": 27,
+     "chain_tv": 6.93,
+     "chain_ms": 109.6,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's coding problem. Need solve and ensure passes tests. Need probably provide code only? User says Write a solution to following problem and make sure it passes tests. We need produce final answer with Python function. Need think carefully. Problem: special_factorial(n) = n! * (n-1)! * ... * 1!, n>0. Example special_factorial(4)=4!*3!*2!*1! =24*6*2*1=288. Need implement efficiently. We need likely handle big ints, n positive. Could compute iteratively: maintain factorial i! and product. For i from 1 to n: fact *= i; prod *= fact. Return prod. O(n^2?) Actually O(n) multiplications, big integer sizes grow. Alternatively recursive? O(n) okay. Tests likely small. Need ensure n=1 returns 1. If n=0? Doc\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\ndef special_factorial(n):\n    \"\"\"\n    The Brazilian factorial is defined as:\n    brazilian_factorial(n) = n! * (n-1)! * (n-2)! * ... * 1!\n    where n > 0\n\n    For example:\n    >>> special_factorial(4)\n    288\n\n    The function will receive an integer as input and should return the special\n    factorial of this integer.\n    \"\"\"\n    result = 1\n    factorial = 1\n\n    for i in range(1, n + 1):\n        factorial *= i\n        result *= factorial\n\n    return result\n```",
+    "seed": 2200,
+    "server_prefill": [
+     [
+      32174,
+      60.9
+     ]
+    ],
+    "sha": "7bbc092ffb91ae73",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 9.181535959243774,
+     "mean_w": {
+      "system_power": 23.570079064458128,
+      "total_power": 29.20688819885254,
+      "cpu_power": 2.306680302249156,
+      "gpu_power": 0.005638421204269083,
+      "ane_power": 0.0,
+      "dram_power": 3.324490410940988
+     },
+     "energy_j": 268.1640942553772,
+     "net_total_w": 19.17505192756653,
+     "net_energy_j": 176.05642879331873
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286169.558508,
+    "t_first": 1795286170.762395,
+    "t_last": 1795286179.872867,
+    "t_end": 1795286179.872936,
+    "ttft_s": 1.2038869857788086,
+    "completion_tokens": 340,
+    "prompt_tokens": 32275,
+    "tool_calls": 0,
+    "decode_tps": 37.209926387172224,
+    "usage": {
+     "prompt_tokens": 32311,
+     "completion_tokens": 340,
+     "total_tokens": 32651,
+     "prompt_tokens_details": {
+      "cached_tokens": 32000
+     }
+    },
+    "server": {
+     "gen": 340,
+     "tps": 36.7,
+     "tok_verify": 4.72,
+     "accept_pct": 48,
+     "hist": "0:8% 1:12% 2:24% 3:14% 4:10% 5:11% 6:6% 7:15%",
+     "ms_cycle": 129,
+     "draft_ms": 13.1,
+     "verify_ms": 109.6,
+     "tree_cycles": 52,
+     "tree_tv": 3.38,
+     "tree_ms": 109.8,
+     "chain_cycles": 20,
+     "chain_tv": 6.9,
+     "chain_ms": 109.1,
+     "other_cycles": 0
+    },
+    "content": "We need answer user asks: Write a solution to problem and make sure passes tests. Need provide code likely function get_odd_collatz. Done. Need analyze. Need produce final with solution. Need ensure passes typical tests. Let's reason details.\n\nProblem: Given positive integer n, return sorted list that has odd numbers in collatz sequence. Collatz(1) [1]. Return sorted increasing. Example n=5 -> [5,16,8,4,2,1], odds [1,5] sorted [1,5]. Need implement.\n\nEdge cases: positive integer. Sequence includes starting n, then until 1? Usually Collatz sequence includes 1. If n=1 returns [1]. Need avoid duplicates? If n odd and later? Collatz sequence can repeat odd numbers? For positive n, sequence eventually 1; before 1, odd terms can repeat? Collatz path might revisit? For standard\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\ndef get_odd_collatz(n):\n    \"\"\"\n    Given a positive integer n, return a sorted list of the odd numbers\n    in its Collatz sequence.\n    \"\"\"\n    odd_numbers = set()\n\n    while True:\n        if n % 2 == 1:\n            odd_numbers.add(n)\n\n        if n == 1:\n            break\n\n        if n % 2 == 0:\n            n //= 2\n        else:\n            n = 3 * n + 1\n\n    return sorted(odd_numbers)\n```",
+    "seed": 2201,
+    "server_prefill": [
+     [
+      311,
+      1.0
+     ]
+    ],
+    "sha": "a38a3ece2c310b4c",
+    "decode_power": {
+     "samples": 8,
+     "seconds": 9.110472202301025,
+     "mean_w": {
+      "system_power": 21.215278607635604,
+      "total_power": 26.33923602104187,
+      "cpu_power": 1.714040731130185,
+      "gpu_power": 0.015737546715092483,
+      "ane_power": 0.0,
+      "dram_power": 3.3941791355609894
+     },
+     "energy_j": 239.96287759954782,
+     "net_total_w": 16.30739974975586,
+     "net_energy_j": 148.56811211196145
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795286180.183628,
+    "t_first": 1795286180.953679,
+    "t_last": 1795286190.402487,
+    "t_end": 1795286190.402554,
+    "ttft_s": 0.7700510025024414,
+    "completion_tokens": 346,
+    "prompt_tokens": 32029,
+    "tool_calls": 0,
+    "decode_tps": 36.512542285841505,
+    "usage": {
+     "prompt_tokens": 32065,
+     "completion_tokens": 346,
+     "total_tokens": 32411,
+     "prompt_tokens_details": {
+      "cached_tokens": 32000
+     }
+    },
+    "server": {
+     "gen": 346,
+     "tps": 36.1,
+     "tok_verify": 4.49,
+     "accept_pct": 50,
+     "hist": "0:5% 1:21% 2:17% 3:18% 4:6% 5:5% 6:3% 7:25%",
+     "ms_cycle": 124,
+     "draft_ms": 13.1,
+     "verify_ms": 109.1,
+     "tree_cycles": 53,
+     "tree_tv": 3.21,
+     "tree_ms": 109.7,
+     "chain_cycles": 24,
+     "chain_tv": 7.33,
+     "chain_ms": 107.9,
+     "other_cycles": 0
+    },
+    "content": "We need answer user: \"Write a function to sort a dictionary by value.\" Very simple. Need produce final. Need maybe include Python function. Could ask language? User didn't specify. Default likely Python. Need maybe concise. But final should be useful. Could provide code:\n\ndef sort_dict_by_value(d, reverse=False):\n    return dict(sorted(d.items(), key=lambda item: item[1], reverse=reverse))\n\nMention handles comparable values. If values not comparable, error. Could also sort ascending. Need maybe if dictionary by value could mean return sorted dict. Since Python 3.7 insertion order. Maybe include example.\n\nNeed ensure final not overkill. But desired oververbosity 9; but simple request. Could include variants: sort by value ascending/descending, and maybe if duplicate values by key. Let's craft answer with Python.\n```python\ndef sort_dict_by_value(d, reverse=False):\n    \"\"\"Return a new dictionary sorted by its values.\"\"\"\n    return dict(sorted(d.items(), key=lambda item: item[1], reverse=reverse))\n```\n\nExample:\n\n```python\ndata = {\"b\": 3, \"a\": 1, \"c\": 2}\n\nprint(sort_dict_by_value(data))\n# {'a': 1, 'c': 2, 'b': 3}\n\nprint(sort_dict_by_value(data, reverse=True))\n# {'b': 3, 'c': 2, 'a': 1}\n```\n\nIf you want to sort directly in place:\n\n```python\nd = dict(sorted(d.items(), key=lambda item: item[1]))\n```",
+    "seed": 2202,
+    "server_prefill": [
+     [
+      65,
+      0.5
+     ]
+    ],
+    "sha": "8a1ce660b0ff8bef",
+    "decode_power": {
+     "samples": 9,
+     "seconds": 9.448807954788208,
+     "mean_w": {
+      "system_power": 18.817346007582092,
+      "total_power": 23.804291831122505,
+      "cpu_power": 1.7990806552432659,
+      "gpu_power": 0.005341639562300955,
+      "ane_power": 0.0,
+      "dram_power": 3.182523528734843
+     },
+     "energy_j": 224.9221820120103,
+     "net_total_w": 13.772455559836494,
+     "net_energy_j": 130.13328765075016
+    },
+    "cat": "code",
+    "set": "mbpp-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286190.7103639,
+    "t_first": 1795286191.24141,
+    "t_last": 1795286195.323833,
+    "t_end": 1795286195.323904,
+    "ttft_s": 0.5310461521148682,
+    "completion_tokens": 173,
+    "prompt_tokens": 32072,
+    "tool_calls": 0,
+    "decode_tps": 42.131842092614676,
+    "usage": {
+     "prompt_tokens": 32108,
+     "completion_tokens": 173,
+     "total_tokens": 32281,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 173,
+     "tps": 41.1,
+     "tok_verify": 5.09,
+     "accept_pct": 58,
+     "hist": "0:9% 1:15% 2:9% 3:15% 4:6% 5:6% 6:9% 7:32%",
+     "ms_cycle": 124,
+     "draft_ms": 13.2,
+     "verify_ms": 108.6,
+     "tree_cycles": 18,
+     "tree_tv": 3.22,
+     "tree_ms": 110.5,
+     "chain_cycles": 16,
+     "chain_tv": 7.19,
+     "chain_ms": 106.4,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple arithmetic. User asks reasoning step by step and final boxed. Need include full analysis? We called. Now final with steps. Compute: Carmen 100, Samantha 125, Daisy 175, total 400. Ensure boxed.\nCarmen has \\$100.\n\nSamantha has \\$25 more than Carmen:\n\n\\[\n100 + 25 = 125\n\\]\n\nDaisy has \\$50 more than Samantha:\n\n\\[\n125 + 50 = 175\n\\]\n\nNow add all three amounts:\n\n\\[\n100 + 125 + 175 = 400\n\\]\n\n\\[\n\\boxed{400}\n\\]",
+    "seed": 2203,
+    "server_prefill": [
+     [
+      63,
+      0.3
+     ]
+    ],
+    "sha": "b3d6550296f62945",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.082422971725464,
+     "mean_w": {
+      "system_power": 17.69995883233369,
+      "total_power": 22.454429626464844,
+      "cpu_power": 1.7870762948582506,
+      "gpu_power": 0.002077071160875578,
+      "ane_power": 0.0,
+      "dram_power": 2.96531742811203
+     },
+     "energy_j": 91.6684793240729,
+     "net_total_w": 12.422593355178833,
+     "net_energy_j": 50.71428048158617
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286195.63656,
+    "t_first": 1795286196.411356,
+    "t_last": 1795286204.258728,
+    "t_end": 1795286204.258805,
+    "ttft_s": 0.7747960090637207,
+    "completion_tokens": 323,
+    "prompt_tokens": 32083,
+    "tool_calls": 0,
+    "decode_tps": 41.032844848057366,
+    "usage": {
+     "prompt_tokens": 32119,
+     "completion_tokens": 323,
+     "total_tokens": 32442,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 323,
+     "tps": 40.5,
+     "tok_verify": 5.21,
+     "accept_pct": 54,
+     "hist": "0:11% 1:10% 2:15% 3:19% 4:8% 5:3% 6:3% 7:31%",
+     "ms_cycle": 129,
+     "draft_ms": 13.2,
+     "verify_ms": 109.0,
+     "tree_cycles": 33,
+     "tree_tv": 3.03,
+     "tree_ms": 110.3,
+     "chain_cycles": 29,
+     "chain_tv": 6.79,
+     "chain_ms": 107.5,
+     "other_cycles": 0
+    },
+    "content": "We need answer simple math. Need reason step by step, final boxed. Let's parse: A cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in 2/3 the amount of time the cat takes. Calculate average time the two take to eat the sausages.\n\nAmbiguity: average time the two take to eat the sausages. Could mean average of their times: cat 30 min, dog 2/3*30=20 min, average (30+20)/2=25 minutes. Or combined eating together? Wording: \"Calculate the average time the two take the eat the sausages.\" Probably average of the two times, not combined. \"the two take the eat\" typo. Need maybe if working together: rates cat 9/30=0.3 saus/min, dog 9/20=0.4\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nThe cat takes **30 minutes**.\n\nThe dog takes \\( \\frac{2}{3} \\) of that time:\n\n\\[\n\\frac{2}{3} \\times 30 = 20 \\text{ minutes}\n\\]\n\nThe average time of the two is:\n\n\\[\n\\frac{30 + 20}{2} = \\frac{50}{2} = 25\n\\]\n\n\\[\n\\boxed{25}\n\\]",
+    "seed": 2204,
+    "server_prefill": [
+     [
+      74,
+      0.5
+     ]
+    ],
+    "sha": "d22a7d0bf4549a62",
+    "decode_power": {
+     "samples": 6,
+     "seconds": 7.847372055053711,
+     "mean_w": {
+      "system_power": 18.007576370914432,
+      "total_power": 23.149747530619305,
+      "cpu_power": 1.9063170404715262,
+      "gpu_power": 0.00168475525782269,
+      "ane_power": 0.0,
+      "dram_power": 3.234169363975525
+     },
+     "energy_j": 181.6646818533306,
+     "net_total_w": 13.117911259333294,
+     "net_energy_j": 102.94113023716652
+    },
+    "cat": "math",
+    "set": "gsm8k-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795286204.573559,
+    "t_first": 1795286205.0823622,
+    "t_last": 1795286213.114391,
+    "t_end": 1795286213.11446,
+    "ttft_s": 0.508803129196167,
+    "completion_tokens": 384,
+    "prompt_tokens": 32064,
+    "tool_calls": 0,
+    "decode_tps": 47.68409129558333,
+    "usage": {
+     "prompt_tokens": 32100,
+     "completion_tokens": 384,
+     "total_tokens": 32484,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 47.0,
+     "tok_verify": 5.82,
+     "accept_pct": 70,
+     "hist": "0:6% 1:6% 2:9% 3:12% 4:3% 5:11% 6:8% 7:45%",
+     "ms_cycle": 124,
+     "draft_ms": 13.2,
+     "verify_ms": 108.2,
+     "tree_cycles": 26,
+     "tree_tv": 4.08,
+     "tree_ms": 110.5,
+     "chain_cycles": 40,
+     "chain_tv": 7.08,
+     "chain_ms": 106.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer math. Problem: product of integers 240 and k is a perfect cube. Smallest possible positive integer k? We need factor 240. 240=2^4 * 3 *5. For product to be cube, each prime exponent multiple of 3. 240 exponents: 2:4 => need +2 (to 6). 3:1 => need +2. 5:1 => need +2. So k=2^2 *3^2*5^2=4*9*25=900. Check 240*900=216000? 240*900=216000 = 60^3? 60^3=216000 yes. Need final boxed. Simple. Ensure no overcomplication.\nFactor \\(240\\):\n\n\\[\n240 = 2^4 \\cdot 3^1 \\cdot 5^1\n\\]\n\nFor \\(240k\\) to be a perfect cube, each prime exponent must be a multiple of \\(3\\).\n\n- For \\(2\\): exponent \\(4\\) needs to become \\(6\\), so add \\(2\\) more factors of \\(2\\).\n- For \\(3\\): exponent \\(1\\) needs to become \\(3\\), so add \\(2\\) more factors of \\(3\\).\n- For \\(5\\): exponent \\(1\\) needs to become \\(3\\), so add \\(2\\) more factors of \\(5\\).\n\nThus the smallest positive \\(k\\) is\n\n\\[\nk = 2^2 \\cdot 3^2 \\cdot 5^2 = 4 \\cdot 9 \\cdot",
+    "seed": 2205,
+    "server_prefill": [
+     [
+      55,
+      0.3
+     ]
+    ],
+    "sha": "dfa09c798c6a1558",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.032028913497925,
+     "mean_w": {
+      "system_power": 18.21426727599927,
+      "total_power": 23.171406064714706,
+      "cpu_power": 1.801136625574433,
+      "gpu_power": 0.001806718216510566,
+      "ane_power": 0.0,
+      "dram_power": 3.1541954449244907
+     },
+     "energy_j": 186.1134034781897,
+     "net_total_w": 13.139569793428695,
+     "net_energy_j": 105.53740449174323
+    },
+    "cat": "math",
+    "set": "27b-prompts_math500128",
+    "index": 0
+   },
+   {
+    "t0": 1795286213.4321978,
+    "t_first": 1795286214.477422,
+    "t_last": 1795286215.9798772,
+    "t_end": 1795286215.979936,
+    "ttft_s": 1.0452241897583008,
+    "completion_tokens": 51,
+    "prompt_tokens": 32195,
+    "tool_calls": 0,
+    "decode_tps": 33.278861726433625,
+    "usage": {
+     "prompt_tokens": 32231,
+     "completion_tokens": 51,
+     "total_tokens": 32282,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 51,
+     "tps": 31.2,
+     "tok_verify": 3.92,
+     "accept_pct": 42,
+     "hist": "0:8% 1:23% 2:23% 3:8% 4:15% 5:8% 6:8% 7:8%",
+     "ms_cycle": 126,
+     "draft_ms": 13.2,
+     "verify_ms": 110.5,
+     "tree_cycles": 10,
+     "tree_tv": 3.6,
+     "tree_ms": 110.1,
+     "chain_cycles": 3,
+     "chain_tv": 5.0,
+     "chain_ms": 112.0,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: evaluate reviews 1-5. Need output JSON array of integers. Need likely just [5,1,3]. Need ensure no extra. Final JSON.\n[5, 1, 3]",
+    "seed": 2206,
+    "server_prefill": [
+     [
+      186,
+      0.8
+     ]
+    ],
+    "sha": "095d3f14ddeb6c22",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 1.502455234527588,
+     "mean_w": {
+      "system_power": 17.090176443721134,
+      "total_power": 20.55571937561035,
+      "cpu_power": 1.7686264162948342,
+      "gpu_power": 0.0017612526473004654,
+      "ane_power": 0.0,
+      "dram_power": 1.6951552629470825
+     },
+     "energy_j": 30.884048175365933,
+     "net_total_w": 10.52388310432434,
+     "net_energy_j": 15.811663257648547
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 0
+   },
+   {
+    "t0": 1795286216.292487,
+    "t_first": 1795286216.7911649,
+    "t_last": 1795286229.943459,
+    "t_end": 1795286229.943542,
+    "ttft_s": 0.49867796897888184,
+    "completion_tokens": 283,
+    "prompt_tokens": 32049,
+    "tool_calls": 0,
+    "decode_tps": 21.441126285060452,
+    "usage": {
+     "prompt_tokens": 32085,
+     "completion_tokens": 283,
+     "total_tokens": 32368,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 283,
+     "tps": 21.3,
+     "tok_verify": 2.67,
+     "accept_pct": 24,
+     "hist": "0:21% 1:32% 2:23% 3:16% 4:5% 5:1% 6:2% 7:1%",
+     "ms_cycle": 125,
+     "draft_ms": 13.3,
+     "verify_ms": 110.4,
+     "tree_cycles": 102,
+     "tree_tv": 2.57,
+     "tree_ms": 110.5,
+     "chain_cycles": 4,
+     "chain_tv": 5.25,
+     "chain_ms": 109.4,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: write a descriptive paragraph about a bustling marketplace with sensory details smells sounds visual elements immersive. Need likely just produce paragraph. Final in English. Ensure no need reference provided material? It's irrelevant. Need maybe concise but detailed. One paragraph.\nThe marketplace erupted into a whirl of color and motion as woven canopies in saffron, teal, and crimson shaded the crowded stalls, while pyramids of emerald figs, blood-orange persimmons, and pale silver fish gleamed under the midday sun. The air hung thick with the perfume of cardamom, cumin, and warm spice mixing with the briny tang of fresh seafood, the sharp bite of citrus, and the sweet, yeasty drift from a nearby bakery. Beneath the canopy, a symphony of clattering wooden crates, ringing brass scales, and the low murmur of haggling voices swelled around the reader, punctuated by the bright ring of a bell, the thump of a merchant\u2019s palm on a table, and the occasional laughter or exclamation that rose above the crowd. Bare feet scuffed the packed-earth path, silk veils fluttered in the warm breeze, and the faces of passersby flickered with curiosity and desire, drawing the reader into the living, breathing heart of the bazaar where every sense was at once called and overwhelmed.",
+    "seed": 2207,
+    "server_prefill": [
+     [
+      40,
+      0.3
+     ]
+    ],
+    "sha": "53e2a3ce65fcd9c2",
+    "decode_power": {
+     "samples": 11,
+     "seconds": 13.152294158935547,
+     "mean_w": {
+      "system_power": 19.41988084598313,
+      "total_power": 24.33175867254084,
+      "cpu_power": 1.6436608483249586,
+      "gpu_power": 0.020220127785529143,
+      "ane_power": 0.0,
+      "dram_power": 3.247996850447221
+     },
+     "energy_j": 320.01844746548824,
+     "net_total_w": 14.299922401254829,
+     "net_energy_j": 188.07678587125545
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795286230.256062,
+    "t_first": 1795286230.749884,
+    "t_last": 1795286249.692698,
+    "t_end": 1795286249.692758,
+    "ttft_s": 0.4938218593597412,
+    "completion_tokens": 384,
+    "prompt_tokens": 32070,
+    "tool_calls": 0,
+    "decode_tps": 20.21874879526198,
+    "usage": {
+     "prompt_tokens": 32106,
+     "completion_tokens": 384,
+     "total_tokens": 32490,
+     "prompt_tokens_details": {
+      "cached_tokens": 32045
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 20.1,
+     "tok_verify": 2.56,
+     "accept_pct": 20,
+     "hist": "0:29% 1:37% 2:19% 3:7% 4:3% 5:0% 6:1% 7:4%",
+     "ms_cycle": 127,
+     "draft_ms": 13.3,
+     "verify_ms": 110.5,
+     "tree_cycles": 144,
+     "tree_tv": 2.15,
+     "tree_ms": 110.6,
+     "chain_cycles": 6,
+     "chain_tv": 8.0,
+     "chain_ms": 108.0,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's creative/persona question. User asks: \"Picture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly, a bunch of deforesters shows up to chop you down. How do you feel when those guys start hacking away at you?\"\n\nNeed answer likely first-person emotional. We need maybe mention as AI? They want picture yourself as tree. Could answer in character. Need be concise but expressive. Maybe include fear, pain? Trees don't feel like humans but personification. Need maybe not too grim? They ask deforesters chopping you down. Could be a dramatic monologue.\n\nNeed ensure no sensitive? Fine.\n\nNeed final only. Need perhaps in English. User English. Let's craft: first-person tree, shock, confusion, roots trembling, sap, memory of centuries, anger, fear, not hatred maybe sorrow for forest, final defiance. Could say\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nI\u2019d feel betrayed.\n\nNot at first. At first I\u2019d sense them the way I sense rain: distant, then closer, then the ground trembling under boots. Leaves brushing my arms. Voices. A strange iron smell.\n\nWhen the first axe hits, I\u2019d feel a cold crack behind my heart\u2014not just pain, but violation. A tree doesn\u2019t die all at once; it remembers. And so I\u2019d remember the birds that nested in me, the rain that fed me, the children who carved their names into my bark a century ago, the slow years when I learned the forest like a language.\n\nThen the hacking would feel like time being torn out of me.\n\nEach blow would rip away a year.\n\nThe birds scattering would be my scream. The sap running down my side would be my",
+    "seed": 2208,
+    "server_prefill": [
+     [
+      61,
+      0.3
+     ]
+    ],
+    "sha": "6f3c9666d49c9f77",
+    "decode_power": {
+     "samples": 16,
+     "seconds": 18.942814111709595,
+     "mean_w": {
+      "system_power": 20.171843001821095,
+      "total_power": 25.42832922935486,
+      "cpu_power": 1.8909561823155085,
+      "gpu_power": 0.04925289887883901,
+      "ane_power": 0.0,
+      "dram_power": 3.3162771463394165
+     },
+     "energy_j": 481.6841137630208,
+     "net_total_w": 15.396492958068848,
+     "net_energy_j": 291.65290407694397
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ]
+ },
+ "idle": {
+  "samples": 2,
+  "seconds": 5.005096912384033,
+  "mean_w": {
+   "system_power": 9.69278970458138,
+   "total_power": 10.03183627128601,
+   "cpu_power": 0.28043804753276597,
+   "gpu_power": 0.006406827156932795,
+   "ane_power": 0.0,
+   "dram_power": 0.05220169201493263
+  },
+  "energy_j": 50.210312746955765
+ },
+ "ended": "2026-11-21 10:37:30"
+}
