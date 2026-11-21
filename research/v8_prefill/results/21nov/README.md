@@ -158,3 +158,36 @@ checked: ring_served_final = fresh):
 
 Files: `serve_t/ring_snap.sh` (the driver), `ring/ring.log` (shas, banners, every restore line), `ring/*.driver.log`,
 `bench/ring_*`, `pipe/v8_server.pre_ringsnap.py` (before the switch).
+
+## 07:27 to 07:42: ring fix served, release port, a 'sysk' crash fixed
+
+**Served** (Anemll 07:27): `pipe/v8_server_dec8_qk.sh` exports `DRAFT_RING_SNAP=${DRAFT_RING_SNAP:-fix}` (backup
+`v8_server_dec8_qk.pre_ringfix.sh`). Banner: `drafter ring snapshot: fix`, tree8 branched, lookup off, libgpu_v8_f8q,
+libdec_gpu_tree dfe059c68dce376a, keep-alive 60 ms, ctx 98304. Forge pid 85554 since 07:40:54.
+
+**Checks, incomplete.** The user's Pi session used the server from 07:31:24, so nothing after the restart was fresh.
+- smoke1 (07:32-07:33): code:1 1681b92d = fresh; chat:2 e4b2451b, fresh a773ceab, although both were cold starts
+  (tok/verify 2.69 vs 2.67). Checksum 43f66f649f26723e, not 29aef2ec9db18a3f. Something besides the ring carries
+  over after a long sampled Pi request (5953 prompt tokens, about 7000 KV rows). Not explained yet.
+- The 9-prompt used-server rung was stopped after 3 requests (it triggered the crash below in the user's session).
+
+**Crash** (StopIteration at `v8_server.py:540`, 3 times: 07:33:07 and 07:35:32 Pi, 07:36:16 bench). Two
+conversations with different system prompts alternating: the request picks `sysk` (its own system prompt with KV),
+then `_save_sysk` replaces `sysk` with the other conversation's `system` before the key lookup, so the lookup finds no
+key. Code from 9c18f06 (16 Nov), not the ring switch. Pi retried each time with a cold prefill (9 s / 18 s).
+- Fix: the key is looked up before `_save_sysk`, which is skipped when `sysk` itself is restored (restoring it
+  rewrites those rows and makes it `system`; the other conversation goes cold next time, as with one `sysk`).
+  Backup `pipe/v8_server.pre_sysk_fix.py`. Replies unchanged where nothing crashed.
+- Repro after the restart (`sysk_fix_repro.log`): X (system A), Y (system B), X again: the third request restored
+  `sysk`, 11 tokens reused, no exception.
+
+**Release port** (anemll-forge `scripts/qwen38_server.py`, not committed, not staged): +16/-1 lines on top of
+Anemll's uncommitted edits, `DRAFT_RING_SNAP` default `fix` there (`off`: before). Backup
+`scripts/qwen38_server.py.bak-20261121`; his edits `scripts/qwen38_server.py.anemll-edits-20261121.patch`; the ring
+change `scripts/qwen38_server.py.ringsnap-20261121.patch` (copies in `release_port/`). Unit check
+`serve_t/release_ring_unit.py` (`release_port/unit.log`): fix restores the system prompt's rows after a cold
+request and after a ring wrap; off keeps the other prompt's rows. The release server has no `_prune` / `sysk`: a
+restored `system` snapshot can still pair with another prompt's target KV rows there (not changed).
+
+Files: `serve_t/ringfix_serve.sh`, `ringfix_serve.log`, `ringfix_server_0731.log` (server log 07:31-07:40, prompt
+excerpts removed), `bench/served_ringfix_*`, `sysk_fix_repro.log`.

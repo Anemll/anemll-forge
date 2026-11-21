@@ -1,0 +1,368 @@
+[07:31:18] drafter ring snapshot: fix (DRAFT_RING_SNAP; 'system' keys ('system',))
+[qwen38-27b-ane] started 2026-11-21 07:31:18  pid 80830  listen 127.0.0.1:8765
+[qwen38-27b-ane] model dir     /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx  (max ctx 98304; Core AI: verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [8192, 16384, 32768, 65536, 98304], KV kv8, one weight copy)
+[qwen38-27b-ane] checkpoint    /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model
+[qwen38-27b-ane] speculative   ON  drafter /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel
+[qwen38-27b-ane] thinking      default off (clients override via chat_template_kwargs.enable_thinking); context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)
+[qwen38-27b-ane] think budget  low=2048,medium=6144,xhigh=12288 tokens per reasoning_effort (request field thinking_budget overrides; then closed with Qwen's budget phrase)
+[qwen38-27b-ane] sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, min_p 0.0 / 0; max_tokens 4096
+[qwen38-27b-ane] repetition    presence_penalty 0.0 thinking / 1.5 non-thinking; DRY multiplier 0.0 base 1.75 allowed 8 tokens; loop guard 3+ periods over 1536+ tokens
+[qwen38-27b-ane] python        /Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+drafter: body-only package built beside release_u15_data600_mat, drafting for release_vq3pA_mixh_s600_k1_mat with its head
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+[07:31:20] ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+[07:31:20] model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+[07:31:20] target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx
+[07:31:20] KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+[07:31:20] KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[07:31:20] [ANE compile] all 18 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+[07:31:20] loaded chunk_L00-07.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L00-07.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L08-15.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L08-15.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L16-23.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L16-23.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L24-31.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L24-31.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L32-39.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L32-39.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L40-47.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L40-47.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L48-55.aimodel (30 entries, 0s, bridge)
+[07:31:20] loaded chunk_L48-55.aimodel (30 entries, 0s, bridge)
+[07:31:21] loaded chunk_L56-63.aimodel (30 entries, 0s, bridge)
+[07:31:21] loaded chunk_L56-63.aimodel (30 entries, 0s, bridge)
+[07:31:21] drafter: Core AI dflash2_lut4_gptq_nohead.aimodel (body only, drafting with the target's head)
+[qwen38-27b-ane] loaded batched prefill + head + DFlash2 drafter dflash2_lut4_gptq_nohead.aimodel from v8_dec8tx (ctx 98304) in 1s
+[07:31:21] v8: GPU engine libgpu_v8_f8q.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+[07:31:21] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d
+[07:31:21] v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+[07:31:21] v8: prefill engine ready in 0s (V8 for new spans >= 256 tokens)
+dec_init: attention kernel dec_attn_r4
+[07:31:21] dec8: BANNER decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto
+[07:31:21] dec8: decode GPU engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a, kernels dec_kernels_tree.metal 674918fb1e682a2c; keep-alive hold 60 ms (DEC_KA_HOLD_MS), switch /Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka
+[07:31:21] dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode auto, 64K entry up to 0 keys
+[07:31:21] v8: text-level prompt match on; decode snapshots every 256 tokens (last 3); V8 rest >= 128, tail <= 8 rows on the bridge
+[07:31:21] tree: BANNER mode=tree8 policy=branched topc=4 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off
+[qwen38-27b-ane] serving OpenAI API on http://127.0.0.1:8765/v1 (V8 prefill, speculative ON, ctx 98304)
+[07:31:23] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[07:31:23] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[07:31:23] prefill: 15 tok in 0.3s (49 tok/s) | decoding ...
+[07:31:23] tree: 1 cycles: tree 1 (1.00 tok/verify, 105.8 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[07:31:23] prompt 15 (cached 0, prefill 15 in 0.3s) | gen 1 in 0.1s (8.2 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 121 (draft 14.8 verify 105.8 sample 0.1 ctx 0.5 host 0.2)) | stop | ctx 16/98304 (8K entry)
+[07:31:24] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 16 tok, prompt 5953 tok, first difference at 1:
+[07:31:24] request: prompt 5953 tok | cache: cold (no reusable state), reused 0 | prefilling 5953 tok ...
+[07:31:24] v8: 16 ANE KV segments registered (ctx 8192)
+[07:31:33] v8: snapshot 'system' at 5888 (cut 5922), taken during the run
+[07:31:33] v8: snapshot 'turn' at 5888 (cut 5948), taken during the run
+[07:31:33] v8: 5953 tok (63 pad) in 8.8s (678 tok/s) + 180 ms handover / drafter context | setup 58 ms (V fill 0 ms, 0 rows)
+[07:31:33] prefill: 5953 tok in 9.0s (660 tok/s) | decoding ...
+[07:31:43] decode: 456 tok, 10s, 45.5 tok/s, 5.01 tok/verify, accept 57%, ms/cycle 110 (draft 13.2 verify 94.9 sample 1.2 ctx 0.6 host 0.1)
+[07:31:53] decode: 984 tok, 20s, 48.9 tok/s, 5.38 tok/verify, accept 62%, ms/cycle 110 (draft 13.2 verify 94.7 sample 1.3 ctx 0.6 host 0.1)
+[07:32:03] decode: 1538 tok, 30s, 50.9 tok/s, 5.59 tok/verify, accept 66%, ms/cycle 110 (draft 13.2 verify 94.6 sample 1.3 ctx 0.6 host 0.1)
+[07:32:13] decode: 1954 tok, 40s, 48.5 tok/s, 5.32 tok/verify, accept 62%, ms/cycle 110 (draft 13.1 verify 94.6 sample 1.2 ctx 0.5 host 0.1)
+[07:32:18] [ctx] 8192 -> 16384 at pos 8188: segments bound, no KV rows copied (86 ms)
+[07:32:23] decode: 2453 tok, 50s, 48.7 tok/s, 5.37 tok/verify, accept 62%, ms/cycle 110 (draft 13.1 verify 95.1 sample 1.3 ctx 0.6 host 0.1)
+[07:32:33] decode: 2961 tok, 60s, 48.9 tok/s, 5.42 tok/verify, accept 63%, ms/cycle 111 (draft 13.1 verify 95.6 sample 1.3 ctx 0.6 host 0.2)
+[07:32:43] decode: 3528 tok, 71s, 50.0 tok/s, 5.56 tok/verify, accept 65%, ms/cycle 111 (draft 13.1 verify 96.0 sample 1.3 ctx 0.6 host 0.2)
+[07:32:48] decode snapshots: 14 taken (49 ms); kept: dec0, dec1, dec2, gen, system, turn
+[07:32:48] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 9707 tok, prompt 279 tok, first difference at 3:
+[07:32:48] snapshot 'system' (5888 tok) kept as 'sysk' with its KV rows (185 MB, 22 ms): this prompt rewrites them
+[07:32:48] [ctx] 16384 -> 8192 at pos 0: segments bound, no KV rows copied (67 ms)
+[07:32:48] request: prompt 279 tok | cache: cold (no reusable state), reused 0 | prefilling 279 tok ...
+[07:32:48] v8: snapshot 'turn' at 256 (cut 272), taken during the run
+[07:32:48] v8: 279 tok (105 pad) in 0.6s (476 tok/s) + 36 ms handover / drafter context | setup 32 ms (V fill 0 ms, 0 rows)
+[07:32:48] snapshots dropped (their KV rows were rewritten): dec0, dec1, dec2, system
+[07:32:48] prefill: 279 tok in 0.7s (425 tok/s) | decoding ...
+[07:32:53] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, turn
+[07:32:53] tree: 41 cycles: tree 1 (6.00 tok/verify, 104.0 ms), chain 40 (7.90 tok/verify, 94.7 ms), other 0, lookup 0; accepted path off the chain rows in 1
+[07:32:53] prompt 279 (cached 0, prefill 279 in 0.7s) | gen 320 in 4.5s (71.2 tok/s, 7.80 tok/verify, accept 98% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:2% 4:0% 5:2% 6:0% 7:95%), ms/cycle 110 (draft 13.2 verify 94.9 sample 0.7 ctx 0.7 host 0.1)) | length | ctx 601/98304 (8K entry)
+[07:32:53] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 601 tok, prompt 74 tok, first difference at 14:
+[07:32:53] request: prompt 74 tok | cache: cold (no reusable state), reused 0 | prefilling 74 tok ...
+[07:32:54] snapshots dropped (their KV rows were rewritten): dec2, turn
+[07:32:54] prefill: 74 tok in 0.4s (167 tok/s) | decoding ...
+[07:33:04] decode: 237 tok, 10s, 23.7 tok/s, 2.66 tok/verify, accept 24%, ms/cycle 112 (draft 13.3 verify 97.8 sample 0.2 ctx 0.9 host 0.1)
+[07:33:07] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system
+[07:33:07] tree: 119 cycles: tree 119 (2.68 tok/verify, 97.8 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 50
+[07:33:07] prompt 74 (cached 0, prefill 74 in 0.5s) | gen 320 in 13.4s (23.9 tok/s, 2.69 tok/verify, accept 24% (accepted/7 per cycle: 0:22% 1:26% 2:28% 3:15% 4:5% 5:4% 6:0% 7:0%), ms/cycle 112 (draft 13.4 verify 97.8 sample 0.2 ctx 0.9 host 0.1)) | length | ctx 393/98304 (8K entry)
+[07:33:07] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 393 tok, prompt 5954 tok, first difference at 3:
+[07:33:07] snapshot 'system' (11 tok) kept as 'sysk' with its KV rows (0 MB, 0 ms): this prompt rewrites them
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 60718)
+Traceback (most recent call last):
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 755, in __init__
+    self.handle()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 428, in handle_one_request
+    method()
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 1111, in do_POST
+    text, finish, n, reused, dt = engine.generate(ids, max_tokens, temp, top_p, top_k, stop,
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/tree_verify.py", line 437, in generate
+    return gen0(*a, **k)
+           ^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 252, in generate
+    return super().generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 704, in generate
+    return self._generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 710, in _generate
+    logits, reused = self.prefill(ids)
+                     ^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 540, in prefill
+    key = next(k for k, v in self.snaps.items() if v is best)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+----------------------------------------
+[07:33:09] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 393 tok, prompt 5954 tok, first difference at 3:
+[07:33:09] request: prompt 5954 tok | cache: cold (no reusable state), reused 0 | prefilling 5954 tok ...
+[07:33:18] v8: snapshot 'system' at 5888 (cut 5922), taken during the run
+[07:33:18] v8: snapshot 'turn' at 5888 (cut 5949), taken during the run
+[07:33:18] v8: 5954 tok (62 pad) in 8.5s (697 tok/s) + 196 ms handover / drafter context | setup 41 ms (V fill 0 ms, 0 rows)
+[07:33:18] snapshots dropped (their KV rows were rewritten): dec0
+[07:33:18] prefill: 5954 tok in 8.8s (678 tok/s) | decoding ...
+[07:33:24] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 6090 tok, prompt 15 tok, first difference at 1:
+[07:33:24] snapshot 'system' (5888 tok) kept as 'sysk' with its KV rows (185 MB, 10 ms): this prompt rewrites them
+[07:33:24] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[07:33:24] snapshots dropped (their KV rows were rewritten): system, turn
+[07:33:24] prefill: 15 tok in 0.2s (72 tok/s) | decoding ...
+[07:33:24] tree: 1 cycles: tree 1 (1.00 tok/verify, 103.2 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[07:33:24] prompt 15 (cached 0, prefill 15 in 0.2s) | gen 1 in 0.1s (8.5 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 117 (draft 13.5 verify 103.2 sample 0.1 ctx 0.5 host 0.1)) | stop | ctx 16/98304 (8K entry)
+[07:33:33] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 16 tok, prompt 5954 tok, first difference at 1:
+[07:33:33] drafter ring (fix): snapshot slots 2048, kept by position 0 (0 hold another prompt's rows), hidden 2048 -> all written back
+[07:33:33] snapshot 'sysk': KV rows [0, 5888) written back in 11 ms
+[07:33:33] request: prompt 5954 tok | cache: restore 'sysk' snapshot, reused 5888 | prefilling 66 tok ...
+[07:33:34] prefill: 66 tok in 0.5s (133 tok/s) | decoding ...
+[07:33:39] prompt 5954 (cached 5888, prefill 66 in 0.6s) | gen 158 in 5.3s (29.8 tok/s, 3.22 tok/verify, accept 32% (accepted/7 per cycle: 0:20% 1:37% 2:12% 3:6% 4:6% 5:4% 6:2% 7:12%), ms/cycle 108 (draft 13.0 verify 94.1 sample 0.8 ctx 0.5 host 0.1)) | thinking 107 + answer 50 tok | tool_calls | ctx 6112/98304 (8K entry)
+[07:33:39] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[07:33:39] request: prompt 6518 tok | cache: continue (model state is a prefix of the prompt), reused 6112 | prefilling 406 tok ...
+[07:33:39] v8: bridge 32 rows to 6144 in 200 ms
+[07:33:39] v8: sync at 6144 in 11 ms
+[07:33:40] v8: snapshot 'turn' at 6400 (cut 6513), taken during the run
+[07:33:40] v8: 374 tok (10 pad) in 0.6s (587 tok/s) + 38 ms handover / drafter context | setup 16 ms (V fill 14 ms, 6144 rows)
+[07:33:40] prefill: 406 tok in 0.9s (449 tok/s) | decoding ...
+[07:33:50] decode: 309 tok, 10s, 30.6 tok/s, 3.32 tok/verify, accept 33%, ms/cycle 109 (draft 13.1 verify 94.2 sample 0.8 ctx 0.5 host 0.1)
+[07:34:00] decode: 778 tok, 20s, 38.6 tok/s, 4.21 tok/verify, accept 46%, ms/cycle 109 (draft 13.0 verify 94.2 sample 1.0 ctx 0.5 host 0.1)
+[07:34:10] decode: 1278 tok, 30s, 42.4 tok/s, 4.61 tok/verify, accept 52%, ms/cycle 109 (draft 13.0 verify 94.2 sample 1.1 ctx 0.5 host 0.1)
+[07:34:17] [ctx] 8192 -> 16384 at pos 8189: segments bound, no KV rows copied (82 ms)
+[07:34:20] decode: 1801 tok, 40s, 44.8 tok/s, 4.91 tok/verify, accept 56%, ms/cycle 110 (draft 13.1 verify 94.7 sample 1.1 ctx 0.5 host 0.1)
+[07:34:30] decode: 2220 tok, 50s, 44.1 tok/s, 4.87 tok/verify, accept 55%, ms/cycle 110 (draft 13.1 verify 95.4 sample 1.1 ctx 0.5 host 0.1)
+[07:34:40] decode: 2689 tok, 60s, 44.6 tok/s, 4.93 tok/verify, accept 56%, ms/cycle 111 (draft 13.1 verify 95.8 sample 1.1 ctx 0.5 host 0.1)
+[07:34:50] decode: 3224 tok, 70s, 45.8 tok/s, 5.09 tok/verify, accept 58%, ms/cycle 111 (draft 13.0 verify 96.2 sample 1.2 ctx 0.5 host 0.1)
+[07:35:00] decode: 3729 tok, 80s, 46.3 tok/s, 5.16 tok/verify, accept 59%, ms/cycle 111 (draft 13.0 verify 96.4 sample 1.2 ctx 0.5 host 0.2)
+[07:35:10] decode: 4242 tok, 91s, 46.9 tok/s, 5.23 tok/verify, accept 60%, ms/cycle 112 (draft 13.0 verify 96.6 sample 1.2 ctx 0.5 host 0.2)
+[07:35:20] decode: 4760 tok, 101s, 47.3 tok/s, 5.29 tok/verify, accept 61%, ms/cycle 112 (draft 13.0 verify 96.8 sample 1.2 ctx 0.5 host 0.2)
+[07:35:28] decode snapshots: 19 taken (39 ms); kept: dec0, dec1, dec2, gen, system, turn
+[07:35:28] prompt 6518 (cached 6112, prefill 406 in 0.9s) | gen 5080 in 107.8s (47.1 tok/s, 5.27 tok/verify, accept 61% (accepted/7 per cycle: 0:12% 1:10% 2:9% 3:8% 4:8% 5:8% 6:7% 7:37%), ms/cycle 112 (draft 13.0 verify 96.9 sample 1.2 ctx 0.5 host 0.2)) | thinking 168 + answer 4911 tok | tool_calls | ctx 11598/98304 (16K entry)
+[07:35:28] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 11598 tok, prompt 142 tok, first difference at 3:
+[07:35:28] snapshot 'system' (5922 tok) kept as 'sysk' with its KV rows (187 MB, 21 ms): this prompt rewrites them
+[07:35:28] [ctx] 16384 -> 8192 at pos 0: segments bound, no KV rows copied (66 ms)
+[07:35:28] request: prompt 142 tok | cache: cold (no reusable state), reused 0 | prefilling 142 tok ...
+[07:35:28] snapshots dropped (their KV rows were rewritten): dec0, dec1, dec2, turn
+[07:35:28] prefill: 142 tok in 0.7s (198 tok/s) | decoding ...
+[07:35:32] tree: 31 cycles: tree 8 (5.12 tok/verify, 100.2 ms), chain 23 (6.83 tok/verify, 94.5 ms), other 0, lookup 0; accepted path off the chain rows in 2
+[07:35:32] prompt 142 (cached 0, prefill 142 in 0.8s) | gen 198 in 3.4s (57.8 tok/s, 6.39 tok/verify, accept 77% (accepted/7 per cycle: 0:0% 1:10% 2:6% 3:10% 4:0% 5:13% 6:6% 7:55%), ms/cycle 110 (draft 13.2 verify 96.0 sample 0.6 ctx 0.7 host 0.1)) | stop | ctx 340/98304 (8K entry)
+[07:35:32] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 340 tok, prompt 11650 tok, first difference at 3:
+[07:35:32] snapshot 'system' (11 tok) kept as 'sysk' with its KV rows (0 MB, 0 ms): this prompt rewrites them
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 60769)
+Traceback (most recent call last):
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 755, in __init__
+    self.handle()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 428, in handle_one_request
+    method()
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 1111, in do_POST
+    text, finish, n, reused, dt = engine.generate(ids, max_tokens, temp, top_p, top_k, stop,
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/tree_verify.py", line 437, in generate
+    return gen0(*a, **k)
+           ^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 252, in generate
+    return super().generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 704, in generate
+    return self._generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 710, in _generate
+    logits, reused = self.prefill(ids)
+                     ^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 540, in prefill
+    key = next(k for k, v in self.snaps.items() if v is best)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+----------------------------------------
+[07:35:33] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 340 tok, prompt 279 tok, first difference at 35:
+[07:35:33] drafter ring (fix): snapshot slots 3, kept by position 3 (0 hold another prompt's rows), hidden 0 -> all written back
+[07:35:33] request: prompt 279 tok | cache: restore 'system' snapshot, reused 11 | prefilling 268 tok ...
+[07:35:33] v8: bridge 53 rows to 64 in 210 ms
+[07:35:33] v8: sync at 64 in 6 ms
+[07:35:34] v8: snapshot 'turn' at 192 (cut 272), taken during the run
+[07:35:34] v8: 215 tok (41 pad) in 0.4s (483 tok/s) + 26 ms handover / drafter context | setup 13 ms (V fill 12 ms, 64 rows)
+[07:35:34] prefill: 268 tok in 0.7s (381 tok/s) | decoding ...
+[07:35:38] decode snapshots: 1 taken (5 ms); kept: dec2, gen, sysk, system, turn
+[07:35:38] tree: 41 cycles: tree 1 (6.00 tok/verify, 102.2 ms), chain 40 (7.90 tok/verify, 94.4 ms), other 0, lookup 0; accepted path off the chain rows in 1
+[07:35:38] prompt 279 (cached 11, prefill 268 in 0.7s) | gen 320 in 4.5s (71.4 tok/s, 7.80 tok/verify, accept 98% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:2% 4:0% 5:2% 6:0% 7:95%), ms/cycle 109 (draft 13.2 verify 94.6 sample 0.7 ctx 0.7 host 0.1)) | length | ctx 601/98304 (8K entry)
+[07:35:38] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 601 tok, prompt 11650 tok, first difference at 3:
+[07:35:38] request: prompt 11650 tok | cache: cold (no reusable state), reused 0 | prefilling 11650 tok ...
+[07:35:38] [ctx] 8192 -> 16384 at pos 0: segments bound, no KV rows copied (76 ms)
+[07:35:38] v8: 32 ANE KV segments registered (ctx 16384)
+[07:35:56] v8: snapshot 'system' at 5888 (cut 5922), taken during the run
+[07:35:56] v8: snapshot 'turn' at 11520 (cut 11645), taken during the run
+[07:35:56] v8: 11648 tok (0 pad) in 17.4s (669 tok/s) + 342 ms handover / drafter context | setup 125 ms (V fill 0 ms, 0 rows)
+[07:35:56] v8: the last 2 rows on the bridge (one T-row call, not a padded pair)
+[07:35:56] snapshots dropped (their KV rows were rewritten): dec2
+[07:35:56] prefill: 11650 tok in 18.0s (647 tok/s) | decoding ...
+[07:36:06] decode: 226 tok, 10s, 22.4 tok/s, 2.54 tok/verify, accept 22%, ms/cycle 113 (draft 13.2 verify 98.8 sample 0.6 ctx 0.5 host 0.1)
+[07:36:16] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system, turn
+[07:36:16] prompt 11650 (cached 0, prefill 11650 in 18.0s) | gen 506 in 20.1s (25.2 tok/s, 2.86 tok/verify, accept 27% (accepted/7 per cycle: 0:32% 1:24% 2:19% 3:6% 4:6% 5:4% 6:2% 7:7%), ms/cycle 113 (draft 13.2 verify 98.9 sample 0.7 ctx 0.5 host 0.1)) | thinking 251 + answer 254 tok | tool_calls | ctx 12156/98304 (16K entry)
+[07:36:16] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 12156 tok, prompt 33 tok, first difference at 3:
+[07:36:16] snapshot 'system' (5888 tok) kept as 'sysk' with its KV rows (185 MB, 12 ms): this prompt rewrites them
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 60773)
+Traceback (most recent call last):
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 755, in __init__
+    self.handle()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 428, in handle_one_request
+    method()
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 1111, in do_POST
+    text, finish, n, reused, dt = engine.generate(ids, max_tokens, temp, top_p, top_k, stop,
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/tree_verify.py", line 437, in generate
+    return gen0(*a, **k)
+           ^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 252, in generate
+    return super().generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 704, in generate
+    return self._generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 710, in _generate
+    logits, reused = self.prefill(ids)
+                     ^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 540, in prefill
+    key = next(k for k, v in self.snaps.items() if v is best)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+----------------------------------------
+[07:36:16] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[07:36:16] request: prompt 12214 tok | cache: continue (model state is a prefix of the prompt), reused 12156 | prefilling 58 tok ...
+[07:36:16] prefill: 58 tok in 0.2s (246 tok/s) | decoding ...
+[07:36:26] decode: 290 tok, 10s, 28.9 tok/s, 3.30 tok/verify, accept 33%, ms/cycle 114 (draft 13.3 verify 99.3 sample 0.8 ctx 0.5 host 0.1)
+[07:36:36] decode: 638 tok, 20s, 31.8 tok/s, 3.62 tok/verify, accept 37%, ms/cycle 114 (draft 13.3 verify 99.1 sample 0.9 ctx 0.5 host 0.1)
+[07:36:46] decode: 929 tok, 30s, 30.9 tok/s, 3.52 tok/verify, accept 36%, ms/cycle 114 (draft 13.3 verify 99.0 sample 0.9 ctx 0.5 host 0.1)
+[07:36:57] decode: 1232 tok, 40s, 30.7 tok/s, 3.49 tok/verify, accept 36%, ms/cycle 114 (draft 13.3 verify 98.9 sample 0.9 ctx 0.5 host 0.1)
+[07:37:07] decode: 1537 tok, 50s, 30.6 tok/s, 3.48 tok/verify, accept 35%, ms/cycle 114 (draft 13.2 verify 98.8 sample 0.9 ctx 0.5 host 0.1)
+[07:37:17] decode: 1905 tok, 60s, 31.6 tok/s, 3.59 tok/verify, accept 37%, ms/cycle 113 (draft 13.2 verify 98.8 sample 0.9 ctx 0.5 host 0.1)
+[07:37:27] decode: 2252 tok, 70s, 32.0 tok/s, 3.63 tok/verify, accept 38%, ms/cycle 113 (draft 13.2 verify 98.8 sample 0.9 ctx 0.5 host 0.1)
+[07:37:29] decode snapshots: 8 taken (19 ms); kept: dec0, dec1, dec2, gen, sysk, system, turn
+[07:37:29] prompt 12214 (cached 12156, prefill 58 in 0.2s) | gen 2324 in 72.7s (32.0 tok/s, 3.63 tok/verify, accept 38% (accepted/7 per cycle: 0:25% 1:19% 2:13% 3:10% 4:8% 5:6% 6:5% 7:14%), ms/cycle 113 (draft 13.2 verify 98.8 sample 0.9 ctx 0.5 host 0.1)) | thinking 131 + answer 2192 tok | tool_calls | ctx 14538/98304 (16K entry)
+[07:37:29] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 14538 tok, prompt 76 tok, first difference at 3:
+[07:37:29] [ctx] 16384 -> 8192 at pos 0: segments bound, no KV rows copied (79 ms)
+[07:37:29] request: prompt 76 tok | cache: cold (no reusable state), reused 0 | prefilling 76 tok ...
+[07:37:30] snapshots dropped (their KV rows were rewritten): dec0, dec1, dec2, turn
+[07:37:30] prefill: 76 tok in 0.5s (147 tok/s) | decoding ...
+[07:37:30] tree: 1 cycles: tree 1 (5.00 tok/verify, 105.4 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 1
+[07:37:30] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 81 tok, prompt 14588 tok, first difference at 3:
+[07:37:30] snapshot 'system' (11 tok) kept as 'sysk' with its KV rows (0 MB, 0 ms): this prompt rewrites them
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 60833)
+Traceback (most recent call last):
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/socketserver.py", line 755, in __init__
+    self.handle()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/Users/anemll/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/lib/python3.11/http/server.py", line 428, in handle_one_request
+    method()
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 1111, in do_POST
+    text, finish, n, reused, dt = engine.generate(ids, max_tokens, temp, top_p, top_k, stop,
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/tree_verify.py", line 437, in generate
+    return gen0(*a, **k)
+           ^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 252, in generate
+    return super().generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 704, in generate
+    return self._generate(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02/scripts/qwen38_server.py", line 710, in _generate
+    logits, reused = self.prefill(ids)
+                     ^^^^^^^^^^^^^^^^^
+  File "/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/v8_server.py", line 540, in prefill
+    key = next(k for k, v in self.snaps.items() if v is best)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+----------------------------------------
+[07:37:32] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[cache] model state 81 tok, prompt 14588 tok, first difference at 3:
+[07:37:32] request: prompt 14588 tok | cache: cold (no reusable state), reused 0 | prefilling 14588 tok ...
+[07:37:32] [ctx] 8192 -> 16384 at pos 0: segments bound, no KV rows copied (80 ms)
+[07:37:32] v8: 32 ANE KV segments registered (ctx 16384)
+[07:37:55] v8: snapshot 'system' at 5888 (cut 5922), taken during the run
+[07:37:55] v8: snapshot 'turn' at 14464 (cut 14583), taken during the run
+[07:37:55] v8: 14588 tok (4 pad) in 22.9s (636 tok/s) + 370 ms handover / drafter context | setup 122 ms (V fill 0 ms, 0 rows)
+[07:37:55] prefill: 14588 tok in 23.4s (622 tok/s) | decoding ...
+[07:38:05] decode: 188 tok, 10s, 18.7 tok/s, 2.11 tok/verify, accept 16%, ms/cycle 113 (draft 13.0 verify 98.7 sample 0.5 ctx 0.5 host 0.1)
+[07:38:08] decode snapshots: 1 taken (3 ms); kept: dec0, gen, sysk, system, turn
+[07:38:08] prompt 14588 (cached 0, prefill 14588 in 23.4s) | gen 293 in 12.9s (22.8 tok/s, 2.57 tok/verify, accept 22% (accepted/7 per cycle: 0:41% 1:23% 2:13% 3:9% 4:4% 5:3% 6:1% 7:7%), ms/cycle 113 (draft 13.0 verify 98.7 sample 0.6 ctx 0.5 host 0.1)) | thinking 153 + answer 139 tok | tool_calls | ctx 14881/98304 (16K entry)
+[07:38:08] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[07:38:08] request: prompt 14937 tok | cache: continue (model state is a prefix of the prompt), reused 14881 | prefilling 56 tok ...
+[07:38:08] prefill: 56 tok in 0.2s (229 tok/s) | decoding ...
+[07:38:19] decode: 206 tok, 10s, 20.4 tok/s, 2.29 tok/verify, accept 18%, ms/cycle 112 (draft 13.1 verify 98.2 sample 0.6 ctx 0.4 host 0.1)
+[07:38:29] decode: 462 tok, 20s, 23.0 tok/s, 2.58 tok/verify, accept 23%, ms/cycle 112 (draft 13.0 verify 98.2 sample 0.6 ctx 0.4 host 0.1)
+[07:38:39] decode: 740 tok, 30s, 24.5 tok/s, 2.76 tok/verify, accept 25%, ms/cycle 113 (draft 13.1 verify 98.3 sample 0.7 ctx 0.5 host 0.1)
+[07:38:47] decode snapshots: 4 taken (8 ms); kept: dec0, dec1, dec2, gen, sysk, system, turn
+[07:38:47] prompt 14937 (cached 14881, prefill 56 in 0.2s) | gen 1088 in 38.1s (28.5 tok/s, 3.22 tok/verify, accept 32% (accepted/7 per cycle: 0:32% 1:20% 2:12% 3:8% 4:8% 5:7% 6:4% 7:9%), ms/cycle 113 (draft 13.1 verify 98.3 sample 0.8 ctx 0.5 host 0.1)) | thinking 628 + answer 459 tok | tool_calls | ctx 16025/98304 (16K entry)
+[07:38:47] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[07:38:47] request: prompt 16081 tok | cache: continue (model state is a prefix of the prompt), reused 16025 | prefilling 56 tok ...
+[07:38:47] prefill: 56 tok in 0.2s (241 tok/s) | decoding ...
+[07:38:52] prompt 16081 (cached 16025, prefill 56 in 0.2s) | gen 177 in 5.5s (32.0 tok/s, 3.61 tok/verify, accept 37% (accepted/7 per cycle: 0:18% 1:27% 2:10% 3:14% 4:10% 5:0% 6:12% 7:8%), ms/cycle 113 (draft 13.1 verify 98.4 sample 0.9 ctx 0.5 host 0.1)) | thinking 102 + answer 74 tok | tool_calls | ctx 16258/98304 (16K entry)
+[07:38:52] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[07:38:52] request: prompt 16546 tok | cache: continue (model state is a prefix of the prompt), reused 16258 | prefilling 288 tok ...
+[07:38:53] v8: bridge 126 rows to 16384 in 453 ms
+[07:38:53] v8: sync at 16384 in 6 ms
+[07:38:53] [ctx] 16384 -> 32768 at pos 16384: segments bound, no KV rows copied (109 ms)
+[07:38:53] v8: 48 ANE KV segments registered (ctx 32768)
+[07:38:54] v8: snapshot 'turn' at 16512 (cut 16541), taken during the run
+[07:38:54] v8: 162 tok (94 pad) in 0.6s (290 tok/s) + 23 ms handover / drafter context | setup 128 ms (V fill 14 ms, 1856 rows)
+[07:38:54] prefill: 288 tok in 1.2s (246 tok/s) | decoding ...
+[07:38:59] prompt 16546 (cached 16258, prefill 288 in 1.2s) | gen 208 in 5.2s (39.7 tok/s, 4.84 tok/verify, accept 55% (accepted/7 per cycle: 0:19% 1:12% 2:5% 3:9% 4:5% 5:16% 6:9% 7:26%), ms/cycle 122 (draft 13.1 verify 106.7 sample 1.1 ctx 0.7 host 0.1)) | thinking 24 + answer 183 tok | tool_calls | ctx 16754/98304 (32K entry)
+[07:38:59] thinking on (effort medium, budget 6144, max_tokens 32768) | temperature 1.0, top_p 0.95, min_p 0.0, presence 0.0
+[07:38:59] request: prompt 16810 tok | cache: continue (model state is a prefix of the prompt), reused 16754 | prefilling 56 tok ...
+[07:38:59] prefill: 56 tok in 0.3s (205 tok/s) | decoding ...

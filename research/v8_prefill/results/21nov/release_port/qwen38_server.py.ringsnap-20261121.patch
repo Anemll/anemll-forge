@@ -1,0 +1,40 @@
+--- scripts/qwen38_server.py.bak-20261121	2026-10-21 12:15:58
++++ scripts/qwen38_server.py	2026-11-21 07:31:41
+@@ -32,6 +32,11 @@
+ # minimum gap removes the stalls (M6, Core AI target + drafter, 16K greedy, 4 runs each: 10 drafter + 4 verify
+ # stalls vs none; historical drafter_gap_test.py harness, not distributed).
+ DRAFT_GAP = float(os.environ.get("DRAFT_GAP_MS", "3")) / 1e3
++# The 'system' snapshot also keeps the drafter's ring rows it can see (20 KB per slot, at most W slots) and writes them
++# back on restore: a request without that system prompt rewrites the same positions, and a restore by slot position
++# alone kept that prompt's rows, so a used server's drafts (and greedy replies at near ties) differed from a fresh
++# start's (2026-11-21, V8 server: used = fresh with this). DRAFT_RING_SNAP=off: slot positions only.
++RING_SNAP = os.environ.get("DRAFT_RING_SNAP", "fix") != "off"
+ # Thinking budget: a reasoning that reaches its budget without "</think>" is closed with Qwen's budget phrase and the
+ # answer follows (the quantized model can deliberate past pi's 16K maxTokens: 2026-09-28, 16384 tokens of thinking,
+ # no answer). ANSWER_RESERVE tokens of max_tokens stay for the answer.
+@@ -367,7 +372,11 @@
+         if self.v2:
+             self.snaps[key] = {"ids": list(ids), **self.model.snapshot()}
+             if self.drafter is not None:  # the drafter's context ring: which slot holds which position, and the queue
+-                self.snaps[key]["draft"] = (self.drafter.slot_pos.copy(), list(self.drafter.pending))
++                d = self.drafter
++                self.snaps[key]["draft"] = (d.slot_pos.copy(), list(d.pending))
++                if RING_SNAP and key == "system" and getattr(d, "ring", None) is not None:  # + its rows (see RING_SNAP)
++                    sl = np.nonzero(d.slot_pos >= 0)[0]
++                    self.snaps[key]["draft_ring"] = (sl, [(k[:, sl].copy(), v[:, sl].copy()) for k, v in d.ring])
+             return
+         self.snaps[key] = {"ids": list(ids), "pos": self.model.pos, "half": getattr(self.model, "half", 0),
+                      "states": [{n: st.read_state(n) for n in names}
+@@ -383,6 +392,12 @@
+                 # queued features of the snapshot are written again on the next flush)
+                 d.slot_pos = np.where(d.slot_pos == slot_pos, slot_pos, -1)
+                 d.pending = list(pending)
++                if "draft_ring" in snap:  # the snapshot's own rows back, whatever wrote those slots since
++                    sl, kv = snap["draft_ring"]
++                    for (k, v), (ks, vs) in zip(d.ring, kv):
++                        k[:, sl] = ks
++                        v[:, sl] = vs
++                    d.slot_pos[sl] = slot_pos[sl]
+         else:
+             for st, saved in zip(self.model.states, snap["states"]):
+                 for n, v in saved.items():

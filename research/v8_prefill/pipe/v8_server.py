@@ -532,12 +532,16 @@ class V8Engine(S.Engine):
         best = max((s_ for s_ in self.snaps.values()
                     if len(ids) > len(s_["ids"]) and ids[:len(s_["ids"])] == s_["ids"]),
                    key=lambda s_: len(s_["ids"]), default=None)
-        self._save_sysk(ids)   # before anything rewrites the KV rows under the 'system' snapshot
+        # 21 Nov 2026: the key before _save_sysk, which replaces 'sysk' with another conversation's 'system' (two
+        # conversations alternating: the lookup then found no key, StopIteration). Restoring 'sysk' rewrites those rows
+        # with its own copy and becomes 'system', so the other conversation's 'system' is not kept then.
+        key = next((k for k, v in self.snaps.items() if v is best), None)
+        if key != "sysk":
+            self._save_sysk(ids)   # before anything rewrites the KV rows under the 'system' snapshot
         cold = False
         if n and len(ids) > n and ids[:n] == self.fed and (best is None or n >= len(best["ids"])):
             reused, how = n, "continue (model state is a prefix of the prompt)"
         elif best is not None:
-            key = next(k for k, v in self.snaps.items() if v is best)
             self._restore(best)
             reused, how = len(self.fed), f"restore '{key}' snapshot"
         else:

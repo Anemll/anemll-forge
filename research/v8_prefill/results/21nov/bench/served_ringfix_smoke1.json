@@ -1,0 +1,141 @@
+{
+ "label": "served_ringfix_smoke1",
+ "banner": "BANNER [served_ringfix_smoke1] prompts realistic_v1.json sha 693e3097d942e5a5 gen 320 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "693e3097d942e5a5",
+ "gen": 320,
+ "started": "2026-11-21 07:31:23",
+ "rungs": {
+  "2k": [
+   {
+    "t0": 1795275103.56296,
+    "t_first": 1795275169.070388,
+    "t_last": 1795275173.446801,
+    "t_end": 1795275173.4468648,
+    "ttft_s": 65.50742816925049,
+    "completion_tokens": 320,
+    "prompt_tokens": 279,
+    "decode_tps": 72.89074627672272,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 279,
+     "completion_tokens": 320,
+     "total_tokens": 599,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 71.2,
+     "tok_verify": 7.8,
+     "accept_pct": 98,
+     "hist": "0:0% 1:0% 2:0% 3:2% 4:0% 5:2% 6:0% 7:95%",
+     "ms_cycle": 110,
+     "draft_ms": 13.2,
+     "verify_ms": 94.9
+    },
+    "content": "```python\ndef get_odd_collatz(n):\n    \"\"\"\n    Given a positive integer n, return a sorted list that has the odd numbers in collatz sequence.\n\n    The Collatz conjecture is a conjecture in mathematics that concerns a sequence defined\n    as follows: start with any positive integer n. Then each term is obtained from the \n    previous term as follows: if the previous term is even, the next term is one half of \n    the previous term. If the previous term is odd, the next term is 3 times the previous\n    term plus 1. The conjecture is that no matter what value of n, the sequence will always reach 1.\n\n    Note: \n        1. Collatz(1) is [1].\n        2. returned list sorted in increasing order.\n\n    For example:\n    get_odd_collatz(5) returns [1, 5] # The collatz sequence for 5 is [5, 16, 8, 4, 2, 1], so the odd numbers are only 1, and 5.\n    \"\"\"\n    odd_numbers = set()\n    current = n\n    while True:\n        if current % 2 == 1:\n            odd_numbers.add(current)\n        if current == 1:\n            break\n        if current % 2 == 0:\n            current = current // 2\n        else:\n            current = 3 * current + 1\n    return",
+    "server_prefill": [
+     [
+      279,
+      0.7
+     ]
+    ],
+    "sha": "1681b92d273f64ad",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.376412868499756,
+     "mean_w": {
+      "system_power": 21.744548749021117,
+      "total_power": 28.33060646057129,
+      "cpu_power": 2.0694241805471747,
+      "gpu_power": 1.0918163265275949,
+      "ane_power": 0.0,
+      "dram_power": 3.424817204475403
+     },
+     "energy_j": 123.98643068644651,
+     "net_total_w": -8.725031738251268,
+     "net_energy_j": -38.18434117735164
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795275173.760318,
+    "t_first": 1795275174.335644,
+    "t_last": 1795275187.603466,
+    "t_end": 1795275187.6035311,
+    "ttft_s": 0.5753259658813477,
+    "completion_tokens": 320,
+    "prompt_tokens": 74,
+    "decode_tps": 24.04313227490333,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 74,
+     "completion_tokens": 320,
+     "total_tokens": 394,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 23.9,
+     "tok_verify": 2.69,
+     "accept_pct": 24,
+     "hist": "0:22% 1:26% 2:28% 3:15% 4:5% 5:4% 6:0% 7:0%",
+     "ms_cycle": 112,
+     "draft_ms": 13.4,
+     "verify_ms": 97.8
+    },
+    "content": "The first blow doesn\u2019t feel like pain, exactly. It feels like a sudden, violent tearing of the air.\n\nFor a century, I have been still. I have been the anchor of this small ecosystem. My roots are tangled with the mycorrhizal networks that whisper secrets to the ferns below; my bark is home to lichen, moss, and the slow, deliberate crawl of beetles. I have watched the seasons turn a thousand times, felt the rain soak into my heartwood, and felt the sun warm my canopy. I am not just a tree; I am a living archive of this forest\u2019s history.\n\nWhen the chainsaw roars to life, the sound is a scream that vibrates through my very fibers. It is a frequency I have never known\u2014a harsh, mechanical shriek that shatters the quiet hum of the wind in the leaves.\n\nThen, the first cut lands.\n\nIt is not a clean severance. It is a jagged, violent intrusion. I feel the wood fibers tearing, the sap rushing out like blood. There is a shockwave of confusion. My leaves, which have been photosynthesizing in the dappled light, suddenly feel exposed, vulnerable. The wind, which used to be a gentle caress, now feels like a threat.\n\nI feel a profound sense of betrayal. I gave shade to the deer. I filtered the air for the birds. I held the soil together with my roots, preventing erosion. I was part of the whole. And now, these beings with their loud machines",
+    "server_prefill": [
+     [
+      74,
+      0.4
+     ]
+    ],
+    "sha": "e4b2451b2d9a1777",
+    "decode_power": {
+     "samples": 12,
+     "seconds": 13.267822027206421,
+     "mean_w": {
+      "system_power": 18.375261228894168,
+      "total_power": 23.730613390604656,
+      "cpu_power": 2.0550323276612747,
+      "gpu_power": 0.006142838294970715,
+      "ane_power": 0.0,
+      "dram_power": 3.294176995754242
+     },
+     "energy_j": 314.8535550629841,
+     "net_total_w": -13.3250248082179,
+     "net_energy_j": -176.7940576635455
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ]
+ },
+ "idle": {
+  "samples": 15,
+  "seconds": 20.005101203918457,
+  "mean_w": {
+   "system_power": 25.863034379449196,
+   "total_power": 37.05563819882256,
+   "cpu_power": 1.9063852700509278,
+   "gpu_power": 5.676897686234465,
+   "ane_power": 0.0,
+   "dram_power": 3.609320863087972
+  },
+  "energy_j": 741.3017923432319
+ },
+ "ended": "2026-11-21 07:33:07"
+}

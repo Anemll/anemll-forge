@@ -1,0 +1,59 @@
+diff --git a/scripts/qwen38_server.py b/scripts/qwen38_server.py
+index 5c0405c..aeea4f2 100644
+--- a/scripts/qwen38_server.py
++++ b/scripts/qwen38_server.py
+@@ -284,18 +284,22 @@ class Engine:
+             import dflash2_ane_drafter as D
+             from dflash2_coreai_drafter import CoreAIDrafter
+             guide = getattr(self.model, "compile_guide", None)
++            # a body-only drafter package drafts with the target's head (head_normw_fp16.npy: the head's norm gain)
++            nw = Path(ddir) / "head_normw_fp16.npy"
++            shared = dict(head=getattr(self.model, "head", None), normw=np.load(nw) if nw.is_file() else None)
+             def make():
+                 try:
+-                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
++                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, **shared)
+                 except Exception as e:  # noqa: BLE001  a stale cached specialization (nilError): recompile once
+                     import coreai_compile_guide as G
+                     n = G.purge(Path(dpath))
+                     if not n:
+                         raise
+                     log(f"drafter load failed ({str(e)[:60]}); purged {n} cached specializations, recompiling")
+-                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb)
++                    return CoreAIDrafter(dpath, dcfg, D.load_codebooks(ddir), self.model.emb, **shared)
+             self.drafter = guide.load(f"drafter {Path(dpath).name}", make) if guide else make()
+-            log(f"drafter: Core AI {dpath.name}")
++            log(f"drafter: Core AI {dpath.name}" + (" (body only, drafting with the target's head)"
++                                                     if getattr(self.drafter, "shared", False) else ""))
+         self.tok = AutoTokenizer.from_pretrained(str(hf))
+         self.a = a
+         # usable positions: a Core AI 64K entry holds 65472 KV rows (the ANE caps [history | block] at 65536)
+@@ -922,14 +926,16 @@ def make_handler(engine):
+                         if tail:
+                             emit(tail)
+                         if splitter.calls:  # streamed incrementally above
+-                            finish = "tool_calls"
++                            if finish != "length":  # cut by max_tokens: a partial call is no call
++                                finish = "tool_calls"
+                         else:
+                             _, _, calls = split_output(text, thinking)
+                             if calls:
+                                 emit({"tool_calls": [{"index": i, "id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
+                                                       "function": {"name": fn, "arguments": json.dumps(typed_args(fn, p, tools))}}
+                                                      for i, (fn, p) in enumerate(calls)]})
+-                                finish = "tool_calls"
++                                if finish != "length":  # cut by max_tokens: a partial call is no call
++                                    finish = "tool_calls"
+                         emit({}, finish=finish)
+                         usage = {"prompt_tokens": len(ids), "completion_tokens": n, "total_tokens": len(ids) + n,
+                                  "prompt_tokens_details": {"cached_tokens": reused}}
+@@ -951,7 +957,8 @@ def make_handler(engine):
+                         msg["tool_calls"] = [{"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
+                                               "function": {"name": fn, "arguments": json.dumps(typed_args(fn, p, tools))}}
+                                              for fn, p in calls]
+-                        finish = "tool_calls"
++                        if finish != "length":  # cut by max_tokens: a partial call is no call
++                            finish = "tool_calls"
+                     self._json(200, {"id": rid, "object": "chat.completion", "created": created, "model": MODEL_ID,
+                                      "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
+                                      "usage": {"prompt_tokens": len(ids), "completion_tokens": n,

@@ -9,3 +9,13 @@
 03:30 arm ring_fixc_run1: start v8_server_dec8_qk.sh ()
 03:31 arm ring_served_final: start v8_server_dec8_qk.sh ()
 03:34 fresh-vs-used done: cause = drafter ring restored by slot position only ('system'/'sysk'); fix arm used = fresh (tree8 9/9 on the 2K rung, chain smoke); served default restored (DRAFT_RING_SNAP off, pid 77853, smoke 29aef2ec9db18a3f)
+07:31 ringfix: launcher v8_server_dec8_qk.sh DRAFT_RING_SNAP=${DRAFT_RING_SNAP:-fix} (backup pre_ringfix.sh); restart + smoke + used 2K (Anemll 07:27)
+07:31 arm served_ringfix_smoke1: start v8_server_dec8_qk.sh ()
+07:37 ringfix: bench stopped (it interleaved with the user's Pi session and triggered StopIteration in v8_server.prefill: 'sysk' replaced before its key lookup)
+07:40 ringfix: StopIteration at v8_server.py:540 x3 (07:33:07 Pi, 07:35:32 Pi, 07:36:16 bench mbpp:0): best = 'sysk' (one
+  conversation's system), then _save_sysk replaces 'sysk' with the other conversation's 'system' before the key lookup.
+  Code from 9c18f06 (16 Nov), not DRAFT_RING_SNAP. Trigger: Pi and the bench (11-token system prompt) alternating.
+  smoke1 (not fresh: the user's 5953-token Pi request ran between warm-up and task 1): code:1 1681b92d = fresh; chat:2
+  e4b2451b != fresh a773ceab although both cold starts (tok/verify 2.69 vs 2.67): a second leftover after a long Pi
+  request, not explained yet. 9-prompt check stopped after 3 requests. Server log copy: ringfix_server_0731.log
+07:40 sysk fix: v8_server.py key before _save_sysk (backup v8_server.pre_sysk_fix.py); restart with v8_server_dec8_qk.sh (user: apply fix and restart)
