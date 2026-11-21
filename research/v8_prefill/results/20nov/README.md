@@ -1197,3 +1197,96 @@ memory bus, so drafting cannot be hidden.
 `bench/final_served4` humaneval 1 / mt-bench 2 byte-identical to final_served3 (sha 1681b92d273f64ad /
 3b060108f4af10b0). **Scratch:** every E1 / E2 package deleted with its Core AI entries (one mistake on the way, fixed:
 `e_forge.log`); internal disk 29 GB free.
+
+## T. Batch T: why Splash 1.7.0's tree pays and ours does not (20 Nov ~20:45-21:40; plan `t/PLAN_T.md`)
+
+### T1. Splash 1.7.0, tree on vs off (`t/`, `bench/tree/splash_bench.py`)
+
+Splash 1.7.0 cannot turn its tree off (`--verify-rows auto|all`; both grow trees). Arms, each alone, forge stopped,
+the realistic 9-prompt set at 2K / 8K / 32K, greedy, 320 tokens; per-request counts from Splash's own response
+(`timings.draft_n` / `draft_n_accepted`, `metrics.speculation.cycles`); banner = Splash's serve log (git, verify
+mode, ANE split, 1-lane step costs):
+- `s170_auto`: 1.7.0 defaults, trees up to 16 rows + prompt lookup, rows by measured costs (13.8-14.6 rows a cycle)
+- `s170_all`: 1.7.0 `--verify-rows all` = the draft's 8-row block a cycle, still a tree (7.9-8.0 rows)
+- `s161`: 1.6.1 defaults, the 8-row draft block as a CHAIN (no trees, no lookup): the chain reference (logged, a
+  different release: 1.7.0 also brings int8 GDN states and 1.6.2's changes)
+
+Forge (T2) from today's benches on the same prompts: `bench/chain_v1` (served chain), `bench/d4_branched` (tree8
+corrx0). Splash's 1-lane step costs measured at its start: 2 rows 95.1 ms, 8 rows 111.8, 15 rows 112.5, 16 rows 112.8.
+
+| rung | arm | tok/s | tok / cycle | ms / cycle | code / math / chat tok per cycle |
+|---|---|---|---|---|---|
+| 2K | Splash chain (1.6.1) | 39.14 | 4.50 | 116.5 | 5.78 / 6.76 / 2.41 |
+| 2K | Splash tree, 8 rows | 42.70 | 4.84 (+8%) | 115.0 | 5.78 / 6.53 / 2.92 |
+| 2K | Splash tree, 16 rows + lookup | **48.10** | **5.47 (+22%)** | 115.9 | 6.94 / 7.11 / 3.28 |
+| 2K | forge chain | 40.99 | 4.57 | 109.5 (draft 13.7, verify 94.8) | 6.92 / 6.53 / 2.40 |
+| 2K | forge tree8 corrx0 | 44.45 | 4.86 (+6%) | 111.7 (13.3, 96.9) | 7.15 / 6.35 / 2.76 |
+| 8K | Splash chain | 41.76 | 4.99 | 121.3 | 6.61 / 6.32 / 2.81 |
+| 8K | Splash tree, 8 rows | 42.92 | 5.06 (+1%) | 119.6 | 6.49 / 6.19 / 2.99 |
+| 8K | Splash tree, 16 rows + lookup | 49.10 | **5.84 (+17%)** | 121.1 | 7.44 / 6.91 / 3.59 |
+| 8K | forge chain | 45.98 | 5.09 | 108.5 (13.3, 94.2) | 6.97 / 6.07 / 2.30 |
+| 8K | forge tree8 corrx0 | **51.09** | 5.51 (+8%) | 110.9 (13.2, 96.6) | 7.37 / 6.40 / 2.67 |
+| 32K | Splash chain | 37.67 | 4.82 | 129.7 | 6.23 / 6.32 / 2.99 |
+| 32K | Splash tree, 8 rows | 39.66 | 5.01 (+4%) | 128.0 | 6.03 / 6.23 / 3.37 |
+| 32K | Splash tree, 16 rows + lookup | 43.68 | **5.69 (+18%)** | 132.4 | 7.46 / 6.86 / 3.74 |
+| 32K | forge chain | 44.05 | 5.16 | 120.7 (13.2, 106.5) | 7.08 / 6.48 / 2.60 |
+| 32K | forge tree8 corrx0 | **46.16** | 5.52 (+7%) | 123.3 (13.2, 108.7) | 7.26 / 6.63 / 2.81 |
+
+Splash's texts match forge's on 0 / 9 prompts per rung (other weights: UD-IQ3_XXS GGUF vs our VQ3), so per-prompt
+acceptance is not like for like across engines; within Splash, `auto` / `all` match 1.6.1 on 4-7 / 9. Splash gives
+no draft / verify split per request (its cycle = its measured step).
+
+### T3. The gap, per component
+
+- **Chains are at parity:** Splash's chain accepts 4.50 / 4.99 / 4.82 tokens per cycle, ours 4.57 / 5.09 / 5.16. The
+  drafter (DFlash2 on both; ours LUT4 GPTQ on the ANE, Splash's on the GPU) is not the difference.
+- **In 8 rows we are as good or better:** Splash's 8-row tree +1-8% tokens per cycle, ours +6-8% (offline on the
+  chain's own texts +5% at 2K, +3% at 8K / 32K; A1b). At 8K and 32K forge tree8 is the fastest of the five arms.
+- **Splash's whole lead is the 16-row width, at no cost:** +17-22% tokens per cycle over its chain at 0 to +2% cycle
+  time (its step: 8 rows 111.8 ms, 16 rows 112.8: the GPU step is weight reads, rows are spare tiles).
+- **What 16 rows cost us, measured** (`t/probe16/`, `v8/build_tree16_probe.py`: one target group, layers 0-3,
+  scratch, deleted; bonded over instances 0 and 1; tree entries under chain masks bit-identical to the chain):
+
+  | per group | chain8 | tree8 corrx0 | chain16, block forward substitution | tree16, corrx0 + block forward substitution |
+  |---|---|---|---|---|
+  | 8K of KV | 5.153 ms | 5.385 (+4.5%) | 5.520 (+7.1%) | **5.803 (+12.6%)** |
+  | 32K of KV | 5.889 | 6.103 (+3.6%) | 6.820 (+15.8%) | **7.068 (+20.0%)** |
+
+  Over a whole cycle (16 groups; the 16-row head costs +0.4%, B): a tree16 cycle about +10% at 8K, +16% at 32K. The
+  ANE's per-row work is the DeltaNet block solve, the conv correction and attention scores, all row-proportional.
+- **Where Splash's 16-row gain comes from:**
+  - **Prompt lookup** (chains of up to 15 tokens copied from earlier context). Offline on our chain's own texts
+    (`pipe/unit/power/t3_lookup_sim.py`, Splash's rule: the tokens after the latest earlier occurrence of the
+    context's last 3+ tokens; per cycle at the chain's own positions, an upper bound that does not re-simulate the
+    trajectory; `t/lookup_sim.*`):
+
+    | rung | chain tok / cycle | + lookup, 16 rows | code | math | chat |
+    |---|---|---|---|---|---|
+    | 2K | 4.57 | 5.26 (+15%) | 6.93 -> 10.40 (+50%) | +1% | 0 |
+    | 8K | 5.11 | 5.98 (+17%) | 6.98 -> 10.19 (+46%) | +2% | 0 |
+    | 32K | 5.19 | 6.11 (+18%) | 7.10 -> 10.82 (+52%) | +3% | 0 |
+    | 64K | 5.06 | 5.94 (+17%) | +54% | +1% | 0 |
+    | 96K | 4.74 | 5.24 (+11%) | +33% | +2% | 0 |
+
+    Inside 8 rows lookup adds +0-0.5%: the draft chain already reaches the 7-token depth cap where lookup matches.
+    Code accepts close to the cap (6.9-7.3 of 8), and only a chain deeper than the draft's block raises it.
+  - **Tree breadth** (chat): Splash's chat +36% at 2K; ours offline +12% / +11% / +10% for a 16-row tree overall (A1b,
+    top-4 children best-first from our DFlash2 candidates), +31% for chat at 32 rows.
+- **DeltaNet state is not the difference:** Splash verifies a tree as we do (each row reads the state before the
+  block along its path, no state per row, every row to a tape, the accepted path folded into the state at the next
+  step: `docs/internals.md`, `verify_gdn_fused`). Its 16-row GDN kernels cost 13-19% more per layer than its 8-row
+  ones, a small share of a weight-read-bound step; ours is the UT solve on the ANE, row-proportional.
+
+**Ranking of the levers** (projected at 8K, our costs):
+1. **Prompt lookup with a 16-row verify only on cycles that carry a lookup chain:** +17% tokens per cycle on this set
+   (+46-54% on code), at +10% cycle time on those cycles alone (lookup matches 15-23% of cycles; proposal rate not
+   yet counted). Needs a 16-row entry for every chunk (tree16 corrx0 + block solve: a v8_dec8tx-size build, ~10 GB
+   on the SSD + ~11 GB of Core AI entries; internal disk 29 GB free), a host lookup index, the tree layout merge
+   (draft chain + lookup chain) and the acceptance walk in `tree_verify.py`.
+2. **16-row breadth trees for low-acceptance (chat) cycles:** +10-12% tokens per verify at +10-16% cycle time: only a
+   dynamic policy pays, a few percent (A1b / A6).
+3. **A cheaper 16-row verify** (GPU instead of ANE): a GPU verify reads every weight (~10 GB, Splash's 112 ms step);
+   not cheaper than our 94 ms ANE verify. No.
+
+**Served state:** forge restored 21:25 (pid 15812, `v8_server_dec8_qk.sh`), `bench/final_served5` smoke
+byte-identical. Tree8 stays behind the flag.
