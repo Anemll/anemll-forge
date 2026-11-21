@@ -85,6 +85,8 @@ class V8Engine(S.Engine):
             return
         sl, kv = rs
         sp = snap["draft"][0]
+        if not len(sl):   # every row of the snapshot was still pending (a system cut of <= R tokens): nothing to write
+            return
         kept = cur[sl] == sp[sl]
         other = np.zeros(len(sl), bool)
         for (k_, v_), (ks, vs) in zip(d.ring, kv):
@@ -428,12 +430,29 @@ class V8Engine(S.Engine):
         S.log(f"snapshot 'system' ({ns} tok) kept as 'sysk' with its KV rows ({mb_:.0f} MB, "
               f"{1e3 * (time.perf_counter() - t):.0f} ms): this prompt rewrites them")
 
+    def _restore_cold(self, snap, what, e):
+        """A restore that failed part way: drop that snapshot and start cold, so nothing is left with one prompt's
+        tokens and state over another prompt's KV rows (prefill then reuses 0 tokens). 21 Nov review."""
+        S.log(f"snapshot {what} not restored ({type(e).__name__}: {str(e)[:120]}): cold start")
+        for k_ in [k_ for k_, v_ in self.snaps.items() if v_ is snap]:
+            del self.snaps[k_]
+        self.model.reset()
+        if self.drafter is not None:
+            self.drafter.reset()
+        self.fed = []
+        if self.v8 is not None:
+            self.v8.rewind(0)
+        self._cold_scrub()
+
     def _restore(self, snap):
         cur = self.drafter.slot_pos.copy() if RING_SNAP != "off" and self.drafter is not None else None
         kv = snap.get("kv")
         if kv is None:
-            super()._restore(snap)
-            self._ring_restore(snap, cur)
+            try:
+                super()._restore(snap)
+                self._ring_restore(snap, cur)
+            except Exception as e:  # noqa: BLE001
+                self._restore_cold(snap, "'system' / 'turn' / 'gen'", e)
             return
         n_ = len(snap["ids"])
         try:   # its rows come back from the copy, whatever the cache kept: first a context entry that holds them (a
@@ -442,19 +461,12 @@ class V8Engine(S.Engine):
                 raise ValueError(f"{n_} rows exceed the largest context")
             self.model.hi = max(self.model.hi, n_)
             super()._restore(snap)
-        except Exception as e:  # noqa: BLE001  nothing restored: start cold (prefill then reuses 0 tokens)
-            S.log(f"snapshot 'sysk' not restored ({type(e).__name__}: {str(e)[:120]}): cold start")
-            self.snaps.pop("sysk", None)
-            self.model.reset()
-            if self.drafter is not None:
-                self.drafter.reset()
-            self.fed = []
-            if self.v8 is not None:
-                self.v8.rewind(0)
+            self._ring_restore(snap, cur)
+            t = time.perf_counter()
+            self._kv_rows(n_, put=kv)   # the base restore above already set tokens / state: these rows must follow
+        except Exception as e:  # noqa: BLE001  start cold (prefill then reuses 0 tokens)
+            self._restore_cold(snap, "'sysk'", e)
             return
-        self._ring_restore(snap, cur)
-        t = time.perf_counter()
-        self._kv_rows(n_, put=kv)
         if self.v8 is not None:
             self.v8.rewind(0)   # the GPU's fp16 V copy of those rows is another prompt's
         self.snaps.pop("sysk", None)

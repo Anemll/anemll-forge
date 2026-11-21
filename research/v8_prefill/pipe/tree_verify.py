@@ -246,8 +246,10 @@ class Tree:
             if s.ka:
                 s._ka_switch()
             s._sync_kv()
-            assert s.g.dec_set_tree(lo, hi) == 0
-            plans, head = self._split_plan(mb.par)
+            plans, head = self._split_plan(mb.par)   # first use binds: before the mask is set (21 Nov review)
+            t0, gpu = time.perf_counter(), 0.0
+            if s.g.dec_set_tree(lo, hi) != 0:
+                raise RuntimeError("dec_set_tree refused the tree mask")
             try:
                 for j, (pa, pba, pb) in enumerate(plans):
                     F = s.files[j]
@@ -258,12 +260,18 @@ class Tree:
                     r2 = s.g.dec_run(2 * j + 1, F["Hba"], s.st, p0)
                     assert r2 >= 0, f"GPU attention, chunk {2 * j + 1}: {r2}"
                     pb.run()
+                    gpu += r + r2
                 head.run()
             finally:
-                s.g.dec_set_tree(0, 0)     # 0, 0: the chain mask (the served visibility)
+                if s.g.dec_set_tree(0, 0) != 0:   # 0, 0: the chain mask (the served visibility)
+                    self.split_ok = False
+                    raise RuntimeError("dec_set_tree could not restore the chain mask: split tree verify off")
             mb._flip()
             mb._last = "dec8"
-            s.stats["steps"] += 1
+            st = s.stats
+            st["steps"] += 1
+            st["gpu_ms"] = st.get("gpu_ms", 0.0) + gpu
+            st["wall_ms"] = st.get("wall_ms", 0.0) + 1e3 * (time.perf_counter() - t0)
         else:
             if mb.ctx not in self.ctx_t8:
                 return None
@@ -440,7 +448,7 @@ class Tree:
                 seen[dk] = 1.0
                 k += 1
             if nxt is None:
-                nxt = eng.sample(lg[k], *samp[:3], rng, seen, samp[3], None if hist is None else hist + drafts, dry)
+                nxt = eng.sample(lg[k], *samp[:3], rng, seen, samp[3], None if hist is None else hist + drafts[:k], dry)
         while nxt is None and k < kmax:
             dk = drafts[k]
             top = S.argmax(lg[k])
