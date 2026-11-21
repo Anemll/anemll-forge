@@ -1,0 +1,1188 @@
+{
+ "label": "lk_on2_g",
+ "banner": "BANNER [lk_on2_g] prompts u1_code_agent.json sha dd1cee6ce18b40f3 gen 320 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)",
+ "banner_parts": {
+  "lookup": "on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off)",
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)"
+ },
+ "prompts_sha": "dd1cee6ce18b40f3",
+ "gen": 320,
+ "temp": 0.0,
+ "think": 0,
+ "seed": -1,
+ "started": "2026-11-21 11:49:19",
+ "rungs": {
+  "code": [
+   {
+    "t0": 1795290579.881406,
+    "t_first": 1795290585.262866,
+    "t_last": 1795290589.115999,
+    "t_end": 1795290589.1160572,
+    "ttft_s": 5.381459951400757,
+    "completion_tokens": 320,
+    "prompt_tokens": 3132,
+    "decode_tps": 82.78977212784363,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 3132,
+     "completion_tokens": 320,
+     "total_tokens": 3452,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 80.4,
+     "tok_verify": 7.8,
+     "accept_pct": 99,
+     "hist": "0:0% 1:0% 2:0% 3:2% 4:0% 5:0% 6:0% 7:98%",
+     "ms_cycle": 97,
+     "draft_ms": 1.0,
+     "verify_ms": 94.4,
+     "lookup_cycles": 40,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 1,
+     "tree_tv": 4.0,
+     "tree_ms": 109.4,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"Clean up the two ANE compile caches on macOS without breaking what is still in use.\n\nCore AI keeps an entry per package and Python in ~/Library/Caches/coreai-cache/<macOS build>/<client>/<hash>/; its\nmanifest.plist names the compiled ANE program in aned's cache (ANERegionsHash {soc: \"<a>_<b>\"} ->\n/Library/Caches/com.apple.aned/<build>/ModelAssetsCache/<client>/<a>/<b>/). The two drift apart:\n  - orphaned programs: aned programs no Core AI entry names any more (research builds whose Core AI entries were\n    purged or replaced). They only take disk space: 273 programs, 176 GB on the M6 on 17 Oct 2026.\n  - dangling entries: Core AI entries whose aned program is gone (aned's cache was cleaned). Loading one fails with\n    nilError instead of recompiling; removing the entry makes the next load compile again.\n  - failed compiles: Core AI specializations with no compiled MPSGraph package in them (an aborted or failed\n    compile), or compiled in another ANE bonded compile mode than this Mac's policy (a load that did not set\n    MPSGRAPH_ANE_BONDED_COMPILE_MODE: mode 0 keeps a second copy of the weights). Removing one makes the next load\n    compile it again; its aned program is then orphaned (--delete-orphans).\n  - stale",
+    "server_prefill": [
+     [
+      3132,
+      5.2
+     ]
+    ],
+    "sha": "4be3226800357249",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.853132963180542,
+     "mean_w": {
+      "system_power": 30.417939314650557,
+      "total_power": 36.92018953959147,
+      "cpu_power": 1.7662290143425199,
+      "gpu_power": 1.0249022740596947,
+      "ane_power": 0.0,
+      "dram_power": 3.7111189365386963
+     },
+     "energy_j": 142.25839932187333,
+     "net_total_w": 31.789057699839272,
+     "net_energy_j": 122.48746609169892
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 0
+   },
+   {
+    "t0": 1795290589.427518,
+    "t_first": 1795290596.933163,
+    "t_last": 1795290600.69079,
+    "t_end": 1795290600.6908522,
+    "ttft_s": 7.505645036697388,
+    "completion_tokens": 320,
+    "prompt_tokens": 4366,
+    "decode_tps": 84.8940033488509,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 4366,
+     "completion_tokens": 320,
+     "total_tokens": 4686,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 82.5,
+     "tok_verify": 8.0,
+     "accept_pct": 100,
+     "hist": "0:0% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:100%",
+     "ms_cycle": 97,
+     "draft_ms": 1.0,
+     "verify_ms": 94.3,
+     "lookup_cycles": 39,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 1,
+     "chain_tv": 8.0,
+     "chain_ms": 104.3,
+     "other_cycles": 0
+    },
+    "content": "```python\n#!/usr/bin/env python3\n\"\"\"ANE vector palettization check: does a LUT entry of several weights run natively?\n\nScalar palettization stores one weight per LUT entry; vector palettization\n(coreai-opt ``cluster_dim > 1``) stores ``cluster_dim`` consecutive output-channel\nweights per entry, so one index fetches a whole vector. The ANE compiler has a\nvector-palette path (``palette_vector_size``, \"only supported at Cout for ANE\").\n\nWorkload: S sequential 1x1 nn.Conv2d(C, C) on a (1, C, H, W) input with small\nH*W, so the run is weight-bandwidth bound. Every layer's weights are generated\nfrom a random LUT (unit-variance outputs), so compression is exact (UNIQUE mode,\nno k-means). If the ANE decompresses on the fly, time tracks compressed\nbits/weight; if the LUT is expanded before running, time matches dense FP16.\n\nVariants (bits/weight = n_bits / cluster_dim; LUT values = 2**n_bits * cluster_dim):\n  dense   FP16 weights                        16 bits/weight\n  s8/s4/s2  scalar, 256/16/4-entry LUT        8 / 4 / 2\n  v2n4    vector of 2,  16 entries (32 values)   2",
+    "server_prefill": [
+     [
+      4366,
+      7.4
+     ]
+    ],
+    "sha": "c8bb2248e31aec48",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.757627010345459,
+     "mean_w": {
+      "system_power": 28.65863944208316,
+      "total_power": 33.931187311808266,
+      "cpu_power": 1.655282946567163,
+      "gpu_power": 0.004606263540836891,
+      "ane_power": 0.0,
+      "dram_power": 3.612658659617106
+     },
+     "energy_j": 127.50074593594186,
+     "net_total_w": 28.80005547205607,
+     "net_energy_j": 108.21986634124542
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 1
+   },
+   {
+    "t0": 1795290601.0007732,
+    "t_first": 1795290608.18204,
+    "t_last": 1795290612.321297,
+    "t_end": 1795290612.321355,
+    "ttft_s": 7.181266784667969,
+    "completion_tokens": 320,
+    "prompt_tokens": 4032,
+    "decode_tps": 77.06697205082891,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 4033,
+     "completion_tokens": 320,
+     "total_tokens": 4353,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 75.0,
+     "tok_verify": 7.44,
+     "accept_pct": 92,
+     "hist": "0:0% 1:2% 2:5% 3:5% 4:0% 5:0% 6:2% 7:86%",
+     "ms_cycle": 99,
+     "draft_ms": 2.6,
+     "verify_ms": 95.0,
+     "lookup_cycles": 37,
+     "lookup_tok_verify": 7.7,
+     "tree_cycles": 3,
+     "tree_tv": 3.67,
+     "tree_ms": 104.5,
+     "chain_cycles": 3,
+     "chain_tv": 7.67,
+     "chain_ms": 93.9,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"Guided first load of Core AI packages: the first start of a build on a macOS build compiles every package for the\nANE once (then it is cached and later starts take seconds). This module tells the user what is being compiled, how\nfar along it is, how long is left, that stopping is safe, and which build options compile faster.\n\nStandard library only; the package loads are passed in as callables. A cold load runs in a worker thread so the main\nthread can print a heartbeat and react to Ctrl-C immediately (finished packages stay cached; the next start resumes).\nEstimates come from cold compiles measured on the M6 (docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md) and are\nre-scaled by the compile times measured during the run.\"\"\"\nfrom __future__ import annotations\n\nimport functools\nimport logging\nimport math\nimport os\nimport re\nimport shutil\nimport signal\nimport subprocess\nimport sys\nimport threading\nimport time\nfrom pathlib import Path\n\nlogger = logging.getLogger(__name__)\n\nCACHE = Path.home() / \"Library/Caches/coreai-cache\"\nTAG = \"[ANE compile]\"\nHEARTBEAT_S = float(os.environ.get(\"ANE_COMPILE_HEARTBEAT_S\", \"30\"))\nHEAD_S, DRAFTER_S = 30.0, 60.0          # rough cold compile of the head / DFlash2 drafter packages\nSTATE_ENV = \"ANE_COMPILE_STATE",
+    "server_prefill": [
+     [
+      4033,
+      7.0
+     ]
+    ],
+    "sha": "d965dfb22d29ad0e",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.139256954193115,
+     "mean_w": {
+      "system_power": 26.626227695649263,
+      "total_power": 32.72576951980591,
+      "cpu_power": 1.638158148713905,
+      "gpu_power": 0.9618249286280104,
+      "ane_power": 0.0,
+      "dram_power": 3.499558746814728
+     },
+     "energy_j": 135.4603690661777,
+     "net_total_w": 27.59463768005371,
+     "net_energy_j": 114.2212959156017
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 2
+   },
+   {
+    "t0": 1795290612.632494,
+    "t_first": 1795290617.094553,
+    "t_last": 1795290621.072526,
+    "t_end": 1795290621.072586,
+    "ttft_s": 4.462059020996094,
+    "completion_tokens": 320,
+    "prompt_tokens": 2322,
+    "decode_tps": 80.19159538234376,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 2323,
+     "completion_tokens": 320,
+     "total_tokens": 2643,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 78.1,
+     "tok_verify": 7.62,
+     "accept_pct": 96,
+     "hist": "0:0% 1:2% 2:2% 3:0% 4:0% 5:0% 6:0% 7:95%",
+     "ms_cycle": 97,
+     "draft_ms": 1.3,
+     "verify_ms": 94.7,
+     "lookup_cycles": 40,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 1,
+     "tree_tv": 2.0,
+     "tree_ms": 103.4,
+     "chain_cycles": 1,
+     "chain_tv": 3.0,
+     "chain_ms": 105.6,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"Core ML vs Core AI DFlash2 drafter.\n    check                torch reference (same GPTQ weights, dequantized) vs the Core ML and Core AI drafters on random\n                         target-like features: hidden cosine, top-16 overlap, drafted tokens, per cycle\n    replay coreml|coreai exact greedy acceptance on saved target traces (TRACES), draft-call time, memory (system wired\n                         and the aned program size); run each in its own process\nenv: COREML_PKG, COREAI_PKG, TRACES, DRAFT_EXPORT (GPTQ export the Core ML package was built from)\"\"\"\nfrom __future__ import annotations\n\nimport json\nimport os\nimport re\nimport subprocess\nimport sys\nimport time\nfrom pathlib import Path\n\nimport numpy as np\nimport torch\n\nE = os.path.expanduser\nos.environ.setdefault(\"DRAFT_EXPORT\", E(\"~/Models/dflash2/export/drafter_lut4_gptq_q7_cal\"))\nsys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, \"scripts\"))\nimport ane_compile_mode  # noqa: E402\nane_compile_mode.apply(log=lambda m: None)  # the SoC's bonded compile mode (M6: 2, M5: 1) unless set explicitly\nsys.path.insert(0, str(Path(__file__).resolve().parent))\nCOREML_PKG = Path(E(os.environ.get(\"COREML_PKG\", \"~/",
+    "server_prefill": [
+     [
+      2323,
+      4.3
+     ]
+    ],
+    "sha": "a8da31242e3d6cb1",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.977972984313965,
+     "mean_w": {
+      "system_power": 26.7043469085671,
+      "total_power": 31.776403427124023,
+      "cpu_power": 1.5805935255653676,
+      "gpu_power": 0.0033588085229715845,
+      "ane_power": 0.0,
+      "dram_power": 3.4881041844685874
+     },
+     "energy_j": 126.40567437176105,
+     "net_total_w": 26.645271587371827,
+     "net_energy_j": 105.99417053427361
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 3
+   },
+   {
+    "t0": 1795290621.382692,
+    "t_first": 1795290629.771845,
+    "t_last": 1795290633.74444,
+    "t_end": 1795290633.744504,
+    "ttft_s": 8.389153003692627,
+    "completion_tokens": 320,
+    "prompt_tokens": 4627,
+    "decode_tps": 80.30015692338698,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 4628,
+     "completion_tokens": 320,
+     "total_tokens": 4948,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 78.2,
+     "tok_verify": 7.62,
+     "accept_pct": 96,
+     "hist": "0:0% 1:2% 2:2% 3:0% 4:0% 5:0% 6:0% 7:95%",
+     "ms_cycle": 97,
+     "draft_ms": 1.3,
+     "verify_ms": 94.6,
+     "lookup_cycles": 40,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 1,
+     "tree_tv": 2.0,
+     "tree_ms": 102.9,
+     "chain_cycles": 1,
+     "chain_tv": 3.0,
+     "chain_ms": 104.3,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"DFlash2 drafter (5 layers, 1.92 B params) as a plain torch reference with an explicit, ANE-shaped context\nstore: per draft layer a K/V ring of W = 2048 slots indexed by absolute position (slot = pos % W), and an\nexplicit additive mask built from absolute positions (|q - k| < 2048, non-causal). Mirrors the bundle's\nreference (dflash-07ebd93/dflash/model.py, DFlash2DraftModel + dflash_generate) op for op:\n\n  features (N, 25600) = concat of target layer outputs [5, 19, 33, 47, 61] (raw residual stream, 0-based)\n    -> fc -> hidden_norm = fused context (N, 5120)\n    -> per draft layer: K = rope(k_norm(k_proj(fused))), V = v_proj(fused) at the tokens' absolute positions\n  block = [anchor, mask x 7] target embeddings at positions p .. p+7\n    -> 5 layers: RMSNorm -> dynamic 2-tap grouped conv (side 0) -> attention over (context + block K/V)\n       -> dynamic conv (side 1, coefficients from the normalized input) -> residual; same around the MLP\n    -> final norm -> target lm_head (rows 1..7) -> top-16",
+    "server_prefill": [
+     [
+      4628,
+      8.2
+     ]
+    ],
+    "sha": "0cafcb9387f4b6ad",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.972594976425171,
+     "mean_w": {
+      "system_power": 25.77316834490296,
+      "total_power": 31.87500762939453,
+      "cpu_power": 1.6927848226244695,
+      "gpu_power": 1.0622952220345427,
+      "ane_power": 0.0,
+      "dram_power": 3.34675923983256
+     },
+     "energy_j": 126.62649518204671,
+     "net_total_w": 26.743875789642335,
+     "net_energy_j": 106.24258661207189
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 4
+   },
+   {
+    "t0": 1795290634.054712,
+    "t_first": 1795290638.168373,
+    "t_last": 1795290642.04461,
+    "t_end": 1795290642.0446699,
+    "ttft_s": 4.113661050796509,
+    "completion_tokens": 320,
+    "prompt_tokens": 2127,
+    "decode_tps": 82.29631133152205,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 2127,
+     "completion_tokens": 320,
+     "total_tokens": 2447,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 80.1,
+     "tok_verify": 7.8,
+     "accept_pct": 98,
+     "hist": "0:0% 1:0% 2:2% 3:0% 4:0% 5:2% 6:0% 7:95%",
+     "ms_cycle": 97,
+     "draft_ms": 1.3,
+     "verify_ms": 94.5,
+     "lookup_cycles": 39,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 1,
+     "tree_tv": 6.0,
+     "tree_ms": 103.0,
+     "chain_cycles": 1,
+     "chain_tv": 3.0,
+     "chain_ms": 104.7,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"KL-512 of a GGUF model through llama.cpp: the same 64 cached BF16-teacher sequences, positions and metric as\nscripts/m6_kl512_eval.py (per position, KL over the teacher's top-512 tokens plus one tail bucket, FP64 log-softmax,\npositions weighted equally), so a GPU runtime's model file (e.g. the Unsloth GGUF Splash serves) can be compared with\nthe ANE builds. Self-contained: numpy and llama-cpp-python (Metal) only, no Core AI, so it runs on any Mac.\n\n    pip install llama-cpp-python numpy\n    python kl512_gguf.py --gguf Qwen3.8-27B-UD-IQ3_XXS.gguf --ref-dir <dir with trace.npz, ref.npz> --out DIR [--nseq 2]\nOutputs kl.npy, agreement.npy, nll.npy, q_top512_lp.npy, sequences.jsonl and summary.json in the m6_kl512_eval layout,\nso `m6_kl512_eval.py compare --a <ANE run> --b DIR` gives the direct KL between the two models. Each sequence is fed as\ntoken ids in one batch (no BOS added, no re-tokenization). llama.cpp is a proxy for runtimes reading the same GGUF:\nSplash reports 99.3 to 99.45% same top",
+    "server_prefill": [
+     [
+      2127,
+      4.0
+     ]
+    ],
+    "sha": "e591aea829ce4395",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 3.876236915588379,
+     "mean_w": {
+      "system_power": 25.648035877899922,
+      "total_power": 31.690044403076172,
+      "cpu_power": 1.5582887942433465,
+      "gpu_power": 1.0616465454890247,
+      "ane_power": 0.0,
+      "dram_power": 3.422073185443878
+     },
+     "energy_j": 122.83811997183875,
+     "net_total_w": 26.558912563323975,
+     "net_energy_j": 102.94863731584037
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 5
+   },
+   {
+    "t0": 1795290642.356842,
+    "t_first": 1795290647.215843,
+    "t_last": 1795290651.982728,
+    "t_end": 1795290651.982789,
+    "ttft_s": 4.85900092124939,
+    "completion_tokens": 320,
+    "prompt_tokens": 2593,
+    "decode_tps": 66.92001111346462,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 2593,
+     "completion_tokens": 320,
+     "total_tokens": 2913,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 65.4,
+     "tok_verify": 6.67,
+     "accept_pct": 81,
+     "hist": "0:4% 1:0% 2:8% 3:10% 4:4% 5:2% 6:2% 7:69%",
+     "ms_cycle": 102,
+     "draft_ms": 4.6,
+     "verify_ms": 95.7,
+     "lookup_cycles": 33,
+     "lookup_tok_verify": 7.97,
+     "tree_cycles": 14,
+     "tree_tv": 3.57,
+     "tree_ms": 98.5,
+     "chain_cycles": 1,
+     "chain_tv": 8.0,
+     "chain_ms": 99.7,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"Vector-LUT rule checks on the ANE via MIL (iOS18 constexpr_lut_to_dense).\nEach case: one or two layers; report MLComputePlan placement, cosine of CPU_AND_NE output\nvs numpy reference, and writes the .mlpackage for a direct ane_mil_bench compile.\"\"\"\nimport sys\nfrom pathlib import Path\n\nimport numpy as np\nimport coremltools as ct\nfrom coremltools.converters.mil import Builder as mb\nfrom coremltools.converters.mil.mil import types\n\nOUT = Path(__file__).parent / \"lut_rules\"\nOUT.mkdir(exist_ok=True)\nIDX = {1: types.np_uint1_dtype, 2: types.np_uint2_dtype, 3: types.np_uint3_dtype,\n       4: types.np_uint4_dtype, 6: types.np_uint6_dtype, 8: np.uint8}\nC, HW = 512, 32\n\n\n# Generates a dense weight tensor, its corresponding LUT indices, the LUT table, and an optional scale factor\n# for int8 quantization, based on specified shape, vector dimension, bit width, axis, and group count.\ndef make_lut_weight(shape, cd, nb, axis, groups, rng, lut_int8=False):\n    \"\"\"Weight of `shape` from `groups` LUTs along axis 0 (Cout); vectors of cd along `axis`.\"\"\"\n    nl = 1 <<",
+    "server_prefill": [
+     [
+      2593,
+      4.7
+     ]
+    ],
+    "sha": "20330c83439f4330",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.766885042190552,
+     "mean_w": {
+      "system_power": 26.942309158733554,
+      "total_power": 32.44668674468994,
+      "cpu_power": 1.8060423495119942,
+      "gpu_power": 0.2613181532763642,
+      "ane_power": 0.0,
+      "dram_power": 3.43701708316803
+     },
+     "energy_j": 154.66962571190493,
+     "net_total_w": 27.315554904937745,
+     "net_energy_j": 130.2101100954825
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 6
+   },
+   {
+    "t0": 1795290652.291827,
+    "t_first": 1795290659.079987,
+    "t_last": 1795290662.9333131,
+    "t_end": 1795290662.933376,
+    "ttft_s": 6.788160085678101,
+    "completion_tokens": 320,
+    "prompt_tokens": 3728,
+    "decode_tps": 82.78562291188707,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 3729,
+     "completion_tokens": 320,
+     "total_tokens": 4049,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 80.5,
+     "tok_verify": 7.8,
+     "accept_pct": 99,
+     "hist": "0:0% 1:0% 2:0% 3:2% 4:0% 5:0% 6:0% 7:98%",
+     "ms_cycle": 97,
+     "draft_ms": 1.0,
+     "verify_ms": 94.2,
+     "lookup_cycles": 40,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 1,
+     "chain_tv": 4.0,
+     "chain_ms": 104.3,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"INT8 compute in one real full-attention layer on the M6 ANE, step by step.\n\nBuilds layer 3 (the first full-attention layer) the way a chunk entry runs it: input RMSNorm, the production AttnW\nwith the exported weights and a kv8 cache (INT8 keys and values), residual. Entries: verify (8 rows) and prefill\n(64 rows) at 8K and 64K. Variants swap only the projection weights:\n  base     production: q / o vector-LUT (palettized), k / v INT8 export dequantized to dense FP16 by QConv\n  kvi8     k / v as compile-time INT8 constants (blockwise_shift_scale with the export's per-channel scales): the same\n           values, half the bytes\n  kvw8a8   kvi8 plus INT8 activations at the k / v projections (shared scales, quantize / dequantize in and out)\n  qo8      kvi8 plus q / o as INT8 constants: the dequantized LUT weights requantized with one shared scale (4x the\n           bytes of their 2-bit vector LUT), per-channel output scales kept after the conv; FP16 activations\n  qkvo8a8  all four projections INT8 constants with INT8 activations (W8A8)\n  qolut8   kvi8 plus q / o kept as 2-bit vector",
+    "server_prefill": [
+     [
+      3729,
+      6.6
+     ]
+    ],
+    "sha": "5e528c08bd4cdb8d",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.8533260822296143,
+     "mean_w": {
+      "system_power": 28.17700299263654,
+      "total_power": 33.690009435017906,
+      "cpu_power": 1.7378271983278566,
+      "gpu_power": 0.2559379905185532,
+      "ane_power": 0.0,
+      "dram_power": 3.5192412535349527
+     },
+     "energy_j": 129.8185920665163,
+     "net_total_w": 28.55887759526571,
+     "net_energy_j": 110.04666791704032
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 7
+   },
+   {
+    "t0": 1795290663.2427142,
+    "t_first": 1795290669.13799,
+    "t_last": 1795290673.016531,
+    "t_end": 1795290673.0165892,
+    "ttft_s": 5.895275831222534,
+    "completion_tokens": 320,
+    "prompt_tokens": 3221,
+    "decode_tps": 82.24742257394678,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 3222,
+     "completion_tokens": 320,
+     "total_tokens": 3542,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 80.0,
+     "tok_verify": 7.8,
+     "accept_pct": 97,
+     "hist": "0:0% 1:0% 2:2% 3:2% 4:0% 5:0% 6:0% 7:95%",
+     "ms_cycle": 97,
+     "draft_ms": 1.3,
+     "verify_ms": 94.6,
+     "lookup_cycles": 39,
+     "lookup_tok_verify": 8.0,
+     "tree_cycles": 1,
+     "tree_tv": 4.0,
+     "tree_ms": 103.7,
+     "chain_cycles": 1,
+     "chain_tv": 3.0,
+     "chain_ms": 104.8,
+     "other_cycles": 0
+    },
+    "content": "```python\n\"\"\"End-to-end leverage model for M6 ANE attention-compute changes.\n\nCompanion to scripts/m6_attn_compute.py. That harness explores the attention\nkernel dtype (INT8-INT8 / FP8-FP8 versus the current V8 dequant-to-FP16). This\nmodule answers a different question: if such a kernel really ran faster on the\nM6 ANE, how much would end-to-end prefill/decode move?\n\nEverything here is arithmetic on documented bytes and an Amdahl split. It is not\nan ANE measurement. The attention time fraction is an on-device input, not a\nconstant. See docs/research/M6_COMPUTE_FEASIBILITY_2026-10-02.md.\n\"\"\"\nfrom __future__ import annotations\n\nimport argparse\nimport json\nimport math\nimport sys\n\n# Documented byte counts from docs/PERFORMANCE_SESSION.md and the V8 trace.\n# Labeled measured-prior in the research doc; reproduced here as constants only.\nWEIGHT_BYTES_PER_VERIFY = 10.61e9       # whole verifier forward (chunks + head)\nCHUNK_BYTES = 9.98e9                     # chunk weights alone\nHEAD_BYTES = 0.63e9                      # output head alone\nKV_BYTES_PER_TOKEN_FP16 = 65536.0       # 16 layers x 4 KV heads x 256 x 2 (K and V) x",
+    "server_prefill": [
+     [
+      3222,
+      5.8
+     ]
+    ],
+    "sha": "2b099daf701cad6a",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 3.8785409927368164,
+     "mean_w": {
+      "system_power": 25.477557717969166,
+      "total_power": 32.37559700012207,
+      "cpu_power": 1.5201923045599277,
+      "gpu_power": 1.887101671577962,
+      "ane_power": 0.0,
+      "dram_power": 3.4907453060150146
+     },
+     "energy_j": 125.57008012930055,
+     "net_total_w": 27.244465160369874,
+     "net_energy_j": 105.66877494968458
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 8
+   }
+  ],
+  "agent": [
+   {
+    "t0": 1795290673.327619,
+    "t_first": 1795290681.399483,
+    "t_last": 1795290684.904139,
+    "t_end": 1795290684.905188,
+    "ttft_s": 8.071863889694214,
+    "completion_tokens": 217,
+    "prompt_tokens": 4386,
+    "tool_calls": 2,
+    "decode_tps": 61.632295805741016,
+    "usage": {
+     "prompt_tokens": 4386,
+     "completion_tokens": 217,
+     "total_tokens": 4603,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 217,
+     "tps": 56.8,
+     "tok_verify": 5.86,
+     "accept_pct": 69,
+     "hist": "0:11% 1:8% 2:3% 3:11% 4:5% 5:3% 6:11% 7:49%",
+     "ms_cycle": 103,
+     "draft_ms": 7.0,
+     "verify_ms": 95.0,
+     "lookup_cycles": 19,
+     "lookup_tok_verify": 5.47,
+     "tree_cycles": 4,
+     "tree_tv": 3.25,
+     "tree_ms": 99.5,
+     "chain_cycles": 14,
+     "chain_tv": 7.14,
+     "chain_ms": 93.8,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_hwx_inspect.py\", \"oldText\": \"def hwx_paths(package: Path, executable: str = \\\"python\\\", target: str = \\\"h18g\\\") -> list[Path]:\", \"newText\": \"def hwx_paths_v2(package: Path, executable: str = \\\"python\\\", target: str = \\\"h18g\\\") -> list[Path]:\"}<tool:edit>{\"path\": \"scripts/m6_hwx_inspect.py\", \"oldText\": \"        hwxs = [p] if p.suffix == \\\".hwx\\\" else hwx_paths(p)\", \"newText\": \"        hwxs = [p] if p.suffix == \\\".hwx\\\" else hwx_paths_v2(p)\"}",
+    "server_prefill": [
+     [
+      4386,
+      7.7
+     ]
+    ],
+    "sha": "055584d339f6b7d0",
+    "decode_power": {
+     "samples": 3,
+     "seconds": 3.5046560764312744,
+     "mean_w": {
+      "system_power": 27.161594065487076,
+      "total_power": 32.04850514729818,
+      "cpu_power": 1.4919226131233956,
+      "gpu_power": 0.0031966481615829027,
+      "ane_power": 0.0,
+      "dram_power": 3.391791820526123
+     },
+     "energy_j": 112.31898830501754,
+     "net_total_w": 26.917373307545983,
+     "net_energy_j": 94.33613592386001
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 0
+   },
+   {
+    "t0": 1795290685.214966,
+    "t_first": 1795290692.174473,
+    "t_last": 1795290694.620119,
+    "t_end": 1795290694.621233,
+    "ttft_s": 6.959506988525391,
+    "completion_tokens": 146,
+    "prompt_tokens": 4439,
+    "tool_calls": 1,
+    "decode_tps": 59.28903740701085,
+    "usage": {
+     "prompt_tokens": 4439,
+     "completion_tokens": 146,
+     "total_tokens": 4585,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 146,
+     "tps": 52.8,
+     "tok_verify": 5.62,
+     "accept_pct": 66,
+     "hist": "0:8% 1:4% 2:12% 3:12% 4:15% 5:0% 6:12% 7:38%",
+     "ms_cycle": 106,
+     "draft_ms": 8.9,
+     "verify_ms": 95.9,
+     "lookup_cycles": 9,
+     "lookup_tok_verify": 5.22,
+     "tree_cycles": 5,
+     "tree_tv": 3.2,
+     "tree_ms": 100.6,
+     "chain_cycles": 12,
+     "chain_tv": 6.92,
+     "chain_ms": 94.2,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_int8_probe.py\", \"oldText\": \"def build(variant: str, form: str, a, dst: Path) -> dict:\\n    import coreai_torch\", \"newText\": \"def build(variant: str, form: str, a, dst: Path, verbose: bool = False) -> dict:\\n    if verbose:\\n        print(f\\\"   build args: variant={variant} form={form} a={a} dst={dst}\\\", flush=True)\\n    import coreai_torch\"}",
+    "server_prefill": [
+     [
+      3799,
+      6.6
+     ]
+    ],
+    "sha": "8ea9885707008e78",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.445646047592163,
+     "mean_w": {
+      "system_power": 32.34744758149226,
+      "total_power": 37.558467864990234,
+      "cpu_power": 1.689387559626959,
+      "gpu_power": 0.0034996796281524228,
+      "ane_power": 0.0,
+      "dram_power": 3.518133044242859
+     },
+     "energy_j": 91.85471848763063,
+     "net_total_w": 32.427336025238034,
+     "net_energy_j": 79.30578618406636
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 1
+   },
+   {
+    "t0": 1795290694.932756,
+    "t_first": 1795290700.396409,
+    "t_last": 1795290707.9271932,
+    "t_end": 1795290708.03855,
+    "ttft_s": 5.463653087615967,
+    "completion_tokens": 318,
+    "prompt_tokens": 3473,
+    "tool_calls": 1,
+    "decode_tps": 42.093890161201664,
+    "usage": {
+     "prompt_tokens": 3473,
+     "completion_tokens": 318,
+     "total_tokens": 3791,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 318,
+     "tps": 40.0,
+     "tok_verify": 4.36,
+     "accept_pct": 48,
+     "hist": "0:16% 1:16% 2:11% 3:14% 4:5% 5:8% 6:8% 7:21%",
+     "ms_cycle": 109,
+     "draft_ms": 10.9,
+     "verify_ms": 96.8,
+     "lookup_cycles": 13,
+     "lookup_tok_verify": 5.92,
+     "tree_cycles": 48,
+     "tree_tv": 3.29,
+     "tree_ms": 97.4,
+     "chain_cycles": 12,
+     "chain_tv": 6.92,
+     "chain_ms": 96.1,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_layer_ablation.py\", \"oldText\": \"def _gdn_prefill_stub(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T):\", \"newText\": \"def _gdn_prefill_stub(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T):\\n    \\\"\\\"\\\"Timing probe for the prefill entry with the GDN core removed.\\n\\n    Parameters:\\n        self: the GDN mix module; only `proj` and `out` are used.\\n        h: input hidden states, shape (1, T, D).\\n        conv_rows: rows of the conv1d input buffer to be convolved.\\n        conv_sel: selector matrix applied to `conv_rows` (kept for shape parity).\\n        conv_sel_out: selector matrix applied to the convolved rows (kept for shape parity).\\n        rec: recurrent state tensor (scaled by 0.5, passed through).\\n        pend: pending state tensor (scaled by 0.5, passed through).\\n        commit: commit flag (unused).\\n        commit_last: last-commit flag (unused).\\n        valid: valid-row mask (unused).\\n        T: number of rows in the prefill chunk.\\n    \\\"\\\"\\\"\"}",
+    "server_prefill": [
+     [
+      2833,
+      5.1
+     ]
+    ],
+    "sha": "4ad1f690b442c5d7",
+    "decode_power": {
+     "samples": 6,
+     "seconds": 7.5307841300964355,
+     "mean_w": {
+      "system_power": 23.55305671892515,
+      "total_power": 28.62255636850993,
+      "cpu_power": 1.5964852385685724,
+      "gpu_power": 0.0032248662748935552,
+      "ane_power": 0.0,
+      "dram_power": 3.4697895447413125
+     },
+     "energy_j": 215.55029326276525,
+     "net_total_w": 23.491424528757733,
+     "net_energy_j": 176.90884703452687
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 2
+   },
+   {
+    "t0": 1795290708.349189,
+    "t_first": 1795290713.870081,
+    "t_last": 1795290716.105929,
+    "t_end": 1795290716.106977,
+    "ttft_s": 5.520891904830933,
+    "completion_tokens": 104,
+    "prompt_tokens": 3709,
+    "tool_calls": 1,
+    "decode_tps": 46.06753334941382,
+    "usage": {
+     "prompt_tokens": 3709,
+     "completion_tokens": 104,
+     "total_tokens": 3813,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 104,
+     "tps": 40.7,
+     "tok_verify": 4.33,
+     "accept_pct": 48,
+     "hist": "0:17% 1:12% 2:12% 3:12% 4:12% 5:8% 6:8% 7:17%",
+     "ms_cycle": 106,
+     "draft_ms": 9.1,
+     "verify_ms": 96.0,
+     "lookup_cycles": 8,
+     "lookup_tok_verify": 4.5,
+     "tree_cycles": 6,
+     "tree_tv": 3.17,
+     "tree_ms": 100.1,
+     "chain_cycles": 10,
+     "chain_tv": 4.9,
+     "chain_ms": 93.7,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_server_bench.py\", \"oldText\": \"    a = ap.parse_args()\\n    if a.out.exists():\", \"newText\": \"    a = ap.parse_args()\\n    if not a.build or not a.bundle or not a.out:\\n        raise ValueError(\\\"empty input\\\")\\n    if a.out.exists():\"}",
+    "server_prefill": [
+     [
+      3069,
+      5.2
+     ]
+    ],
+    "sha": "bc61b2a4e7fd22e6",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.2358479499816895,
+     "mean_w": {
+      "system_power": 29.45767331550388,
+      "total_power": 35.944857597351074,
+      "cpu_power": 1.989824774711769,
+      "gpu_power": 1.0673832822361342,
+      "ane_power": 0.0,
+      "dram_power": 3.429976224899292
+     },
+     "energy_j": 80.36723617142115,
+     "net_total_w": 30.813725757598878,
+     "net_energy_j": 68.89480556642543
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 3
+   },
+   {
+    "t0": 1795290716.4137468,
+    "t_first": 1795290721.782887,
+    "t_last": 1795290723.708409,
+    "t_end": 1795290723.709449,
+    "ttft_s": 5.369140148162842,
+    "completion_tokens": 85,
+    "prompt_tokens": 3478,
+    "tool_calls": 1,
+    "decode_tps": 43.62453200598052,
+    "usage": {
+     "prompt_tokens": 3478,
+     "completion_tokens": 85,
+     "total_tokens": 3563,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 85,
+     "tps": 37.9,
+     "tok_verify": 4.05,
+     "accept_pct": 44,
+     "hist": "0:24% 1:10% 2:19% 3:14% 4:5% 5:0% 6:5% 7:24%",
+     "ms_cycle": 107,
+     "draft_ms": 9.1,
+     "verify_ms": 96.6,
+     "lookup_cycles": 7,
+     "lookup_tok_verify": 3.71,
+     "tree_cycles": 6,
+     "tree_tv": 2.0,
+     "tree_ms": 99.5,
+     "chain_cycles": 8,
+     "chain_tv": 5.88,
+     "chain_ms": 93.8,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_attn_chunk_probe.py\", \"oldText\": \"def _save(prog, var):\", \"newText\": \"def _save(prog: Program, var: str) -> tuple[Path, \\\"ct.models.ModelDescription\\\"]:\"}",
+    "server_prefill": [
+     [
+      2838,
+      5.0
+     ]
+    ],
+    "sha": "20d78dc9079f069b",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 1.9255220890045166,
+     "mean_w": {
+      "system_power": 39.12074094742249,
+      "total_power": 44.18579864501953,
+      "cpu_power": 1.8992874556790496,
+      "gpu_power": 0.0071060153860114895,
+      "ane_power": 0.0,
+      "dram_power": 3.1586642265319824
+     },
+     "energy_j": 85.08073131129095,
+     "net_total_w": 39.05466680526733,
+     "net_energy_j": 75.20062361225371
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 4
+   },
+   {
+    "t0": 1795290724.021848,
+    "t_first": 1795290731.158592,
+    "t_last": 1795290735.5194712,
+    "t_end": 1795290735.519525,
+    "ttft_s": 7.136744022369385,
+    "completion_tokens": 320,
+    "prompt_tokens": 4485,
+    "tool_calls": 1,
+    "decode_tps": 73.15038702678328,
+    "usage": {
+     "prompt_tokens": 4485,
+     "completion_tokens": 320,
+     "total_tokens": 4805,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 68.6,
+     "tok_verify": 6.81,
+     "accept_pct": 84,
+     "hist": "0:4% 1:6% 2:4% 3:4% 4:2% 5:0% 6:0% 7:79%",
+     "ms_cycle": 99,
+     "draft_ms": 3.5,
+     "verify_ms": 94.3,
+     "lookup_cycles": 37,
+     "lookup_tok_verify": 7.57,
+     "tree_cycles": 1,
+     "tree_tv": 2.0,
+     "tree_ms": 102.1,
+     "chain_cycles": 9,
+     "chain_tv": 4.56,
+     "chain_ms": 93.7,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_chat.py\", \"oldText\": \"def main():\\n    import coreai_compile_guide as G\\n    G.watch_parent()\\n    a = parse()\\n    chat = Chat(a)\\n    if a.prompt:\\n        chat.reply(a.prompt)\\n        return\\n    while True:\\n        try:\\n            line = input(\\\"\\\\n\\\\033[1mYou:\\\\033[0m \\\").strip()\\n            if not line:\\n                continue\\n            if line.startswith(\\\"/\\\"):\\n                chat.command(line)\\n                continue\\n            print(\\\"\\\\033[1mQwen3.8-27B (ANE):\\\\033[0m \\\", end=\\\"\\\", flush=True)\\n            chat.reply(line)\\n        except (EOFError, KeyboardInterrupt):\\n            print(\\\"\\\\nbye\\\")\\n            break\", \"newText\": \"def _main_body():\\n    import coreai_compile_guide as G\\n    G.watch_parent()\\n    a = parse()\\n    chat = Chat(a)\\n    if a.prompt:\\n        chat.reply(a.prompt)\\n        return\\n    while True:\\n        try:\\n            line = input(\\\"\\\\n\\\\033[1mYou:\\\\033[0m \\\").strip()\\n            if not line:\\n                continue\\n            if line.startswith(\\\"/\\\"):\\n                chat.command(line)\\n                continue\\n            print(\\\"\\\\",
+    "server_prefill": [
+     [
+      3845,
+      6.8
+     ]
+    ],
+    "sha": "46cbe2232845be45",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.360879182815552,
+     "mean_w": {
+      "system_power": 24.32201361624958,
+      "total_power": 30.510539054870605,
+      "cpu_power": 1.627733537779076,
+      "gpu_power": 1.1353949219868142,
+      "ane_power": 0.0,
+      "dram_power": 3.425396978855133
+     },
+     "energy_j": 133.0527746208661,
+     "net_total_w": 25.37940721511841,
+     "net_energy_j": 110.67652859660869
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 5
+   },
+   {
+    "t0": 1795290735.8316019,
+    "t_first": 1795290740.887674,
+    "t_last": 1795290742.18116,
+    "t_end": 1795290742.182229,
+    "ttft_s": 5.056072235107422,
+    "completion_tokens": 77,
+    "prompt_tokens": 3245,
+    "tool_calls": 1,
+    "decode_tps": 58.75595642836775,
+    "usage": {
+     "prompt_tokens": 3245,
+     "completion_tokens": 77,
+     "total_tokens": 3322,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 77,
+     "tps": 47.7,
+     "tok_verify": 5.13,
+     "accept_pct": 59,
+     "hist": "0:13% 1:0% 2:7% 3:20% 4:13% 5:13% 6:13% 7:20%",
+     "ms_cycle": 107,
+     "draft_ms": 10.0,
+     "verify_ms": 96.3,
+     "lookup_cycles": 4,
+     "lookup_tok_verify": 3.5,
+     "tree_cycles": 4,
+     "tree_tv": 5.0,
+     "tree_ms": 98.4,
+     "chain_cycles": 7,
+     "chain_tv": 6.14,
+     "chain_ms": 94.0,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_decode_ref.py\", \"oldText\": \"import json\\nimport os\\nfrom pathlib import Path\", \"newText\": \"import json\\nimport logging\\nimport os\\nfrom pathlib import Path\"}",
+    "server_prefill": [
+     [
+      2605,
+      4.7
+     ]
+    ],
+    "sha": "b40d9535c6bde32c",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 1.2934858798980713,
+     "mean_w": {
+      "system_power": 37.968038185433684,
+      "total_power": 43.454891204833984,
+      "cpu_power": 1.9032256706537074,
+      "gpu_power": 0.002668028678233941,
+      "ane_power": 0.0,
+      "dram_power": 3.5809593200683594
+     },
+     "energy_j": 56.208288185959645,
+     "net_total_w": 38.323759365081784,
+     "net_energy_j": 49.57124160334476
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 6
+   },
+   {
+    "t0": 1795290742.494824,
+    "t_first": 1795290747.9928498,
+    "t_last": 1795290750.524693,
+    "t_end": 1795290750.525721,
+    "ttft_s": 5.498025894165039,
+    "completion_tokens": 138,
+    "prompt_tokens": 3563,
+    "tool_calls": 1,
+    "decode_tps": 54.11077620789278,
+    "usage": {
+     "prompt_tokens": 3563,
+     "completion_tokens": 138,
+     "total_tokens": 3701,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 138,
+     "tps": 48.4,
+     "tok_verify": 5.11,
+     "accept_pct": 59,
+     "hist": "0:15% 1:7% 2:11% 3:15% 4:7% 5:0% 6:4% 7:41%",
+     "ms_cycle": 106,
+     "draft_ms": 8.2,
+     "verify_ms": 96.1,
+     "lookup_cycles": 11,
+     "lookup_tok_verify": 4.73,
+     "tree_cycles": 7,
+     "tree_tv": 3.71,
+     "tree_ms": 99.9,
+     "chain_cycles": 9,
+     "chain_tv": 6.67,
+     "chain_ms": 93.9,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_divergence.py\", \"oldText\": \"    print(f\\\"saved {OUT_BF16 if BF16 else OUT} ({len(ids)} tokens, {time.time() - t0:.0f}s)\\\", flush=True)\", \"newText\": \"    out = OUT_BF16 if BF16 else OUT\\n    print(f\\\"saved {out} ({len(ids)} tokens, {time.time() - t0:.0f}s)\\\", flush=True)\"}",
+    "server_prefill": [
+     [
+      2923,
+      5.1
+     ]
+    ],
+    "sha": "a86ca5c554092999",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.5318431854248047,
+     "mean_w": {
+      "system_power": 30.65095870379725,
+      "total_power": 35.96163845062256,
+      "cpu_power": 1.7263060897706866,
+      "gpu_power": 0.005450074023917534,
+      "ane_power": 0.0,
+      "dram_power": 3.5789235830307007
+     },
+     "energy_j": 91.04922924791936,
+     "net_total_w": 30.830506610870362,
+     "net_energy_j": 78.05800806592651
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 7
+   },
+   {
+    "t0": 1795290750.838837,
+    "t_first": 1795290756.795274,
+    "t_last": 1795290758.200345,
+    "t_end": 1795290758.201377,
+    "ttft_s": 5.956437110900879,
+    "completion_tokens": 81,
+    "prompt_tokens": 3721,
+    "tool_calls": 1,
+    "decode_tps": 56.93662373935125,
+    "usage": {
+     "prompt_tokens": 3721,
+     "completion_tokens": 81,
+     "total_tokens": 3802,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 81,
+     "tps": 47.0,
+     "tok_verify": 5.06,
+     "accept_pct": 58,
+     "hist": "0:6% 1:6% 2:12% 3:19% 4:19% 5:0% 6:19% 7:19%",
+     "ms_cycle": 108,
+     "draft_ms": 10.3,
+     "verify_ms": 96.2,
+     "lookup_cycles": 4,
+     "lookup_tok_verify": 3.75,
+     "tree_cycles": 3,
+     "tree_tv": 3.67,
+     "tree_ms": 99.8,
+     "chain_cycles": 9,
+     "chain_tv": 6.11,
+     "chain_ms": 94.2,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_kv_cache.py\", \"oldText\": \"    if manifest.get(\\\"ptp\\\"):\", \"newText\": \"    if manifest is None:\\n        return {}\\n    if manifest.get(\\\"ptp\\\"):\"}",
+    "server_prefill": [
+     [
+      3081,
+      5.6
+     ]
+    ],
+    "sha": "40120ce854e86a27",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 1.4050710201263428,
+     "mean_w": {
+      "system_power": 36.786852242471454,
+      "total_power": 42.957008361816406,
+      "cpu_power": 2.892966156947865,
+      "gpu_power": 0.1730632705788473,
+      "ane_power": 0.0,
+      "dram_power": 3.1041266918182373
+     },
+     "energy_j": 60.357647560513215,
+     "net_total_w": 37.825876522064206,
+     "net_energy_j": 53.14804291202983
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 8
+   }
+  ]
+ },
+ "idle": {
+  "samples": 15,
+  "seconds": 20.005027770996094,
+  "mean_w": {
+   "system_power": 4.827389787431967,
+   "total_power": 5.131131839752197,
+   "cpu_power": 0.2556957822954536,
+   "gpu_power": 0.0031347785264258517,
+   "ane_power": 0.0,
+   "dram_power": 0.044911491498351094
+  },
+  "energy_j": 102.64843495088499
+ },
+ "ended": "2026-11-21 11:52:38"
+}

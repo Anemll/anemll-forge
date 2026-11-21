@@ -2,7 +2,7 @@
 the same prompt and seed in both arms (the sampled texts differ once a cycle splits differently). Per set: decode
 tok/s token-weighted from the client's times, tok/verify and ms/cycle from the server's lines (cycle-weighted), the
 tree arm's share of tree cycles, the paired tok/s ratio (geometric mean) and wins; a text sanity line per arm.
-    PY tree_sampled_compare.py BENCH_DIR [OUT.json]"""
+    PY tree_sampled_compare.py BENCH_DIR [OUT.json [ARM_A ARM_B]]   (default chain_s tree_s)"""
 import json, math, sys
 from pathlib import Path
 
@@ -36,7 +36,8 @@ def agg(rs):
     return {"n": len(rs), "gen": g, "tps": tps, "tv": g / cyc, "ms": ms, "verify": vms, "tree": tc, "chain": cc, "other": oc}
 
 
-A, T = load("chain_s"), load("tree_s")
+NA, NT = (sys.argv[3], sys.argv[4]) if len(sys.argv) > 4 else ("chain_s", "tree_s")
+A, T = load(NA), load(NT)
 sets = {"8k": lambda k: k[0] == "8k", "32k": lambda k: k[0] == "32k", "code": lambda k: k[0] == "code",
         "agent": lambda k: k[0] == "agent", "all": lambda k: True}
 print(f"{'set':6s} | {'chain_s tok/s':>13s} {'tok/v':>6s} {'ms/cyc':>7s} | {'tree_s tok/s':>12s} {'tok/v':>6s} {'ms/cyc':>7s} "
@@ -58,7 +59,7 @@ for nm, sel in sets.items():
     out[nm] = {"chain_s": a, "tree_s": t, "paired_gm": gm, "wins": wins, "pairs": len(lr)}
 same = sum(A[k]["sha"] == T[k]["sha"] for k in A if k in T)
 print(f"identical texts (same prompt + seed): {same}/{len(set(A) & set(T))} (sampled: equal only while every cycle split matched)")
-for arm, D in (("chain_s", A), ("tree_s", T)):
+for arm, D in ((NA, A), (NT, T)):
     r = next((v for k, v in D.items() if k[0] == "code"), None) or next(iter(D.values()))
     txt = " ".join(r["content"].split())[:160]
     print(f"{arm} sample ({r['cat']}:{r['index']}, {r['completion_tokens']} tok): {txt!r}")
