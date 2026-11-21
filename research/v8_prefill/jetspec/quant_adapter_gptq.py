@@ -7,8 +7,11 @@
   GPTQ      columns in blocks of 128, nearest palette entry x row scale, error fed forward with the Cholesky of H'^-1
             (damp 1% of mean diag); MODE=rtn skips GPTQ (Hadamard + nearest entry)
 Writes OUT_DIR/<name>.weight.npz: lut, idx, scale, sign (int8), block. The replay reads W = (lut[idx] scale) R.
-    PY quant_adapter_gptq.py CAP_DIR OUT_DIR [bits] [MODE=gptq|rtn]"""
-import hashlib, json, sys, time
+    PY quant_adapter_gptq.py CAP_DIR OUT_DIR [bits] [MODE=gptq|rtn]
+E2 (20 Nov 2026): PALETTE=uniform replaces the Lloyd palette by the uniform INT4 grid (codes -8..7, step = row max /
+7.5): the values an ANE INT4 constant (constexpr_blockwise_shift_scale, shared step, row scale after the conv)
+computes; ONLY=<substring> quantizes only the matching tensors (e.g. ONLY=.mlp. for the W4A8 MLPs)."""
+import hashlib, json, os, sys, time
 from pathlib import Path
 
 import numpy as np
@@ -85,12 +88,21 @@ def main():
     for k in f.keys():
         if not (k.endswith("_proj.weight")):
             continue
+        if os.environ.get("ONLY") and os.environ["ONLY"] not in k:
+            continue
         name = k[:-len(".weight")]
         W = f.get_tensor(k).float()
         o, i = W.shape
         sign = sign_for(name, i)
         Wr = rot_rows(W, sign)                                      # W R^T: rows of W rotated like x
-        lut, idx0, scale = lut_quantize(Wr, bits)
+        if os.environ.get("PALETTE") == "uniform":   # uniform INT<bits> grid in units of the row max
+            K = 2 ** bits
+            lut = ((torch.arange(K, dtype=torch.float32) - K // 2) / (K // 2 - 0.5)).to(torch.float16).reshape(K, 1)
+            scale = Wr.abs().amax(1).clamp_min(1e-12).to(torch.float16)
+            mid = 0.5 * (lut.reshape(-1).float()[1:] + lut.reshape(-1).float()[:-1])
+            idx0 = torch.bucketize(Wr / scale.float()[:, None], mid).to(torch.uint8)
+        else:
+            lut, idx0, scale = lut_quantize(Wr, bits)
         cf = cap / f"{name}.npy"
         X = torch.from_numpy(np.load(cf)).float() if cf.exists() else None
         Xr = rot_rows(X, sign) if X is not None else None
@@ -111,7 +123,8 @@ def main():
                  block=np.array(BLK))
         rep[k] = {"shape": [o, i], "rel_err_weights": round(rel_w, 5), "rel_err_output_calib": round(rel_o, 5)}
         print(f"{k} {tuple(W.shape)} {mode} LUT{bits}: weight rel err {rel_w:.4f}, output rel err {rel_o:.4f} ({time.time() - t0:.0f}s)", flush=True)
-        (out / "report.json").write_text(json.dumps({"bits": bits, "mode": mode, "block": BLK, "tensors": rep}, indent=1))
+        (out / "report.json").write_text(json.dumps({"bits": bits, "mode": mode, "block": BLK, "palette": os.environ.get("PALETTE", "lloyd"),
+                                                     "only": os.environ.get("ONLY"), "tensors": rep}, indent=1))
 
 
 if __name__ == "__main__":

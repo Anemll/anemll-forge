@@ -534,6 +534,49 @@ def fake_quant_spec(module, spec):
     return n_t, n_p
 
 
+def install_actq(adapter, mode, scales_path=None, parts="mlp"):
+    """E2 (20 Nov 2026): INT8 activations into the adapter's Linear layers, simulated exactly as an ANE W4A8 build of the
+    rotated LUT4 files (spec lut4rf, JSP_LUT_DIR) computes them: the weight is W = W' R (R = blockdiag(H_blk) diag(sign),
+    the matrix's own rotation), so W x = W' (R x); the hook replaces x by R^T q(R x), q = INT8 fake-quantization:
+      tok     per token (row): s = max|R x| / 127, codes round((R x) / s) clipped to +-127 (lut3.AQd's recipe)
+      tensor  per tensor: a constant s = A / 127 per matrix input from JSP_ACTQ_SCALES (json {linear name: A}), clipped
+    parts: 'mlp' (gate / up / down only) or 'all' (every adapter Linear). Hooks on the module (installed once)."""
+    d = Path(os.environ["JSP_LUT_DIR"])
+    sc = json.loads(Path(scales_path).read_text()) if mode == "tensor" else None
+    hooks, n = [], 0
+    for name, m in adapter.named_modules():
+        if not isinstance(m, nn.Linear) or any(k in name for k in ("embed", "lm_head", "norm")):
+            continue
+        if parts == "mlp" and not ("." + name).count(".mlp."):
+            continue
+        z = np.load(d / f"{name}.weight.npz")
+        blk = int(z["block"])
+        h = torch.ones(1, 1)
+        while h.shape[0] < blk:
+            h = torch.cat([torch.cat([h, h], 1), torch.cat([h, -h], 1)], 0)
+        h = (h / blk ** 0.5)
+        dev = m.weight.device
+        hs = h.to(dev, torch.float32)
+        sign = torch.from_numpy(z["sign"].astype(np.float32)).to(dev)
+        A_ = float(sc[name]) if sc is not None else None
+
+        def fn(mod, args, hs=hs, sign=sign, blk=blk, A_=A_):
+            x = args[0]
+            sh = x.shape
+            xf = x.float().reshape(-1, sh[-1])
+            xr = ((xf * sign).reshape(xf.shape[0], -1, blk) @ hs.T).reshape(xf.shape)
+            s = (xr.abs().amax(-1, keepdim=True).clamp_min(2 ** -9) / 127.0) if A_ is None else torch.full_like(xr[:, :1], A_ / 127.0)
+            q = torch.clamp(torch.round(xr / s), -127, 127) * s
+            xb = ((q.reshape(xf.shape[0], -1, blk) @ hs).reshape(xf.shape)) * sign      # R^T q (H orthonormal, symmetric)
+            return (xb.to(x.dtype).reshape(sh),) + tuple(args[1:])
+        hooks.append(m.register_forward_pre_hook(fn))
+        n += 1
+    adapter._actq_hooks = hooks
+    print(f"ACTQ adapter: INT8 activations ({mode}{', scales ' + str(scales_path) if sc else ''}) into {n} Linear layers ({parts}), "
+          f"rotated basis from {d}", flush=True)
+    return n
+
+
 def patch_adapter_loader():
     from jetspec.engines.jetspec_plus_plus.draft.reference.models import adapter as A
     if not getattr(A.load_adapter, "preloaded", False):   # keep a preloaded adapter
@@ -706,6 +749,9 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
             return fn
         hooks = [m.register_forward_pre_hook(hook(n)) for n, m in drafter.driver.adapter.named_modules() if isinstance(m, nn.Linear)]
         drafter.driver.adapter._cap_hooks = (hooks, capd, Path(cap_dir))
+    actq = os.environ.get("JSP_ACTQ")   # E2: INT8 activations of the adapter MLPs (W4A8), in each matrix's rotated basis
+    if actq and not getattr(drafter.driver.adapter, "_actq_hooks", None):
+        install_actq(drafter.driver.adapter, actq, os.environ.get("JSP_ACTQ_SCALES"), os.environ.get("JSP_ACTQ_PARTS", "mlp"))
     rows = OutcomeRows(drafter, llm.runner) if a.rows == "outcome" else None
     out = Path(a.out) if not multi else Path(a.out).with_name(Path(a.out).stem + f"_{dataset}.json")
     banner = dict(jetspec_src=str(SRC), jetspec_commit=os.popen(f"git -C {SRC} rev-parse HEAD").read().strip(),
@@ -713,7 +759,9 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
                   release=a.release, target_root=a.target_root, schedule=a.schedule, device=a.device,
                   dtype=str(dtype), config=config.__dict__, max_new=a.max_new, loaded_target_tensors=len(llm.model.loaded),
                   target_load_s=round(t_target, 1), drafter_build_s=round(t_build, 1), torch=torch.__version__,
-                  quant=a.quant or None, skip_blocks=os.environ.get("JSP_SKIP_BLOCKS") or None, mps_allocated_gb=round(torch.mps.current_allocated_memory() / 1e9, 2)
+                  quant=a.quant or None, skip_blocks=os.environ.get("JSP_SKIP_BLOCKS") or None,
+                  actq=(f"{actq}:{os.environ.get('JSP_ACTQ_PARTS', 'mlp')}" + (f":{os.environ.get('JSP_ACTQ_SCALES')}" if actq == "tensor" else "")) if actq else None,
+                  mps_allocated_gb=round(torch.mps.current_allocated_memory() / 1e9, 2)
                   if torch.backends.mps.is_available() else None)
     print("BANNER " + json.dumps(banner), flush=True)
     dirs = sorted(d for d in glob.glob(f"{tdir}/*") if Path(d, "meta.json").exists())
@@ -723,7 +771,8 @@ def run_one(a, llm, dtype, t_target, dataset, tdir, qinfo, multi):
     if out.exists():   # resume (20 Nov 2026): keep the traces an earlier run of the same command finished
         old = json.loads(out.read_text())
         ob = old.get("banner", {})
-        if ob.get("schedule") == a.schedule and ob.get("rows") == a.rows and ob.get("quant") == (a.quant or None):
+        if (ob.get("schedule") == a.schedule and ob.get("rows") == a.rows and ob.get("quant") == (a.quant or None)
+                and ob.get("actq") == banner.get("actq")):
             res = old.get("results", [])
             print(f"RESUME: {len(res)} traces already in {out}", flush=True)
     done = {r["trace"] for r in res}

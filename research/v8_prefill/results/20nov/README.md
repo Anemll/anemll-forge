@@ -52,6 +52,25 @@ Plan: `PLAN.md` (Anemll, 19 Nov 22:32). Status line: `/tmp/m6_yolo_status.txt`. 
   - **What would make it pay:** an adapter 2-3x cheaper per pass, or drafting that overlaps the verify.
 - **Memory:** DFlash2 measured 0.84 GB wired (+0.25 GB selector file pages); the LUT6 adapter alone 3.7 GB wired.
 
+**Batch E (18:35-20:35; sections E0-E3):**
+- **E0:** the 4.5 GB GPTQ calibration inputs were already on `/Volumes/SSD4TB` (`jetspec_pp/calib_inputs`).
+- **E1, memory or compute (16 rows):** both ANE passes are memory-bound: LUT6 27.2 ms (131 GB/s = 88% of the ANE's
+  measured 149 GB/s; 6.7 TFLOP/s = 33% of its 20.1), LUT4 22.2 ms (110 GB/s; LUT4 kernels stream at most 131 GB/s);
+  one package grows only 16-21% from 1 to 16 rows, knee at 32-64 rows. The GPU LUT4 kernel (38.2 ms) is
+  compute-bound on the simdgroup_matrix path (4.6 of 18.8 TFLOP/s; 58 of 153 GB/s).
+- **HWX, every package timed:** bonded only over ANE instances 0 and 1 (2 streams per function, ActiveNE 4). Not even:
+  q / k / v / down sit on one instance; splitting them in output-channel halves (exact) gives -2.1% on the full pass.
+- **E2, W4A8:** INT4 x INT8 runs at the INT8 double rate on the M6 when compute-bound (Anemll's gist chain: FP16 34.2
+  TOPS, W8A8 56.8, W4A8 58.4 = 1.71x; LUT4 palette = dense). There is no separate INT4 MAC: an INT4 constant
+  compiles to a 4-bit index into an INT8 table, the same program as a palette of INT8 values. The adapter pass at 16
+  rows gains nothing (22.11 -> 22.06 ms; its MLP 1.17 vs 1.24 ms): it is bound by reading the weights. INT8
+  activations cost no acceptance (J0-R0 6.10 / 8.56 / 6.64 vs bf16 6.12 / 8.59 / 6.64).
+- **E3:** Jet Flash with the best E2 pass (21.65 ms) is unchanged (8K J0-R0 -12 to -23%). Even VQ2 weights leave J3-R3
+  8-14% behind DFlash2. **JetSpec++ parked** (Anemll) until two execution units.
+- **A quantizer bug for any ANE port:** `quant_adapter_gptq.py` seeds each matrix's Hadamard signs by its own name, so
+  gate / up and q / k / v see different rotations of one input (7 rotations per block, not the 4 timed).
+- **Forge** restored 20:27 (pid 88551), smoke byte-identical.
+
 **Batch D (11:45-15:20; sections D1-D4):**
 - **D1, the 09:02 forge exit:** forge's own swap watchdog (`watchdog_v8_server.log`: swap 1071 -> 3173 MB > its +1536
   MB limit) while the C3 replay held 17.6 GB of GPU memory next to forge's 19 GB wired. Contention only. Forge alone,
@@ -937,3 +956,244 @@ humaneval 1 / mt-bench 2 byte-identical to 08:34's (sha 1681b92d273f64ad / 3b060
 v8_dec8t (19 Nov ctap form) and v8_dec8tc (A8 corr form) also kept, three tree builds sit on the internal disk; the two
 older ones are superseded by v8_dec8tx (not deleted: needs Anemll's OK). Internal disk free after the build: 30 GB.
 The D-batch scratch builds are deleted.
+
+## E. Batch E (20 Nov ~18:35; forge down 18:40 for every ANE / GPU measurement, restored after; `e_forge.log`)
+
+### E0. GPTQ calibration inputs
+
+`jetspec_pp/calib_inputs` (84 files, 4.5 GB) was already on `/Volumes/SSD4TB` (disk4s2), with no copy on the internal
+disk. Nothing moved, nothing deleted.
+
+### E1. Is the 16-row adapter pass memory-bound or compute-bound? (`e1/`)
+
+**Row sweep, one ANE package** (`v8/build_jsp_adapter_rows.py`: adapter blocks 0-2 built exactly as D2's timing form, one
+entry per row count against 8K of INT8 KV, plus block 0's MLP alone as a pure weight stream; `pipe/unit/power/
+e1_ane_rows_time.py`: dense inputs, median of 30, bytes = index bits + scales + the bound KV buffers, FLOPs = weights +
+attention; banner with the HWX mode). Per call:
+
+| rows | LUT4 (Hadamard + GPTQ), 3 blocks: ms | GB/s | TFLOP/s | LUT6, 3 blocks: ms | GB/s | TFLOP/s | LUT4 MLP alone: ms (GB/s) | LUT6 MLP alone: ms (GB/s) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 4.650 | **131.1** | 0.61 | 5.969 | **148.9** | 0.48 | 1.212 (110) | 1.569 (128) |
+| 4 | 4.844 | 125.8 | 2.34 | 6.096 | 145.8 | 1.86 | | |
+| 8 | 5.074 | 120.1 | 4.47 | 6.302 | 141.0 | 3.60 | 1.218 (110) | 1.568 (128) |
+| **16** | **5.610** | 108.6 | 8.09 | **6.941** | 128.0 | 6.54 | 1.227 (109) | 1.565 (128) |
+| 32 | 6.623 | 92.0 | 13.71 | 7.873 | 112.9 | 11.53 | 1.172 (114) | 1.593 (126) |
+| 64 | 9.810 | 62.1 | **18.51** | 11.095 | 80.1 | **16.37** | 1.705 (20.1 TFLOP/s) | 2.072 (16.5 TFLOP/s) |
+| 128 | 48.667 | 12.5 | 7.46 | 46.821 | 19.0 | 7.76 | 12.240 | 11.726 |
+
+Bytes per call: LUT4 558.7 MB of weights + 50.7 MB of KV, LUT6 837.9 + 50.7 MB; 45.4 GFLOP at 16 rows (9.7 of it
+attention). A repeat of the LUT4 package (`timing_rep2`): 16 rows 5.575 ms, 1 row 4.595, 64 rows 9.764.
+
+- **Both ANE forms are memory-bound at 16 rows.** From 1 to 16 rows (16x the FLOPs) the call grows only 21% (LUT4) /
+  16% (LUT6); the MLP alone does not grow at all up to 32 rows. The knee is between 32 and 64 rows: at 64 rows the
+  calls run at 18.5 / 16.4 TFLOP/s, the MLP alone at 20.1 / 16.5, which is this program's compute ceiling (3 Oct:
+  22.5-24 TFLOPS for the release LUT MLP at 64 rows).
+- **The ANE's read peak:** LUT6 at 1 row streams 148.9 GB/s, the DRAM ceiling (GPU raw read 153-155 GB/s, below).
+  LUT4 kernels stream at most 131 GB/s: 33% fewer bytes buy only 19-23% less time. So LUT4 is limited by the rate the
+  ANE fetches and expands 4-bit kernels, not by DRAM alone.
+- **128 rows is a cliff, compiled in:** the HWX tiles a 128-row call into 32-row tasks that each re-stream the weights
+  (gate / up halves at 424 static cycles each, against 139 for a 16-row task), so 128 rows cost 5-8x 64 rows. Outside
+  the operating range (B16 = 16 rows).
+
+**Row sweep, one GPU matmul** (`jetspec/e1_gpu_rows.py`: the adapter's largest matrix, streams.0 gate_proj 17,408 x 5,120
+at LUT4, 44.6 MB; D3's best kernel form v6 generalized to 1-8 input tiles of 8 rows; per call = 20 back-to-back calls
+between synchronizes, as D3 timed per shape; `e1/gpu/rows_v6form_batched.*`):
+
+| rows | LUT4 kernel ms | GB/s | TFLOP/s | torch dense fp16 ms | GB/s | TFLOP/s |
+|---|---|---|---|---|---|---|
+| 1 | 0.500 | 89.1 | 0.36 | 1.168 | 152.6 | 0.15 |
+| 4 | 0.501 | 89.0 | 1.42 | 1.150 | 155.0 | 0.62 |
+| 8 | 0.501 | 89.0 | 2.85 | 1.166 | 152.9 | 1.22 |
+| **16** | **0.716** (D3: 0.707) | 62.3 | 3.98 | 1.518 | 117.4 | 1.88 |
+| 32 | 1.295 | 34.4 | 4.40 | 1.407 | 126.7 | 4.05 |
+| 64 | 2.493 | 17.9 | 4.58 | 1.435 | 124.2 | 7.95 |
+
+Peaks in the same harness: raw read 153.2 GB/s (2.23 GB), torch fp16 matmul 18.8 TFLOP/s (M 256-2048).
+
+- **The GPU LUT4 kernel is compute-bound at 16 rows, on the wrong unit.** Flat at 0.50 ms up to 8 rows (89 GB/s, 58%
+  of the read peak: the decode / issue floor), then +0.29 ms per extra 8-row tile, saturating at 4.6 TFLOP/s: the
+  simdgroup_matrix (ALU) path, 25% of the 18.8 TFLOP/s fp16 peak (13 Nov: simdgroup_matrix tops out at 4.8, Metal 4
+  tensor ops reach 9-12). torch's dense fp16 matmul is bandwidth-bound at every row count here (117-155 GB/s).
+
+**The three 16-row passes, 12 blocks at 8K** (2.44 GB per pass at LUT4, 3.55 GB at LUT6, 0.20 GB of it KV; 181.6
+GFLOP, 38.7 of it attention; GPU pass without attention: 2.23 GB, 142.9 GFLOP):
+
+| pass | ms | bytes / s vs measured peak | FLOP / s vs measured peak | limited by |
+|---|---|---|---|---|
+| ANE LUT6 | 27.2 (B8) | 130.7 GB/s = 88% of 148.9 | 6.7 TFLOP/s = 33% of 20.1 (ANE FP16 LUT, mlp64) | **memory** (DRAM stream) |
+| ANE LUT4 | 22.2 (D2) | 109.8 GB/s = 74% of 148.9 (84% of LUT4's own 131) | 8.2 TFLOP/s = 41% of 20.1 | **memory** (the 4-bit kernel fetch rate) |
+| GPU LUT4 | 38.2 (D3) | 58.5 GB/s = 38% of 153.2 | 3.7 TFLOP/s = 20% of 18.8 (81% of the kernel's own simdgroup ceiling 4.6) | **compute**, on the simdgroup_matrix ALU path |
+
+**Compiled program per ANE package (HWX, `hwx_mode.py`; every package timed in batch E):**
+
+| package | HWX | mode (compiler options in the HWX) | ANE instances | streams | NE (MAC array) tasks: kernel format, ActiveNE | static MACs / ExeCycle |
+|---|---|---|---|---|---|---|
+| E1 LUT4 sweep (13 functions) | 1,382 MB | bonded only (`--fdisable-bonded-networks=false`, `--enable-nonbonded-networks=false`, work stealing off) | 0, 1 | 26 (2 per function) | fp16-LUT4 461 tasks, all ActiveNE 4; fp16 971; e4m3 (FP8 P.V) 264 | fp16-LUT4 3.86 M |
+| E1 LUT6 sweep | 2,019 MB | bonded only | 0, 1 | 26 | fp16-LUT6 321, ActiveNE 4 | fp16-LUT6 3.69 M |
+| E1 LUT4 split (below) | 589 MB | bonded only | 0, 1 | 6 | fp16-LUT4 169, ActiveNE 4 | 4.71 M |
+| E2 W4A8 per token | 697 MB | bonded only | 0, 1 | 12 | int8-LUT4 84 (INT8 input, INT8 kernel), ActiveNE 4; fp16-LUT4 133 | int8-LUT4 9.43 M |
+| E2 W4A8 per tensor | 950 MB | bonded only | 0, 1 | 12 | int8-LUT4 92, ActiveNE 4; fp16-LUT4 133 | int8-LUT4 9.48 M |
+
+The served v8_dec8 chunk_L00-07 reads the same (bonded only, instances 0 and 1, 110 streams). ActiveNE is 4 on every
+LUT matmul task (16 NE blocks per half on the 13 Nov layout decode; the log2 reading of the field is inferred).
+ExeCycles are the compiler's static estimates in its own units, not clock cycles, so MACs per ExeCycle compare formats
+with each other, not with a clock. Same-shape comparison (E2 package against the FP16 one): a 16-row gate / up half
+(5,120 -> 8,704) costs 139.0 static cycles in FP16-LUT4 and 138.5 in INT8-LUT4 (5.1 M MAC / cycle each); at 64 rows
+426.3 against ~142 (6.7 M against 20.1 M MAC / cycle). **So the 2x path is engaged everywhere** (bonded over both
+instances; the INT8 rate 3x the FP16 one at 64 rows), but at 16 rows the compiler's own model is pinned at the
+kernel-fetch rate in both formats.
+
+**Not engaged evenly, and what fixes part of it:** in the bonded program each function has one stream per ANE
+instance, and the compiler splits only gate / up (two 8,704-wide halves) and o (two 2,560 halves) across the
+instances; q (12,288 wide), k, v and down (17,408 -> 5,120) and most Hadamards run on one instance. For the 16-row
+3-block call that is 4,400 static cycles on one stream against 2,013 on the other. Building q / k / v / down as two
+output-channel halves with separate constants (`SPLIT_OC=q,k,v,down`, exact per channel) moves them onto both:
+4,400 -> 3,675 on the busier stream. Measured (same session, outputs byte-identical to the unsplit package): 1 row
+4.650 -> 4.398 ms (-5.4%), 16 rows 5.610 -> 5.438 (-3.1%), 32 rows 6.623 -> 6.476 (-2.2%). Small, because the call
+is memory-bound: balancing compute between the instances does not add DRAM bandwidth.
+
+**A deployment gap found on the way:** the C4 quantizer seeds each matrix's Hadamard signs by its own tensor name, so
+gate and up (and q / k / v) see different rotations of the same input. A faithful ANE port of `adapter_lut4hg` needs
+7 activation rotations per block, not the 4 in D2's timing form (D2 and E2 timings are the 4-rotation form;
+`JSP_ROT=1` signs are timing seeds, not the quantizer's). Fix when it matters: re-run GPTQ with one sign vector per
+input (per block: attention input, o input, MLP input, down input).
+
+### E2. W4A8: INT4 (LUT4) weights x INT8 activations on the ANE for the adapter MLPs (`e2/`)
+
+**Form** (`v8/build_jsp_adapter_rows.py MLP=w4a8 | w4a8t`; 19 Nov `w8a8/lut3.py` recipe, which compiled and ran INT8 x
+INT8 on the served LUT3 FFN): one index tensor per matrix (the adapter_lut4hg 4-bit indices), the 16-entry palette as
+INT8 codes round(lut / s) with s = max|lut| / 127, through `lut_to_dense` + `constexpr_blockwise_shift_scale`, so the
+ANE expands the indices online and no INT8 weight is stored. Gate / up read the rotated RMSNorm output and down the
+rotated SwiGLU output as INT8 with a q / dq pair:
+- `w4a8`: per token, dynamic (lut3.AQd: x * 127 / peak, constant-scale quantize, the peak factor after the conv)
+- `w4a8t`: per tensor, one constant scale per MLP input (AQt)
+Attention projections stay FP16-activation LUT4. Calibration (`jetspec/e2_act_scales.py`, the 4.5 GB GPTQ inputs,
+held-out gsm8k traces 8-15, each matrix's own rotated basis, clip chosen by MSE): INT8 activation error 0.90%
+relative per token, 1.18% per tensor (clip 0.5-0.9 of max); `e2/scales/`.
+
+**HWX** (table in E1): every W4A8 package bonded over instances 0 and 1, the MLP matrices as `int8-LUT4` NE tasks
+(INT8 input, INT8 kernel, ActiveNE 4), the attention projections `fp16-LUT4`; HWX 697-950 MB for 3 blocks (FP16:
+589 MB single-shape), nothing expanded. Static rate: 16-row gate / up half 138.5 cycles INT8 vs 139.0 FP16; 64 rows
+~142 vs 426 (3.0x).
+
+**Correctness on the device** (`v8/e2_host_ref.py`, block 0's MLP at 16 rows, the timing script's seed-0 input):
+ANE FP16 vs host FP16 2.9e-3; ANE `w4a8` vs its own host graph 1.5e-2, and vs FP16 1.84% (host recipe 1.81%: the
+ANE's INT8 is as accurate as the recipe); ANE `w4a8t` vs its own host graph 1.3e-2. With the scales calibrated on
+the real adapter inputs the timing graph saturates (its synthetic activations are ~10x larger: real gate-input row
+rms 0.012, timing graph 0.13), so the per-tensor TIMING builds use scales matched to the timing graph's own data
+(`scales/ane_ascale_timing.json`: codes fill the range, dense, no zero runs). Real-data accuracy is the replay below.
+
+**Pass time, 16 rows, 8K** (one package of blocks 0-2, all row counts in one session; FP16 = the E1 LUT4 package):
+
+| rows | FP16 act (rep 1 / rep 2) | W4A8 per token | W4A8 per tensor, saturated scales | W4A8 per tensor, matched scales |
+|---|---|---|---|---|
+| 1 | 4.650 / 4.595 | 4.688 | 4.659 | 4.553 |
+| **16** | **5.610 / 5.575** | 5.876 (+5%) | 5.638 (+1%) | **5.533 (-1%)** |
+| 32 | 6.623 / 6.548 | 6.895 | 6.539 | 6.500 |
+| 64 | 9.810 / 9.764 | 9.306 (-5%) | 8.716 (-11%) | 8.626 (-12%) |
+| MLP alone, 16 | 1.227 / 1.225 | 1.288 | 1.207 | 1.216 |
+| MLP alone, 64 | 1.705 / 1.714 | 1.534 | 1.352 | 1.337 (-22%) |
+
+**The full 12-block pass, 16 rows** (`e2/full_*`: 4 packages of 3 blocks, one compile, the same session; each
+variant's 4 package medians summed; per-package spread 0.06 ms):
+
+| variant | 8K | vs FP16 | 32K |
+|---|---|---|---|
+| FP16 act (D2's form) | **22.11** (D2: 22.2) | | 36.88 (D2: 36.9) |
+| q / k / v / down split in halves (exact: outputs byte-identical) | **21.65** | -2.1% | 36.90 (one package 9.43 vs 9.14-9.17: noise) |
+| W4A8 per tensor | 22.06 | -0.2% | not built |
+| W4A8 per tensor + split | 21.75 | -1.6% | **36.61** (-0.7%) |
+
+**So W4A8 does not make the 16-row pass cheaper** (-0.2%, inside the run-to-run spread): the pass is memory-bound
+(E1), and INT8 MACs only shorten the compute it already hides under the weight stream. It pays from 64 rows (-12%
+per 3 blocks, -22% for an MLP alone). Per-token scaling costs +5% at 16 rows (the per-token peak and its rescale).
+
+**Correction (Anemll, 20:1x): the W4A8 above is not the W4A8 construction.** Its weights are a 4-bit palette of
+INT8 values (`lut_to_dense` + `constexpr_blockwise_shift_scale`). Anemll's form (gist 49e219448ad350ef67ff4bfdcb9ebd8c:
+W8A8 = INT8 constexpr weights + quantize / dequantize INT8 activations): INT4 constexpr weights (values -8..7, one
+shared scale, the row scale after the conv) x INT8 activations through q / dq. Both were built and compared.
+
+**A/B, block 0's MLP alone (267 M weights), one package per form, all bonded over instances 0 and 1** (`e2/ab_*`,
+`v8/build_jsp_adapter_rows.py` MLP = fp16 / w4a8t / w8a8t / w4a8q / w4a16q):
+
+| weights x activations | HWX NE kernel (MLP tasks) | HWX MB | 16 rows | 64 rows | 256 rows |
+|---|---|---|---|---|---|
+| 4-bit palette -> FP16 x FP16 (served form) | fp16 Pal=1(4bit), FP16 input | 363 | 1.170 ms | 1.698 | 6.982 |
+| 4-bit palette -> INT8 x INT8 (the form above) | int8 Pal=1(4bit), INT8 input | 405 | 1.212 | 1.342 | 19.889 |
+| dense INT8 (the same values) x INT8 | int8 Pal=0, INT8 input | 745 | 2.003 | 2.135 | 19.899 |
+| **INT4 constexpr x INT8 q / dq (Anemll's form)** | **int8 Pal=1(4bit), INT8 input** | 405 | 1.241 | 1.370 | 18.394 |
+| INT4 constexpr x FP16 | int8 Pal=1(4bit), FP16 input | 405 | 1.251 | 1.808 | 7.064 |
+
+- **Anemll's form compiles to the same program as the palette form:** the same 100 NE tasks (`KernelCfg Fmt=int8
+  Pal=1(4bit)`, INT8 input), the same static cycles, the same HWX size, and times within noise. The M6 ANE has no
+  separate INT4 x INT8 MAC: an INT4 constant is stored as 4-bit indices into an INT8 table and multiplied INT8 x INT8.
+- **The 4-bit table is not slower than dense INT8:** outputs byte-identical (same values); dense INT8 is slower at 16
+  / 64 rows only because it reads 2x the bytes (267 MB: 133 / 125 GB/s), and equal at 256 rows.
+- **The 256-row INT8 cliff is a tiling choice, not the MAC rate:** the HWX puts the whole INT8 down projection
+  (17,408 -> 5,120) on one instance in 32 tasks of 32 rows x 1,280 channels that re-stream the weights (17,892 static
+  cycles on one stream, 1,625 on the other); FP16 at 256 rows splits evenly (6,317 / 6,179). Untested fix: a K split
+  of the INT8 down (it fixed the INT8 FFN tiling on 16 Nov).
+
+**Higher speed confirmed where the work is compute-bound** (`v8/e2_int8_peak.py`, Anemll's gist chain on our Core AI
+path: 64 x 1x1 conv 512 x 512 on 64 x 64, dense random weights, q / dq before every conv; `e2/peak_gist64/`):
+
+| form | ms | TOPS | vs FP16 | HWX NE kernel | static MACs / ExeCycle |
+|---|---|---|---|---|---|
+| FP16 dense | 4.024 | 34.2 | 1.00 | fp16, ActiveNE 4 | 10.3 M |
+| LUT4 palette, FP16 act | 3.983 | 34.5 | 1.01 | fp16 Pal=1(4bit) | 10.3 M |
+| W8A8 (INT8 constexpr + q / dq) | 2.418 | 56.8 | **1.66** | int8 | 20.4 M |
+| W4A8 (INT4 constexpr + q / dq) | 2.354 | 58.4 | **1.71** | int8 Pal=1(4bit) | 20.4 M |
+
+So on the M6 (both clusters bonded) INT4 x INT8 runs at the INT8 double rate, 1.71x FP16, and a 4-bit palette
+costs nothing against dense weights. The JetSpec++ adapter at 16 rows cannot use it: its pass is bound by reading
+the weights (E1). Its MLP alone takes ~1.2 ms to read 134 MB in every form, so W4A8 gains nothing at 16 rows, 1.24x
+at 64 rows (1.70 -> 1.37 ms: compute shrinks to the read floor) and would need about 256+ rows (with the down K
+split) to approach 1.7x.
+
+**Acceptance with INT8 MLP activations** (replay, adapter_lut4hg weights = the palette values, head bf16, each
+matrix's own rotated basis, `jsp_replay.py JSP_ACTQ`; hook verified: W x' = W' q(R x) to 7e-7; every trace lossless):
+
+| J0-R0 tok / round | gsm8k | humaneval | mbpp |
+|---|---|---|---|
+| bf16 | 6.12 | 8.59 | 6.64 |
+| LUT4 (D2) | 6.07 | 8.53 | 6.59 |
+| LUT4 + INT8 act per token | 6.08 | 8.50 | 6.59 |
+| LUT4 + INT8 act per tensor (calibrated) | 6.10 | 8.56 | 6.64 |
+
+INT8 activations cost no acceptance. A uniform-INT4 GPTQ of the MLPs (Anemll's weight form) was started and stopped
+at Anemll's request (confirm the speed first): 15 of 36 matrices in `jetspec_pp/adapter_int4hg` (partial, kept, not
+used). The J3-R3 W4A8 replay was stopped at its start for the same reason.
+
+### E3. Jet Flash with the best of E2 (`e3/`)
+
+The best 16-row pass from E2 is the q / k / v / down split at FP16 activations: 21.65 ms at 8K, 36.90 at 32K (W4A8 +
+split 21.75 / 36.61, the same within noise). `jetspec/e3_project.py` (d2_project.py's model: head 14.8 ms and decoder
+7.1 PROJECTED, 16-row verify = measured ratio x the served 8-row verify, DFlash2 measured), LUT4 acceptance
+(`e3/projection_ANE_split.md`):
+
+| entry | schedule | gsm8k | humaneval | mbpp |
+|---|---|---|---|---|
+| 8K | J0-R0 | 43.3 vs 56.5 (-23%) | 59.8 vs 67.8 (-12%) | 46.6 vs 54.7 (-15%) |
+| 8K | J3-R3 | 36.0 (-36%) | 45.6 (-33%) | 34.4 (-37%) |
+| 32K | J0-R0 | 34.1 vs 50.2 (-32%) | 47.0 vs 60.3 (-22%) | 36.7 vs 48.7 (-25%) |
+| 32K | J3-R3 | 27.5 (-45%) | 34.7 (-43%) | 26.2 (-46%) |
+
+D2's estimate moves by +0.2 tok/s. **What would close the gap** (PROJECTED, 8K, acceptance assumed equal to LUT4's,
+the read rate of the served VQ3 FFN, 136 GB/s; the head scaled with the same bits):
+
+| drafter weights | adapter / head pass | J0-R0 vs DFlash2 | J3-R3 vs DFlash2 |
+|---|---|---|---|
+| LUT4 (measured adapter) | 21.6 / 14.8 ms | -12 to -23% | -33 to -37% |
+| VQ3 (3 bits per weight) | ~16.7 / ~9.1 | -4 to -17% | -19 to -24% |
+| VQ2 (2 bits per weight) | ~11.7 / ~7.5 | -12 to +2% | -8 to -14% |
+| a free drafter | 0 / 4.3 | 0 to +17% | +25 to +35% |
+
+To beat DFlash2 at J3-R3 (where the +67% tokens per round are), each adapter + head pass must cost about 13-15 ms;
+LUT4 is ~36, VQ3 ~26, VQ2 ~19. **Decision (Anemll, 20 Nov evening): JetSpec++ is parked until there are two execution
+units** (two machines over RDMA): on one M6 the 6.2 B-parameter drafter and the 103 ms 16-row verify share one
+memory bus, so drafting cannot be hidden.
+
+**Forge:** stopped 18:40 for batch E, restored 20:27 (pid 88551, `v8_server_dec8_qk.sh`, build v8_dec8):
+`bench/final_served4` humaneval 1 / mt-bench 2 byte-identical to final_served3 (sha 1681b92d273f64ad /
+3b060108f4af10b0). **Scratch:** every E1 / E2 package deleted with its Core AI entries (one mistake on the way, fixed:
+`e_forge.log`); internal disk 29 GB free.
