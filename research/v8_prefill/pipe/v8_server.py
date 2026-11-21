@@ -44,6 +44,12 @@ V8_TAIL_T = int(os.environ.get("V8_TAIL_T", "8"))   # a last pair with <= this m
 DEC_SNAP = int(os.environ.get("V8_DEC_SNAP", "256"))   # a snapshot every this many decoded tokens (0: off)
 DEC_KEEP = int(os.environ.get("V8_DEC_KEEP", "3"))     # decode snapshots kept (the latest; about 97 MB each)
 TEXT_MATCH = os.environ.get("V8_TEXT_MATCH", "1") == "1"   # reuse the state's own tokens where the prompt's text equals it
+# 21 Nov 2026 (fresh vs used server): the 'system' snapshot keeps the drafter's ring only as slot positions; a restore
+# keeps every slot whose position still matches, so after another prompt (e.g. a cold request) rewrote those positions
+# the drafter drafts from that prompt's rows (or, after a reset, from none). DRAFT_RING_SNAP: off (default, unchanged),
+# log (copy the snapshot's visible ring slots; at restore log kept / other content / hidden), fix (log + write them back).
+RING_SNAP = os.environ.get("DRAFT_RING_SNAP", "off")
+RING_KEYS = ("system",)   # the only snapshot another prompt's rows can leave in place ('sysk' is its copy; _prune drops the rest)
 
 
 def _bytes_to_unicode():
@@ -58,6 +64,39 @@ def _bytes_to_unicode():
 
 
 class V8Engine(S.Engine):
+    # ---- drafter ring in the 'system' snapshot (DRAFT_RING_SNAP) ----
+    def _ring_save(self, key):
+        d, sn = self.drafter, self.snaps.get(key)
+        if RING_SNAP == "off" or d is None or key not in RING_KEYS or sn is None or "draft" not in sn:
+            return
+        sl = np.nonzero(sn["draft"][0] >= 0)[0]
+        sn["draft_ring"] = (sl, [(k_[:, sl].copy(), v_[:, sl].copy()) for k_, v_ in d.ring])
+
+    def _snapshot(self, key, ids):
+        super()._snapshot(key, ids)
+        self._ring_save(key)
+
+    def _ring_restore(self, snap, cur):
+        d, rs = self.drafter, snap.get("draft_ring")
+        if d is None or rs is None or cur is None:
+            return
+        sl, kv = rs
+        sp = snap["draft"][0]
+        kept = cur[sl] == sp[sl]
+        other = np.zeros(len(sl), bool)
+        for (k_, v_), (ks, vs) in zip(d.ring, kv):
+            for x_, y_ in ((k_, ks), (v_, vs)):   # axis 1 = slot (as _commit indexes the ring)
+                other |= np.moveaxis(x_[:, sl] != y_, 1, -1).reshape(-1, len(sl)).any(0)
+        other &= kept
+        if RING_SNAP == "fix":
+            for (k_, v_), (ks, vs) in zip(d.ring, kv):
+                k_[:, sl] = ks
+                v_[:, sl] = vs
+            d.slot_pos[sl] = sp[sl]
+        S.log(f"drafter ring ({RING_SNAP}): snapshot slots {len(sl)}, kept by position {int(kept.sum())} "
+              f"({int(other.sum())} hold another prompt's rows), hidden {int((~kept).sum())}"
+              f"{' -> all written back' if RING_SNAP == 'fix' else ''}")
+
     def __init__(self, a, v):
         super().__init__(a)
         from v8_engine import V8Prefill
@@ -373,9 +412,12 @@ class V8Engine(S.Engine):
               f"{1e3 * (time.perf_counter() - t):.0f} ms): this prompt rewrites them")
 
     def _restore(self, snap):
+        cur = self.drafter.slot_pos.copy() if RING_SNAP != "off" and self.drafter is not None else None
         kv = snap.get("kv")
         if kv is None:
-            return super()._restore(snap)
+            super()._restore(snap)
+            self._ring_restore(snap, cur)
+            return
         n_ = len(snap["ids"])
         try:   # its rows come back from the copy, whatever the cache kept: first a context entry that holds them (a
             # summary request since may have shrunk the cache below them)
@@ -393,6 +435,7 @@ class V8Engine(S.Engine):
             if self.v8 is not None:
                 self.v8.rewind(0)
             return
+        self._ring_restore(snap, cur)
         t = time.perf_counter()
         self._kv_rows(n_, put=kv)
         if self.v8 is not None:
@@ -438,6 +481,7 @@ class V8Engine(S.Engine):
                 self.snaps[key] = {"ids": list(ids[:pos]), **snap}
                 if self.drafter is not None:
                     self.snaps[key]["draft"] = (self.drafter.slot_pos.copy(), list(self.drafter.pending))
+                    self._ring_save(key)
                 done.add(key)
                 S.log(f"v8: snapshot '{key}' at {pos} (cut {cut}), taken during the run")
         st = self.v8.run(ids[i:end], i, ingest, snap_at=sorted(sn), on_snap=on_snap)
@@ -598,6 +642,7 @@ def main():
                    "v8/build_dec8_chunk.py): ANE parts around a GPU attention where it is faster (env V8_DEC8)")
     v, rest = p.parse_known_args()
     sys.argv = [sys.argv[0]] + rest
+    print(f"[{time.strftime('%H:%M:%S')}] drafter ring snapshot: {RING_SNAP} (DRAFT_RING_SNAP; 'system' keys {RING_KEYS})", flush=True)
     sys.stdout, sys.stderr = S.SurvivingStream(sys.stdout), S.SurvivingStream(sys.stderr)
     import coreai_compile_guide as G
     G.watch_parent()

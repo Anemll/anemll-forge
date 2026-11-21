@@ -7,7 +7,10 @@ Decision (Anemll, 21 Nov 02:30): serve tree8 (v8_dec8tx, corrx0, TREE=1, policy 
 
 - Forge on 127.0.0.1:8765 serves tree8 from the standard serving launcher `pipe/v8_server_dec8_qk.sh`, using the
   launcher defaults only (no tree or lookup env). pid 55758 since 02:43:29.
-- Decode tok/s, realistic 2K rung: **45.80** vs chain 42.74 (+7.2%). The U1 tree8 arm gave 44.70.
+- Decode tok/s, realistic 2K rung: 45.80 vs chain 42.74. **Correction (03:30):** that run was on a used server, and
+  its replies differ from a fresh start (see "Fresh vs used server" below). With the ring fix, a used server gives
+  the fresh replies at **44.91** (U1 tree8, fresh: 44.70). Like for like against the fresh chain that is **+4.6 to
+  +5.1%**, not +7.2%.
 - Code set: **40.66** vs chain 39.46 (+3.0%). Agent set: **54.04** vs chain 54.48 (-0.8%).
 - Smoke (realistic 2K, positions 1 and 8): a fresh launch reproduces itself and the U1 tree8 arm exactly (checksum
   29aef2ec9db18a3f). The second run on the same server also reproduces exactly (f7f2e615cb9623bf). The chain
@@ -75,7 +78,7 @@ arm checked libdec_gpu_clk.dylib and mode=chain instead. The keep-alive hold of 
 
 | set | chain (U1, 20 Nov) | tree8 (U1, 20 Nov) | tree8 served (21 Nov) | vs chain | tok/verify served |
 |---|---|---|---|---|---|
-| realistic 2K | 42.74 | 44.70 | **45.80** | +7.2% | 5.007 |
+| realistic 2K | 42.74 | 44.70 | 45.80 (used server); **44.91** with the ring fix (= the fresh replies) | +7.2%; **+5.1%** like for like | 5.007; 4.862 |
 | code (2.1-4.6K prompts) | 39.46 | 41.01 | **40.66** | +3.0% | 4.491 |
 | agent (3.2-4.5K prompts) | 54.48 | 54.71 | **54.04** | -0.8% | 5.562 |
 
@@ -88,3 +91,70 @@ The 54.5 / 39.5 chain baselines in the request are read as U1's agent (54.48) an
   (third same-server run, chain fresh + same, tree8 fresh + same; leaves tree8 serving).
 - Raw output: `serve_tree8.log`, `det_tree8.log`, `bench/*.json|log`, `ops.log`, `*.driver.log`. Server logs are
   in coreai_seg_logs/v8_server.<timestamp>.log; the live one is v8_server.log.
+
+## Fresh vs used server: root cause (Anemll, 03:17; ring/, bench/ring_*)
+
+**Cause.** The drafter's context ring is restored by slot position only.
+- The 'system' snapshot, and 'sysk', its copy with KV rows, store the drafter as `slot_pos` plus the pending
+  queue. They do not store the ring's K / V.
+- `_restore` keeps every slot whose position still equals the snapshot's (qwen38_server `Engine._restore`:
+  `np.where(d.slot_pos == slot_pos, slot_pos, -1)`).
+- Another prompt can rewrite those slots at the same positions. On a used server that is tree_bench's "Say OK."
+  warm-up, a cold request with no system prompt: `drafter.reset()`, then its rows 0-6 go into slots 0-6.
+- A later restore of 'system' or 'sysk' then keeps those slots as valid. The drafter drafts the next request with
+  the warm-up's rows at positions 1-2 instead of the system prompt's.
+- Different drafts give a different verify split. The target's greedy text depends on the split at near ties
+  (D4), so the reply changes.
+- The target model state itself is restored correctly: the same prefill calls and the same DeltaNet snapshot.
+  Seed, sampling, presence penalty and keep-alive play no part: greedy requests skip the sampler (`dist` returns
+  None at temperature 0).
+
+**Is it a bug?** Yes, in the prompt cache's drafter restore. It is not in the model math and not in tree8.
+- The chain and tree8 share it.
+- On a fresh server, or when the previous prompts had the same system prompt (U1's rung order), the kept slots hold
+  the same tokens, so it is invisible.
+- Real-world trigger: any request that does not start with the 'system' snapshot's tokens, followed by one that
+  restores 'system' / 'sysk' (Pi's summary request, another conversation, a title request).
+- With a long system prompt, up to the last 2048 rows before the cut (the drafter window) would be another prompt's.
+  The effect on acceptance in that case was not measured.
+
+**Evidence** (each arm is a fresh launch of the served launcher with tree8 unless noted; smoke = realistic 2K
+positions 1 and 8; the usual banner was checked, and the server log shows `drafter ring snapshot: <mode>`):
+
+| arm | DRAFT_RING_SNAP | run 1 (fresh) | run 2 (same server) | 2K rung on the used server vs U1 tree8 (fresh) | run 3 |
+|---|---|---|---|---|---|
+| this morning (served, before the switch existed) | | 29aef2ec9db18a3f | f7f2e615cb9623bf | 4/9 identical (068b970f1430c571) | |
+| ring_log (control) | log | 29aef2ec9db18a3f | f7f2e615cb9623bf | 4/9 (068b970f1430c571, = this morning) | |
+| ring_fix | fix | 29aef2ec9db18a3f | **29aef2ec9db18a3f** | **9/9** (576e79b18042345a; tok/verify per request = U1's) | **29aef2ec9db18a3f** |
+| chain, det (no switch) | | c4c4be331d40e7f1 | fce3854ba8d742dd | | |
+| chain, ring_fixc | fix | c4c4be331d40e7f1 | **c4c4be331d40e7f1** | | |
+| ring_served_final | off (served) | 29aef2ec9db18a3f | | | |
+
+- The log arm's restore lines, on a used server after the warm-up, read `snapshot slots 3, kept by position 3 (2 hold
+  another prompt's rows), hidden 0`. When the previous request shared the system prompt they read `0 hold another
+  prompt's rows`.
+- The 11-token system prompt flushes 3 rows to the ring before the cut; the other 8 stay in the pending queue, which
+  the snapshot does keep. Slot 0 (`<|im_start|>`) is the same token in both prompts, so only positions 1-2 differ.
+- Off and log produce identical output, so the control reproduces this morning's sequence exactly. The history
+  effect is deterministic.
+
+**Residual, not the ring.** A long prompt on a used server restores 11 cached tokens. Its V8 prefill then starts at
+an aligned point instead of position 0, a different target prefill slicing.
+- The chain's code:1 (279 tokens) shows it: tok/verify 7.62 fresh and 7.80 used, with or without the fix. The text
+  is identical in every run.
+- This comes with caching by design: the cached prefix was computed in one slicing.
+
+**Smallest fix** (prototype in `pipe/v8_server.py` behind `DRAFT_RING_SNAP`, default **off** = the served behavior,
+checked: ring_served_final = fresh):
+- `fix` copies the ring K / V of the slots the 'system' snapshot can see into the snapshot (`draft_ring`), and
+  writes them back on restore. 'sysk' carries the same arrays.
+- The code is about 30 lines (`_ring_save`, `_ring_restore`).
+- Memory: 20 KB per visible slot (5 layers x K, V x 8 x 128 fp16), at most 40 MB at 2048 slots. Here: 3 slots, 60 KB.
+- Only 'system' needs it: `_prune` drops every other snapshot once another prompt rewrites its KV rows.
+- It changes served replies on a used server, back to the fresh-server ones, so it is not applied. To serve it:
+  `DRAFT_RING_SNAP=fix` in the serving launcher (Anemll's call).
+- The release server (anemll-forge `scripts/qwen38_server.py`, `Engine._snapshot` / `_restore`) has the same
+  position-only restore. It is not changed here: that file has uncommitted edits.
+
+Files: `serve_t/ring_snap.sh` (the driver), `ring/ring.log` (shas, banners, every restore line), `ring/*.driver.log`,
+`bench/ring_*`, `pipe/v8_server.pre_ringsnap.py` (before the switch).
