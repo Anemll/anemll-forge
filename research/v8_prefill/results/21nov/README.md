@@ -226,3 +226,31 @@ the server's thinking defaults, 384 tokens; Pi idle by agreement, checked in the
   it now keys by set too.
 - Served: forge pid 61702 since 10:32 (banner `sampled=on`, ring fix, tree8, lookup off).
 - Not done yet: the 9-prompt used-vs-fresh greedy check of 07:27 (stopped twice by live Pi traffic).
+
+## 10:48 to 10:56: used vs fresh (9 prompts) and the chat:2 leftover: stale KV rows (`leftover/`)
+
+Anemll 10:45, Pi idle. Driver `serve_t/leftover.sh`, log `leftover/leftover.log`. Realistic 2K rung, all 9 prompts,
+greedy, served config (tree8, TREE_SAMPLED=1, lookup off, DRAFT_RING_SNAP=fix).
+
+| run | state before the rung | identical to the fresh rung |
+|---|---|---|
+| lo_fresh_2k | fresh launch | (reference; = u1_tree8 of 20 Nov: 9/9) |
+| lo_used_ab | the server after the sampled A/B (8K / 32K / code / agent) | **2/9** |
+| lo_used_ctl | fresh launch + its rung + one long sampled request (8k task 0, seed 777, 1500 tokens, past 8K) | **1/9** |
+| lo_scrub_fresh_2k | fresh launch with COLD_SCRUB=kv | 9/9 |
+| lo_scrub_used_2k | the same long request (identical output, a6a5c4bb) on the COLD_SCRUB=kv server | **9/9** |
+
+**Cause:** KV cache rows past the current position. A cold start resets the DeltaNet states and the drafter, not the
+KV rows; they are "masked by position". A fresh process has them at 0 with the unused scale (1.0); after a longer
+request they hold that request's rows, and they change a later request's numbers enough to flip near-ties. Putting
+every KV row back in its fresh state on a cold start (`COLD_SCRUB=kv`, `pipe/v8_server.py` `_cold_scrub`: 258 MB at
+the 8K entry, 2-8 ms) makes a used server give the fresh replies 9/9. So the masking of rows past the position is not
+exact somewhere; which kernel leaks (bridge prefill, chain verify, tree entry, GPU split) is not localized yet.
+- The ring fix (07:40) holds, but it only covered histories of short prompts; after long requests the KV leftover
+  dominates (2/9).
+- The same leak can touch warm requests: after a restore to a shorter snapshot, the rows past it hold the abandoned
+  continuation. The cold-start scrub does not cover that.
+- Served stays as it was (no COLD_SCRUB): the fix changes served replies on used servers (Anemll's call). Smallest
+  fix: `COLD_SCRUB=kv` in the launcher (cold starts). Fuller fix: also reset rows [n, high-water mark) after a
+  restore. Better still: find the kernel whose mask leaks (a one-layer probe, zero vs stale rows past the position).
+- Served restart 10:55:50, forge pid 73029; smoke (positions 1, 8) 29aef2ec9db18a3f.

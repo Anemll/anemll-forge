@@ -50,6 +50,9 @@ TEXT_MATCH = os.environ.get("V8_TEXT_MATCH", "1") == "1"   # reuse the state's o
 # log (copy the snapshot's visible ring slots; at restore log kept / other content / hidden), fix (log + write them back).
 RING_SNAP = os.environ.get("DRAFT_RING_SNAP", "off")
 RING_KEYS = ("system",)   # the only snapshot another prompt's rows can leave in place ('sysk' is its copy; _prune drops the rest)
+# 21 Nov 2026 research switch (chat:2 leftover): COLD_SCRUB=kv makes a cold start also put every KV row back in its fresh
+# state (K / V int8 0, scales KV_UNUSED_SCALE), as a new process has it. Off (empty) by default: the served behavior.
+COLD_SCRUB = set(x for x in os.environ.get("COLD_SCRUB", "").split(",") if x)
 
 
 def _bytes_to_unicode():
@@ -365,6 +368,20 @@ class V8Engine(S.Engine):
             S.log(f"snapshots dropped (their KV rows were rewritten): {', '.join(sorted(bad))}")
 
     # ---- the 'system' snapshot across a prompt that rewrites its KV rows (a summary request) ----
+    def _cold_scrub(self):
+        """COLD_SCRUB=kv: every KV row of every attention layer back to a fresh process's state (research)."""
+        if "kv" not in COLD_SCRUB or not hasattr(self.model, "kv"):
+            return
+        t, nb, unused = time.perf_counter(), 0, float(os.environ.get("KV_UNUSED_SCALE", "1"))
+        for d in self.model.kv:
+            for name, val in d.items():
+                mm = re.fullmatch(r"(k|v|ks|vs)(\d+)_(\d+)", name)
+                if mm:
+                    val[1][:] = unused if mm[1] in ("ks", "vs") else 0
+                    nb += val[1].nbytes
+        S.log(f"cold scrub (COLD_SCRUB=kv): KV rows reset to the fresh state ({nb / 2 ** 20:.0f} MB, "
+              f"{1e3 * (time.perf_counter() - t):.0f} ms)")
+
     def _kv_rows(self, n, put=None):
         """KV rows [0, n) of every attention layer's segments: a copy {(chunk, name): array} (put None), or written
         back from one. {} without a segmented KV history (nothing is kept then)."""
@@ -549,6 +566,7 @@ class V8Engine(S.Engine):
             if self.drafter is not None:
                 self.drafter.reset()
             self.fed, reused, how, cold = [], 0, "cold (no reusable state)", True
+            self._cold_scrub()
         if self.v8 is not None:
             self.v8.rewind(reused)   # the KV rows from here on are rewritten: the GPU's V copy is valid below at most
         S.log(f"request: prompt {len(ids)} tok | cache: {how}, reused {reused} | prefilling {len(ids) - reused} tok ...")
@@ -646,7 +664,8 @@ def main():
                    "v8/build_dec8_chunk.py): ANE parts around a GPU attention where it is faster (env V8_DEC8)")
     v, rest = p.parse_known_args()
     sys.argv = [sys.argv[0]] + rest
-    print(f"[{time.strftime('%H:%M:%S')}] drafter ring snapshot: {RING_SNAP} (DRAFT_RING_SNAP; 'system' keys {RING_KEYS})", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] drafter ring snapshot: {RING_SNAP} (DRAFT_RING_SNAP; 'system' keys {RING_KEYS})"
+      f"{' | cold scrub: ' + ','.join(sorted(COLD_SCRUB)) if COLD_SCRUB else ''}", flush=True)
     sys.stdout, sys.stderr = S.SurvivingStream(sys.stdout), S.SurvivingStream(sys.stderr)
     import coreai_compile_guide as G
     G.watch_parent()

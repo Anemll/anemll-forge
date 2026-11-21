@@ -82,8 +82,9 @@ RR = `/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/
 - **Power:** about 22-25 W total during decode (CPU + GPU about 2 W): 0.48-0.62 J per generated token greedy, 0.73-0.88
   Pi-like.
 - **Known open items:**
-  - (a) After a long sampled Pi request, a cold 74-token greedy request differs from a fresh process. The drafter
-    ring is not the cause.
+  - (a) Stale KV rows past the position change results (used server 1-2/9 identical to fresh; 9/9 when a cold start
+    resets them, `COLD_SCRUB=kv`; results/21nov/leftover/). The masking is not exact somewhere; the kernel is not
+    localized, and warm restores to a shorter snapshot are not covered.
   - (b) The release server (anemll-forge-v02 / anemll-forge `qwen38_server.py`) can restore a 'system' snapshot whose
     target KV rows another prompt overwrote. It has no `_prune` / 'sysk'.
   - (c) Sampled tree8 reuses the greedy-calibrated tree (tau 1.5, top-4 children per node).
