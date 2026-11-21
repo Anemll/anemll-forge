@@ -127,10 +127,10 @@ class Tree:
         self.rec = [] if LOGDIR else None
         self.log(f"tree: BANNER mode=tree8 policy={POLICY}{f' cap={CAP}' if POLICY == 'cap' else ''} topc={TOPC} tau={TAU} t8 contexts "
                  f"{[c // 1024 for c in self.ctx_t8]}K | split tree {'on (tdva/tdvba + dec_set_tree)' if self.split_ok else 'OFF'}"
-                 f" | build {mb.root}")
+                 f" | build {mb.root} | lookup {'on (NGRAM_DRAFT=' + str(eng.ngram.base) + ': lookup cycles keep the chain)' if eng.ngram is not None else 'off'}")
 
     def _req_stats(self):
-        return {"cycles": 0, "tree": 0, "chain": 0, "other": 0, "tok": 0, "tree_tok": 0, "chain_tok": 0,
+        return {"cycles": 0, "tree": 0, "chain": 0, "other": 0, "lookup": 0, "tok": 0, "tree_tok": 0, "chain_tok": 0,
                 "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0}
 
     # ---- split path (dec8): tdva / tdvba + GPU attention with the tree mask ----
@@ -278,8 +278,14 @@ class Tree:
         mb, d = self.mb, eng.drafter
         temp = samp[0]
         lazy = hasattr(d, "flush")
-        if temp > 0 or not lazy or eng.ngram is not None:   # sampling / prompt lookup: the served chain
+        if temp > 0 or not lazy:   # sampling: the served chain
             self.req["other"] += 1
+            return orig(anchor, samp, rng, seen, hist, dry)
+        # U1 (20 Nov 2026): prompt lookup per cycle. When the ngram drafter (NGRAM_DRAFT) has a proposal for this anchor
+        # (its propose() is pure: the same answer the served cycle will get), the cycle is the served lookup chain
+        # (lookup drafts, no drafter call); otherwise the tree. Before U1 any ngram drafter turned the tree off.
+        if eng.ngram is not None and eng.tokens is not None and eng.ngram.propose(eng.tokens, anchor) is not None:
+            self.req["lookup"] += 1
             return orig(anchor, samp, rng, seen, hist, dry)
         p = mb.pos
         t0 = time.perf_counter()
@@ -401,7 +407,7 @@ class Tree:
             tv = lambda k: q[f"{k}_tok"] / max(1, q[k])  # noqa: E731
             self.log(f"tree: {q['cycles']} cycles: tree {q['tree']} ({tv('tree'):.2f} tok/verify, "
                      f"{q['tree_ms'] / max(1, q['tree']):.1f} ms), chain {q['chain']} ({tv('chain'):.2f} tok/verify, "
-                     f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}; accepted path off the chain rows "
+                     f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}, lookup {q['lookup']}; accepted path off the chain rows "
                      f"in {q['nonprefix']}")
         if self.rec:
             od = Path(LOGDIR); od.mkdir(parents=True, exist_ok=True)

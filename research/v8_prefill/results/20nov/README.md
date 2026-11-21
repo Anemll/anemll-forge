@@ -1327,3 +1327,96 @@ By category (`near`, tokens per cycle vs the chain, 2K / 8K / 32K):
 **Decision per the T4 gate (Anemll: build only if the replay confirms at least +10% tokens per cycle overall):**
 stopped before the build and reported. The lookup lever by itself is +4-7%; the full policy clears +10% only in the
 central estimate, and most of it is tree8.
+
+## U. Batch U: measured tree8 + lookup end to end, and why 16 rows cost us (20 Nov ~22:2x-23:3x; plan `u/PLAN_U.md`)
+
+### U1. Chain vs tree8 vs prompt lookup, end to end (`bench/u1_*`, `u/u1_table.json`)
+
+Four forge launches (`bench/tree/run_arm.sh`; each arm's banner checked before timing: v8 / dec8 dylib, tree mode and
+build, the engine's prompt-lookup line), each on the realistic 9-prompt rungs 2K / 8K / 32K / 64K and then two new
+sets on the same server (`bench/tree/make_prompts_u1.py` -> `u1_code_agent.json`, real files of the forge checkout,
+no user data): **code** (a source file + an edit that makes the answer reproduce the file) and **agent** (Pi's tool
+shape: system prompt, the user's change request, the assistant's read call and its result; the model answers with
+an edit call that copies the file). Greedy, thinking off, 320 tokens.
+- `chain`: the served configuration (`v8_server_dec8_qk.sh`, build v8_dec8)
+- `chainlk`: the same + the engine's prompt lookup (`NGRAM_DRAFT=6`, ngram_draft.py: a suffix match of 6+ tokens,
+  adaptive, replaces the cycle's 7 DFlash2 drafts and skips the drafter call)
+- `tree8`: `v8_server_tree.sh` on v8_dec8tx (corrx0 conv), `TREE_POLICY=branched`
+- `tree8lk`: tree8 + lookup: `pipe/tree_verify.py` now takes a lookup cycle when the ngram drafter proposes (its
+  `propose()` is pure) and the tree otherwise (before U1 any ngram drafter turned the tree off; backup
+  `tree_verify.pre_lookup.py`)
+
+tok/s (token-weighted) and its change vs `chain`, tokens per verify, replies byte-identical to `chain`'s:
+
+| set | chain | chainlk | tree8 | tree8lk |
+|---|---|---|---|---|
+| 2K | 42.74, 4.57 | 43.10 (+0.8%), 4.51, 8/9 | 44.70 (+4.6%), 4.86, 3/9 | **45.10 (+5.5%)**, 4.82, 4/9 |
+| 8K | 48.21, 5.09 | 48.41 (+0.4%), 5.02, 7/9 | **51.33 (+6.5%)**, 5.51, 3/9 | 50.07 (+3.9%), 5.29, 3/9 |
+| 32K | 44.25, 5.16 | 44.11 (-0.3%), 5.06, 7/9 | **46.40 (+4.9%)**, 5.52, 4/9 | 46.05 (+4.1%), 5.39, 4/9 |
+| 64K | 38.58, 5.04 | 38.49 (-0.2%), 4.96, 8/9 | 39.30 (+1.9%), 5.28, 5/9 | **39.43 (+2.2%)**, 5.22, 6/9 |
+| code | 39.46, 4.21 | 79.34 (**+101%**), 7.56, 8/9 | 41.01 (+3.9%), 4.51, 8/9 | **79.68 (+102%)**, 7.60, 8/9 |
+| agent | 54.48, 5.45 | 54.87 (+0.7%), 5.12, 7/9 | 54.71 (+0.4%), 5.61, 6/9 | 54.32 (-0.3%), 5.20, 8/9 |
+
+- **Lookup cycles:** 11-15% of the realistic set's cycles, 91-92% on code, 39-40% on agent.
+- **Lookup doubles code** (DFlash2 alone accepts 4.2 tokens per verify on full-file copies; lookup fills the block,
+  7.6), is neutral on the realistic set (lookup cycles skip the drafter, about -2 ms a cycle, at slightly lower
+  acceptance) and on agent edits (5.45 -> 5.12 tokens per verify at 108 -> 104 ms).
+- **tree8 is +1.9 to +6.5% on the realistic set**, as on 20 Nov; tok/verify reproduces d4_branched exactly
+  (deterministic run to run). With lookup the two combine on code (+102%) but tree8lk trails tree8 at 8K / 32K by
+  1-2.5%: lookup cycles keep the chain, so they lose the tree's gain on the cycles where both apply.
+- **Identity:** chain is byte-identical to chain_v1 (tok/verify equal at every rung). Any other arm changes the
+  cycle split, and with it 1-6 of 9 replies (D4: split dependence).
+- **Bench fix on the way:** forge puts the lookup summary inside its per-request line's parenthesis; tree_bench's
+  regex missed those lines (the chainlk bench summaries were wrong: 24.9 / 22.0 / 24.4 / 17.9 tok/s). The regex is
+  fixed; chainlk and tree8lk are re-read from their server logs (`bench/tree/u1_reparse.py`, every line matched by
+  its token count; `u/u1_chainlk.server.log`, `u/u1_tree8lk.server.log`).
+
+### U2. Where a 16-row verify's extra cost goes (`u/decomp/`, `v8/build_u2_decomp.py`, scratch, deleted)
+
+One target group (layers 0-3: three DeltaNet layers + the attention layer + their FFNs, the served weights), split
+into parts at 8 and 16 rows (16: block forward substitution solve), median of 30 (`tree_decomp_time.py`):
+
+| part, ms per group | 8 rows | 16 rows | 16 rows adds |
+|---|---|---|---|
+| 4 FFNs | 2.998 | 3.019 | +0.02 (+0.7%) |
+| 3 DeltaNet mixers | 1.758 | 1.970 | +0.21 (+12%) |
+| the same without the solve | 1.648 | 1.757 | +0.11 (solve share: 0.11 -> 0.21) |
+| attention mixer, 8K | 0.958 | 1.131 | +0.17 (+18%) |
+| attention mixer, 32K | 1.729 | 2.450 | +0.72 (+42%) |
+| whole group, 8K | 5.074 | 5.501 | +0.43 (+8.4%) |
+| whole group, 32K | 5.808 | 6.846 | +1.04 (+17.9%) |
+
+A tree (not a chain) adds the corrx0 conv correction on top: +0.28 ms per group at 8K, +0.25 at 32K (t/probe16).
+
+**Per cycle** (16 groups; the 16-row head +0.02 ms; the per-call handoffs do not change with rows: 16 group calls +
+the head either way):
+
+| 8K / 32K, ms per cycle | FFN | DeltaNet | attention | tree conv correction | total | of the chain cycle |
+|---|---|---|---|---|---|---|
+| 16-row chain | +0.3 / +0.3 | +3.4 / +3.4 | +2.8 / +11.5 | | +6.8 / +16.6 | +6.3% / +13.8% |
+| 16-row tree | | | | +4.5 / +4.0 | +11.3 / +20.6 | +10% / +17% |
+
+- **The ANE's 2x path is engaged at 16 rows:** both packages bonded only over instances 0 and 1, 14 streams (2 per
+  function). The stream pairs are 6-27% uneven (busier stream / pair mean 1.06-1.27; FFN-heavy 1.06, the mixers
+  1.15-1.27, slightly worse at 16 rows), as E1 found on the adapter.
+- **No compute knee in the matmuls:** the FFNs are free at 16 rows (+0.7%), as E1's sweep had it (weight-bound up to
+  32 rows). The extra cost is the row-proportional non-matmul work: the DeltaNet UT solve and the per-row ops around
+  it (+0.21), and attention's score passes (scale, mask, max, exp, sum over rows x context), which grow with context
+  (+0.17 at 8K, +0.72 at 32K: long-context attention is score-traffic bound, 15 Nov).
+- **Why Splash pays ~0:** its whole step is a GPU step bound by reading weights; its flash attention keeps the scores
+  in registers (one K / V read for all rows) and its GDN kernel's 16-row form costs 13-19% more on a small share.
+
+**The cheapest changes, estimated (no build done):**
+1. **A 16-row CHAIN entry for lookup chains** (no ancestor mask, no conv correction): a lookup cycle with 16 rows
+   costs +6.8 ms at 8K (+6.3%) instead of the tree's +11.3. New verify entries on the same weight constants (a
+   v8_dec8tx-size package build, ~1.3 h, ~10 GB SSD + ~11 GB Core AI entries).
+2. **GPU attention for the 16-row verify from 32K on** (the split path the 96K entry already uses: ANE projections,
+   GPU core with the row mask): removes most of the attention's +11.5 ms at 32K (GPU core at 8 rows 0.55 ms per
+   layer at 32K, C1; 16 rows about x1-2), so a 16-row cycle at 32K about +8-10 ms instead of +16.6. Needs split
+   entries at 32K / 64K (a package build) and the 16-row GPU core.
+3. **What stays:** DeltaNet +3.4 ms and FFN +0.3 per cycle: a 16-row cycle stays at least ~+3.5% on the ANE.
+   Nearly free (Splash's ~0) needs the DeltaNet and attention of the extra rows off the ANE, i.e. a GPU verify, which
+   reads every weight (Splash's 112 ms step against our 94).
+
+**Served state:** forge restored 23:24 (pid 68810, `v8_server_dec8_qk.sh`, build v8_dec8), `bench/final_served7` smoke
+byte-identical; tree8 and lookup stay off by default.

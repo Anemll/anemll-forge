@@ -8,11 +8,11 @@ R=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/v8_p
 L=/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs/v8_server.log
 PY=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
 cd $P && PORT=8765 zsh srv_stop.sh
-echo "$(date '+%H:%M') arm $ARM: start $LAUNCHER ($(env | grep -E '^(TREE|DEC_|BUILD|GM|V8_)' | tr '\n' ' '))" >> $R/ops.log
+echo "$(date '+%H:%M') arm $ARM: start $LAUNCHER ($(env | grep -E '^(TREE|DEC_|BUILD|GM|V8_|NGRAM)' | tr '\n' ' '))" >> $R/ops.log
 [ -s $L ] && mv $L ${L:r}.$(date -r $L +%Y%m%d-%H%M%S).log   # so the wait below reads the new server's log
 PORT=8765 nohup zsh $P/$LAUNCHER > /dev/null 2>&1 &
 for i in $(seq 1 120); do grep -q "serving OpenAI API" $L 2>/dev/null && break; sleep 2; done
 grep -q "serving OpenAI API" $L || { echo "server did not come up"; tail -30 $L; exit 1; }
 EX=(); for e in ${=EXPECT:-}; do EX+=(--expect $e); done
-$PY $T/tree_bench.py --prompts $T/realistic_v1.json --label $ARM --out $R/bench/$ARM.json --rungs ${RUNGS:-2k,8k,32k,64k,96k} \
+$PY $T/tree_bench.py --prompts $T/${PROMPTS:-realistic_v1.json} --label $ARM --out $R/bench/$ARM.json --rungs ${RUNGS:-2k,8k,32k,64k,96k} \
   ${=TASKS:+--tasks $TASKS} $EX 2>&1 | tee $R/bench/$ARM.log

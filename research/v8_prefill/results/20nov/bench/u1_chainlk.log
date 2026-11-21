@@ -1,0 +1,43 @@
+BANNER [u1_chainlk] prompts realistic_v1.json sha 693e3097d942e5a5 gen 320 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_clk.dylib sha256 2b64e979a91a414fba14261a02db9db3a9e595cd008b3bece70db474ef74fdb2 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels.metal sha256 00f351b5edc893b73a8ef21433fe8fca425c51a14eac795e151c40e4f5767a1a | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=chain (no tree banner: the served chain path)
+[u1_chainlk] warmup ttft 0.39s
+[u1_chainlk] idle 5.1 W
+[u1_chainlk] 2k code humaneval-t0:0 prompt 142 ttft 1.1s | gen 198 63.8 tok/s | no server line | 11.6 W | sha fc635e5cce740a81
+[u1_chainlk] 2k code humaneval-t0:1 prompt 279 ttft 0.8s | gen 320 78.3 tok/s | no server line | 25.0 W | sha 1681b92d273f64ad
+[u1_chainlk] 2k code mbpp-t0:0 prompt 33 ttft 0.4s | gen 91 64.2 tok/s | 6.50 tok/verify, cycle 108 ms (verify 93.8) | 23.8 W | sha b626aecf791d6c5d
+[u1_chainlk] 2k math gsm8k-t0:0 prompt 76 ttft 0.4s | gen 320 57.2 tok/s | no server line | 22.5 W | sha efc58ce01880db3e
+[u1_chainlk] 2k math gsm8k-t0:1 prompt 87 ttft 0.5s | gen 320 59.4 tok/s | no server line | 22.5 W | sha de709ad9087553ee
+[u1_chainlk] 2k math 27b-prompts_math500128:0 prompt 68 ttft 0.4s | gen 320 60.7 tok/s | no server line | 22.1 W | sha be218a8698df42a7
+[u1_chainlk] 2k chat mt-bench-t0:0 prompt 199 ttft 0.9s | gen 14 119.7 tok/s | 4.67 tok/verify, cycle 111 ms (verify 96.8) | nan W | sha 2d1fb5c121e32ff9
+[u1_chainlk] 2k chat mt-bench-t0:1 prompt 53 ttft 0.3s | gen 217 20.7 tok/s | 2.21 tok/verify, cycle 108 ms (verify 93.9) | 23.2 W | sha 9e878e516569e178
+[u1_chainlk] 2k chat mt-bench-t0:2 prompt 74 ttft 0.3s | gen 320 23.3 tok/s | 2.50 tok/verify, cycle 108 ms (verify 93.9) | 24.0 W | sha 3b060108f4af10b0
+[u1_chainlk] 2k SUMMARY tok/s 24.92 (token-weighted), tok/verify 2.640, output checksum 259056cc0cb25d78
+[u1_chainlk] 8k code humaneval-t0:0 prompt 7562 ttft 11.4s | gen 196 63.0 tok/s | no server line | 45.3 W | sha bd218409c335b7f2
+[u1_chainlk] 8k code humaneval-t0:1 prompt 7699 ttft 0.9s | gen 320 78.1 tok/s | no server line | 26.5 W | sha 1681b92d273f64ad
+[u1_chainlk] 8k code mbpp-t0:0 prompt 7453 ttft 0.5s | gen 146 58.5 tok/s | no server line | 20.9 W | sha afd2ea58941d19da
+[u1_chainlk] 8k math gsm8k-t0:0 prompt 7496 ttft 0.5s | gen 312 55.5 tok/s | no server line | 23.1 W | sha 810c6801a8580013
+[u1_chainlk] 8k math gsm8k-t0:1 prompt 7507 ttft 0.7s | gen 320 59.2 tok/s | no server line | 23.4 W | sha 7c3c33645579a9d6
+[u1_chainlk] 8k math 27b-prompts_math500128:0 prompt 7488 ttft 0.4s | gen 320 54.8 tok/s | no server line | 23.2 W | sha 30f30a400c5b3d79
+[u1_chainlk] 8k chat mt-bench-t0:0 prompt 7619 ttft 0.9s | gen 14 119.2 tok/s | 4.67 tok/verify, cycle 111 ms (verify 97.1) | nan W | sha 2d1fb5c121e32ff9
+[u1_chainlk] 8k chat mt-bench-t0:1 prompt 7473 ttft 0.4s | gen 195 20.2 tok/s | 2.17 tok/verify, cycle 108 ms (verify 94.0) | 23.0 W | sha 5a2eba2e996bedbb
+[u1_chainlk] 8k chat mt-bench-t0:2 prompt 7494 ttft 0.5s | gen 67 24.5 tok/s | 2.48 tok/verify, cycle 108 ms (verify 94.6) | 21.0 W | sha b6db24b4fed1bff2
+[u1_chainlk] 8k SUMMARY tok/s 22.04 (token-weighted), tok/verify 2.302, output checksum ac80240217987ab1
+[u1_chainlk] 32k code humaneval-t0:0 prompt 32138 ttft 56.3s | gen 183 66.6 tok/s | no server line | 41.8 W | sha 39d7ee3a22700398
+[u1_chainlk] 32k code humaneval-t0:1 prompt 32275 ttft 1.2s | gen 320 70.0 tok/s | no server line | 27.7 W | sha 1681b92d273f64ad
+[u1_chainlk] 32k code mbpp-t0:0 prompt 32029 ttft 0.6s | gen 78 40.2 tok/s | 4.59 tok/verify, cycle 120 ms (verify 105.8) | 16.9 W | sha 4e3e28ee2c55836f
+[u1_chainlk] 32k math gsm8k-t0:0 prompt 32072 ttft 0.7s | gen 317 56.5 tok/s | no server line | 23.1 W | sha 344bcf03e2fb2064
+[u1_chainlk] 32k math gsm8k-t0:1 prompt 32083 ttft 0.7s | gen 320 53.5 tok/s | no server line | 23.1 W | sha 0c8d2be13b7a50c4
+[u1_chainlk] 32k math 27b-prompts_math500128:0 prompt 32064 ttft 0.5s | gen 320 50.4 tok/s | no server line | 22.9 W | sha 215a6f9619ffbdaf
+[u1_chainlk] 32k chat mt-bench-t0:0 prompt 32195 ttft 1.1s | gen 14 107.9 tok/s | 4.67 tok/verify, cycle 124 ms (verify 109.6) | nan W | sha 2d1fb5c121e32ff9
+[u1_chainlk] 32k chat mt-bench-t0:1 prompt 32049 ttft 0.5s | gen 238 20.7 tok/s | 2.45 tok/verify, cycle 120 ms (verify 105.8) | 22.9 W | sha 382670009c4b71e7
+[u1_chainlk] 32k chat mt-bench-t0:2 prompt 32070 ttft 0.6s | gen 99 24.9 tok/s | 2.83 tok/verify, cycle 120 ms (verify 105.8) | 21.8 W | sha 395ae53bc4409e09
+[u1_chainlk] 32k SUMMARY tok/s 24.37 (token-weighted), tok/verify 2.820, output checksum 991c07b1bd5eb317
+[u1_chainlk] 64k code humaneval-t0:0 prompt 64906 ttft 138.9s | gen 183 61.6 tok/s | no server line | 39.6 W | sha 39d7ee3a22700398
+[u1_chainlk] 64k code humaneval-t0:1 prompt 65043 ttft 1.5s | gen 320 61.7 tok/s | no server line | 29.7 W | sha 1681b92d273f64ad
+[u1_chainlk] 64k code mbpp-t0:0 prompt 64797 ttft 0.7s | gen 86 39.9 tok/s | no server line | 20.2 W | sha 7eb4d8bd136914a1
+[u1_chainlk] 64k math gsm8k-t0:0 prompt 64840 ttft 0.8s | gen 320 47.4 tok/s | no server line | 24.5 W | sha 11756e60ca2b59f5
+[u1_chainlk] 64k math gsm8k-t0:1 prompt 64851 ttft 0.9s | gen 320 46.8 tok/s | no server line | 23.5 W | sha 7694f3ce413cf8d3
+[u1_chainlk] 64k math 27b-prompts_math500128:0 prompt 64832 ttft 0.6s | gen 320 47.7 tok/s | no server line | 23.4 W | sha d2494dd342391dce
+[u1_chainlk] 64k chat mt-bench-t0:0 prompt 64963 ttft 1.6s | gen 9 0.0 tok/s | 3.00 tok/verify, cycle 140 ms (verify 125.4) | nan W | sha d6a76193fc64c869
+[u1_chainlk] 64k chat mt-bench-t0:1 prompt 64817 ttft 0.6s | gen 225 17.8 tok/s | 2.37 tok/verify, cycle 134 ms (verify 120.6) | 23.6 W | sha 6a0f92ffeb6f7dbc
+[u1_chainlk] 64k chat mt-bench-t0:2 prompt 64838 ttft 0.9s | gen 91 16.8 tok/s | 2.12 tok/verify, cycle 134 ms (verify 120.7) | 22.6 W | sha 6d06c2aa661b0f6f
+[u1_chainlk] 64k SUMMARY tok/s 17.92 (token-weighted), tok/verify 2.307, output checksum 4d64245396e7bc34

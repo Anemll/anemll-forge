@@ -15,7 +15,8 @@ from m6_compare_bench import Power, chat  # noqa: E402
 
 LOG = Path("/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs/v8_server.log")
 GEN_RE = re.compile(r"gen (\d+) in ([\d.]+)s \(([\d.]+) tok/s, ([\d.]+) tok/verify, accept (\d+)% \(accepted/7 per cycle: "
-                    r"([^)]*)\), ms/cycle (\d+) \(draft ([\d.]+) verify ([\d.]+) sample ([\d.]+) ctx ([\d.]+) host ([\d.]+)\)\)")
+                    r"([^)]*)\), ms/cycle (\d+) \(draft ([\d.]+) verify ([\d.]+) sample ([\d.]+) ctx ([\d.]+) host ([\d.]+)\)"
+                    r"(?:, lookup \d+/\d+ cycles, [\d.]+ tok/verify)?\)")   # U1: the lookup summary sits inside the parenthesis
 
 
 def banner(log):
@@ -28,8 +29,47 @@ def banner(log):
             keep["dec8"] = ln.split("dec8: BANNER", 1)[1].strip()
         elif "tree: BANNER" in ln:
             keep["tree"] = ln.split("tree: BANNER", 1)[1].strip()
+        elif "prompt-lookup drafts:" in ln:   # U1: the engine's ngram drafter (NGRAM_DRAFT)
+            keep["lookup"] = ln.split("prompt-lookup drafts:", 1)[1].strip()[:120]
     keep.setdefault("tree", "mode=chain (no tree banner: the served chain path)")
+    keep.setdefault("lookup", "off (no prompt-lookup line)")
     return keep
+
+
+def chat_tools(url, model, messages, tools, max_tokens, timeout=3600.0):
+    """U1: chat() with a tools list (the agent set); streamed tool-call arguments count as reply text (checksums)"""
+    import urllib.request, urllib.error
+    body = {"model": model, "messages": messages, "tools": tools, "max_tokens": max_tokens, "temperature": 0, "stream": True,
+            "stream_options": {"include_usage": True}, "chat_template_kwargs": {"enable_thinking": False}}
+    req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    t0 = time.time(); first = last = None; parts, usage, ntc = [], None, 0
+    try:
+        r = urllib.request.urlopen(req, timeout=timeout)
+    except (OSError, urllib.error.URLError) as e:
+        return {"t0": t0, "t_first": None, "t_last": None, "t_end": time.time(), "ttft_s": None, "completion_tokens": 0,
+                "prompt_tokens": None, "decode_tps": None, "usage": None, "server": {}, "content": "", "error": str(e)[:200]}
+    with r:
+        for line in r:
+            line = line.decode().strip()
+            if not line.startswith("data:") or line == "data: [DONE]":
+                continue
+            d = json.loads(line[5:])
+            usage = d.get("usage") or usage
+            for c in d.get("choices", []):
+                delta = c.get("delta", {})
+                text = (delta.get("content") or "")
+                for tc in delta.get("tool_calls") or []:
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        ntc += 1; text += f"<tool:{fn['name']}>"
+                    text += fn.get("arguments") or ""
+                if text:
+                    now = time.time(); first = first or now; last = now; parts.append(text)
+    t1 = time.time(); n = (usage or {}).get("completion_tokens", 0)
+    return {"t0": t0, "t_first": first, "t_last": last, "t_end": t1, "ttft_s": (first or t1) - t0, "completion_tokens": n,
+            "prompt_tokens": (usage or {}).get("prompt_tokens"), "tool_calls": ntc,
+            "decode_tps": (n - 1) / (last - first) if first and last and last > first and n > 1 else None,
+            "usage": usage, "server": {}, "content": "".join(parts)}
 
 
 def main():
@@ -76,7 +116,7 @@ def main():
                 if sel is not None and ti not in sel:
                     continue
                 off = a.log.stat().st_size
-                r = chat(url, "x", q["messages"], gen)
+                r = chat_tools(url, "x", q["messages"], q["tools"], gen) if q.get("tools") else chat(url, "x", q["messages"], gen)
                 time.sleep(0.3)
                 with open(a.log, "rb") as f:
                     f.seek(off)
@@ -88,6 +128,9 @@ def main():
                     srv = {"gen": int(g[0]), "tps": float(g[2]), "tok_verify": float(g[3]), "accept_pct": int(g[4]),
                            "hist": g[5], "ms_cycle": int(g[6]), "draft_ms": float(g[7]), "verify_ms": float(g[8])}
                 pre = re.findall(r"prefill: (\d+) tok in ([\d.]+)s", new)
+                lk = re.findall(r"lookup (\d+)/(\d+) cycles, ([\d.]+) tok/verify", new)   # U1: lookup cycles of the request
+                if srv is not None and lk:
+                    srv["lookup_cycles"], srv["lookup_tok_verify"] = int(lk[-1][0]), float(lk[-1][2])
                 r["server"] = srv
                 r["server_prefill"] = [(int(x), float(y)) for x, y in pre]
                 r["sha"] = hashlib.sha256(r["content"].encode()).hexdigest()[:16]

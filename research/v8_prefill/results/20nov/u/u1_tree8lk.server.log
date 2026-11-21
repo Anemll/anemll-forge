@@ -1,0 +1,641 @@
+[qwen38-27b-ane] started 2026-11-20 23:05:30  pid 60387  listen 127.0.0.1:8765
+[qwen38-27b-ane] model dir     /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx  (max ctx 98304; Core AI: verify-8 contexts [8192, 16384, 32768, 65536, 98304], prefill-64 contexts [8192, 16384, 32768, 65536, 98304], KV kv8, one weight copy)
+[qwen38-27b-ane] checkpoint    /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/model
+[qwen38-27b-ane] speculative   ON  drafter /Users/anemll/Models/anemll-forge-qwen3.8-27B-192K/drafter/all3/dflash2_lut4_gptq_nohead.aimodel; prompt-lookup drafts 6+ token matches
+[qwen38-27b-ane] thinking      default off (clients override via chat_template_kwargs.enable_thinking); context-summary requests (Pi's compaction): off (--summary-think keeps the client's setting)
+[qwen38-27b-ane] think budget  low=2048,medium=6144,xhigh=12288 tokens per reasoning_effort (request field thinking_budget overrides; then closed with Qwen's budget phrase)
+[qwen38-27b-ane] sampling      defaults: temperature 1.0 thinking / 0.7 non-thinking, top_p 0.95 / 0.8, top_k 20, min_p 0.0 / 0; max_tokens 4096
+[qwen38-27b-ane] repetition    presence_penalty 0.0 thinking / 1.5 non-thinking; DRY multiplier 0.0 base 1.75 allowed 8 tokens; loop guard 3+ periods over 1536+ tokens
+[qwen38-27b-ane] python        /Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
+drafter: body-only package built beside release_u15_data600_mat, drafting for release_vq3pA_mixh_s600_k1_mat with its head
+Torch version 2.14.0 has not been tested with coremltools. You may run into unexpected errors. Torch 2.7.0 is the most recent version that has been tested.
+[23:05:31] ANE compile mode policy: m6 (ioreg soc-generation) -> bonded mode 2 (explicit override)
+[23:05:31] model: ANEMLL Qwen3.8-27B release 0.2 (weights release_vq3pA_mixh_s600_k1_mat)
+[23:05:31] target graph: GDN_FAST=1 ATT_BLOCK=2048 ATT_BLOCK_PREFILL=4096 ATT_BLOCK_PREFILL_LONG=8192 above 96K | 8-bit attention: INT8 scores (step 1/4), FP8 softmax (probabilities and sum, FP8 scale 1/64), FP8 PV probabilities [ATT_INT8MM=s8,s8b,sm8,pvf8] | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx
+[23:05:31] KV cache: INT8 K / INT8 V + FP16 token/head scales | keys stored transposed (head dim x token: no key transposes in attention)
+[23:05:31] KV history in segments of [8192, 8192, 16384, 32768, 32768] rows: a longer context binds more segments, nothing is copied
+[23:05:31] [ANE compile] all 18 packages already compiled for this Mac (macOS 26C5035r): loading from cache
+[23:05:32] loaded chunk_L00-07.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L00-07.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L08-15.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L08-15.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L16-23.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L16-23.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L24-31.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L24-31.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L32-39.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L32-39.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L40-47.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L40-47.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L48-55.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L48-55.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L56-63.aimodel (30 entries, 0s, bridge)
+[23:05:32] loaded chunk_L56-63.aimodel (30 entries, 0s, bridge)
+[23:05:33] drafter: Core AI dflash2_lut4_gptq_nohead.aimodel (body only, drafting with the target's head)
+[23:05:33] prompt-lookup drafts: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off)
+[qwen38-27b-ane] loaded batched prefill + head + DFlash2 drafter dflash2_lut4_gptq_nohead.aimodel from v8_dec8tx (ctx 98304) in 2s
+[23:05:33] v8: GPU engine libgpu_v8_f8q.dylib, 64 layers, 8 streams, KV INT8 (ANE cache, KV8)
+[23:05:33] v8: variant F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d
+[23:05:33] v8: DeltaNet state handover on the GPU (48 layers x 2 sets wrapped)
+[23:05:33] v8: prefill engine ready in 0s (V8 for new spans >= 256 tokens)
+dec_init: attention kernel dec_attn_r4
+[23:05:33] dec8: BANNER decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto
+[23:05:33] dec8: decode GPU engine /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a, kernels dec_kernels_tree.metal 674918fb1e682a2c; keep-alive hold 60 ms (DEC_KA_HOLD_MS), switch /Volumes/SSD4TB/anemll-forge-research/contention/ctl/ka
+[23:05:33] dec8: split verify ready (8 packages: dva -> GPU -> dvba -> GPU -> dvb), mode auto, 64K entry up to 0 keys
+[23:05:33] v8: text-level prompt match on; decode snapshots every 256 tokens (last 3); V8 rest >= 128, tail <= 8 rows on the bridge
+[23:05:33] tree: BANNER mode=tree8 policy=branched topc=4 tau=1.5 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)
+[qwen38-27b-ane] serving OpenAI API on http://127.0.0.1:8765/v1 (V8 prefill, speculative ON, ctx 98304)
+[23:05:34] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[23:05:34] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[23:05:35] prefill: 15 tok in 0.2s (62 tok/s) | decoding ...
+[23:05:35] tree: 1 cycles: tree 1 (1.00 tok/verify, 103.3 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[23:05:35] prompt 15 (cached 0, prefill 15 in 0.2s) | gen 1 in 0.1s (8.4 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 118 (draft 14.2 verify 103.3 sample 0.1 ctx 0.5 host 0.2)) | stop | ctx 16/98304 (8K entry)
+[23:05:55] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16 tok, prompt 142 tok, first difference at 1:
+   state : '<|im_start|>user\nSay OK.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nOK'
+   prompt: '<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a solution to the following problem and make sure that'
+[23:05:55] request: prompt 142 tok | cache: cold (no reusable state), reused 0 | prefilling 142 tok ...
+[23:05:56] prefill: 142 tok in 1.0s (147 tok/s) | decoding ...
+[23:05:59] tree: 19 cycles: tree 8 (4.75 tok/verify, 98.9 ms), chain 11 (6.18 tok/verify, 94.5 ms), other 0, lookup 12; accepted path off the chain rows in 1
+[23:05:59] prompt 142 (cached 0, prefill 142 in 1.0s) | gen 198 in 3.3s (60.8 tok/s, 6.39 tok/verify, accept 77% (accepted/7 per cycle: 0:0% 1:13% 2:0% 3:13% 4:3% 5:6% 6:10% 7:55%), ms/cycle 105 (draft 8.4 verify 95.4 sample 0.6 ctx 0.6 host 0.1), lookup 12/31 cycles, 7.67 tok/verify) | stop | ctx 340/98304 (8K entry)
+[23:05:59] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 340 tok, prompt 279 tok, first difference at 35:
+   state : ' sure that it passes the tests:\n```python\n\ndef special_factorial(n):\n    """The Brazilian factorial is defined as:\n    brazilian_factorial(n) ='
+   prompt: ' sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n):\n    """\n    Given a positive integer n, return a sorted list that has the'
+[23:05:59] request: prompt 279 tok | cache: restore 'system' snapshot, reused 11 | prefilling 268 tok ...
+[23:06:00] v8: bridge 53 rows to 64 in 225 ms
+[23:06:00] v8: sync at 64 in 6 ms
+[23:06:00] v8: 16 ANE KV segments registered (ctx 8192)
+[23:06:00] v8: snapshot 'turn' at 192 (cut 272), taken during the run
+[23:06:00] v8: 215 tok (41 pad) in 0.5s (475 tok/s) + 28 ms handover / drafter context | setup 9 ms (V fill 8 ms, 64 rows)
+[23:06:00] prefill: 268 tok in 0.7s (371 tok/s) | decoding ...
+[23:06:04] decode snapshots: 1 taken (3 ms); kept: dec0, gen, system, turn
+[23:06:04] tree: 13 cycles: tree 2 (6.00 tok/verify, 99.6 ms), chain 11 (7.36 tok/verify, 94.6 ms), other 0, lookup 30; accepted path off the chain rows in 1
+[23:06:04] prompt 279 (cached 11, prefill 268 in 0.7s) | gen 320 in 4.3s (74.0 tok/s, 7.44 tok/verify, accept 93% (accepted/7 per cycle: 0:2% 1:2% 2:0% 3:0% 4:2% 5:5% 6:0% 7:88%), ms/cycle 100 (draft 4.6 verify 94.4 sample 0.7 ctx 0.6 host 0.1), lookup 30/43 cycles, 7.70 tok/verify) | length | ctx 603/98304 (8K entry)
+[23:06:05] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 603 tok, prompt 33 tok, first difference at 16:
+   state : ' are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a solution to the following problem and make sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n'
+   prompt: ' are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[23:06:05] request: prompt 33 tok | cache: restore 'system' snapshot, reused 11 | prefilling 22 tok ...
+[23:06:05] snapshots dropped (their KV rows were rewritten): dec0, turn
+[23:06:05] prefill: 22 tok in 0.2s (91 tok/s) | decoding ...
+[23:06:06] tree: 13 cycles: tree 3 (5.67 tok/verify, 99.9 ms), chain 10 (7.40 tok/verify, 94.8 ms), other 0, lookup 0; accepted path off the chain rows in 3
+[23:06:06] prompt 33 (cached 11, prefill 22 in 0.3s) | gen 91 in 1.5s (62.7 tok/s, 7.00 tok/verify, accept 86% (accepted/7 per cycle: 0:0% 1:0% 2:15% 3:0% 4:0% 5:0% 6:23% 7:62%), ms/cycle 112 (draft 13.9 verify 96.0 sample 0.6 ctx 0.9 host 0.1)) | stop | ctx 124/98304 (8K entry)
+[23:06:07] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 124 tok, prompt 76 tok, first difference at 14:
+   state : '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\ndef sort'
+   prompt: '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+[23:06:07] request: prompt 76 tok | cache: restore 'system' snapshot, reused 11 | prefilling 65 tok ...
+[23:06:07] prefill: 65 tok in 0.4s (180 tok/s) | decoding ...
+[23:06:13] decode snapshots: 1 taken (4 ms); kept: dec1, gen, system
+[23:06:13] tree: 49 cycles: tree 8 (4.00 tok/verify, 100.5 ms), chain 41 (6.83 tok/verify, 94.0 ms), other 0, lookup 3; accepted path off the chain rows in 5
+[23:06:13] prompt 76 (cached 11, prefill 65 in 0.4s) | gen 320 in 5.7s (56.6 tok/s, 6.15 tok/verify, accept 74% (accepted/7 per cycle: 0:2% 1:12% 2:6% 3:4% 4:10% 5:10% 6:4% 7:54%), ms/cycle 109 (draft 12.4 verify 95.0 sample 0.5 ctx 0.7 host 0.1), lookup 3/52 cycles, 3.67 tok/verify) | length | ctx 399/98304 (8K entry)
+[23:06:13] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 399 tok, prompt 87 tok, first difference at 14:
+   state : '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+   prompt: '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+[23:06:13] request: prompt 87 tok | cache: restore 'system' snapshot, reused 11 | prefilling 76 tok ...
+[23:06:14] snapshots dropped (their KV rows were rewritten): dec1
+[23:06:14] prefill: 76 tok in 0.4s (179 tok/s) | decoding ...
+[23:06:19] decode snapshots: 1 taken (2 ms); kept: dec2, gen, system
+[23:06:19] tree: 47 cycles: tree 13 (4.69 tok/verify, 100.8 ms), chain 34 (7.44 tok/verify, 94.4 ms), other 0, lookup 3; accepted path off the chain rows in 5
+[23:06:19] prompt 87 (cached 11, prefill 76 in 0.4s) | gen 320 in 5.5s (58.3 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:4% 1:8% 2:2% 3:6% 4:10% 5:6% 6:6% 7:58%), ms/cycle 110 (draft 12.4 verify 96.0 sample 0.6 ctx 0.7 host 0.1), lookup 3/50 cycles, 2.33 tok/verify) | length | ctx 408/98304 (8K entry)
+[23:06:19] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 408 tok, prompt 68 tok, first difference at 14:
+   state : '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+   prompt: '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+[23:06:19] request: prompt 68 tok | cache: restore 'system' snapshot, reused 11 | prefilling 57 tok ...
+[23:06:20] snapshots dropped (their KV rows were rewritten): dec2
+[23:06:20] prefill: 57 tok in 0.2s (261 tok/s) | decoding ...
+[23:06:25] decode snapshots: 1 taken (2 ms); kept: dec0, gen, system
+[23:06:25] tree: 48 cycles: tree 16 (4.69 tok/verify, 98.5 ms), chain 32 (7.38 tok/verify, 94.4 ms), other 0, lookup 3; accepted path off the chain rows in 8
+[23:06:25] prompt 68 (cached 11, prefill 57 in 0.2s) | gen 320 in 5.6s (57.3 tok/s, 6.27 tok/verify, accept 76% (accepted/7 per cycle: 0:4% 1:2% 2:12% 3:6% 4:6% 5:12% 6:8% 7:51%), ms/cycle 109 (draft 12.4 verify 95.6 sample 0.5 ctx 0.8 host 0.1), lookup 3/51 cycles, 3.33 tok/verify) | length | ctx 389/98304 (8K entry)
+[23:06:26] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 389 tok, prompt 199 tok, first difference at 14:
+   state : '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+   prompt: '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+[23:06:26] request: prompt 199 tok | cache: restore 'system' snapshot, reused 11 | prefilling 188 tok ...
+[23:06:26] snapshots dropped (their KV rows were rewritten): dec0
+[23:06:26] prefill: 188 tok in 0.6s (302 tok/s) | decoding ...
+[23:06:26] tree: 3 cycles: tree 2 (3.50 tok/verify, 101.4 ms), chain 1 (7.00 tok/verify, 99.8 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[23:06:26] prompt 199 (cached 11, prefill 188 in 0.6s) | gen 14 in 0.3s (40.5 tok/s, 4.67 tok/verify, accept 52% (accepted/7 per cycle: 0:0% 1:0% 2:33% 3:33% 4:0% 5:0% 6:33% 7:0%), ms/cycle 115 (draft 13.2 verify 100.8 sample 0.4 ctx 0.6 host 0.1)) | stop | ctx 213/98304 (8K entry)
+[23:06:27] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 213 tok, prompt 53 tok, first difference at 14:
+   state : '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+   prompt: '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+[23:06:27] request: prompt 53 tok | cache: restore 'system' snapshot, reused 11 | prefilling 42 tok ...
+[23:06:27] prefill: 42 tok in 0.2s (177 tok/s) | decoding ...
+[23:06:36] tree: 77 cycles: tree 77 (2.83 tok/verify, 96.9 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 24
+[23:06:36] prompt 53 (cached 11, prefill 42 in 0.3s) | gen 218 in 8.6s (25.5 tok/s, 2.83 tok/verify, accept 26% (accepted/7 per cycle: 0:8% 1:35% 2:32% 3:18% 4:4% 5:3% 6:0% 7:0%), ms/cycle 111 (draft 13.0 verify 96.9 sample 0.3 ctx 0.8 host 0.0)) | stop | ctx 271/98304 (8K entry)
+[23:06:36] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 271 tok, prompt 74 tok, first difference at 14:
+   state : '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+   prompt: '\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly'
+[23:06:36] request: prompt 74 tok | cache: restore 'system' snapshot, reused 11 | prefilling 63 tok ...
+[23:06:36] prefill: 63 tok in 0.3s (239 tok/s) | decoding ...
+[23:06:46] decode: 240 tok, 10s, 23.9 tok/s, 2.67 tok/verify, accept 24%, ms/cycle 111 (draft 13.0 verify 97.2 sample 0.2 ctx 0.9 host 0.0)
+[23:06:50] decode snapshots: 1 taken (2 ms); kept: dec1, gen, system
+[23:06:50] tree: 120 cycles: tree 119 (2.68 tok/verify, 97.0 ms), chain 1 (1.00 tok/verify, 99.6 ms), other 0, lookup 0; accepted path off the chain rows in 53
+[23:06:50] prompt 74 (cached 11, prefill 63 in 0.3s) | gen 320 in 13.4s (23.9 tok/s, 2.67 tok/verify, accept 24% (accepted/7 per cycle: 0:18% 1:33% 2:24% 3:17% 4:7% 5:2% 6:0% 7:0%), ms/cycle 111 (draft 13.0 verify 97.1 sample 0.2 ctx 0.9 host 0.0)) | length | ctx 394/98304 (8K entry)
+[23:06:50] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 394 tok, prompt 7562 tok, first difference at 9:
+   state : '<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your'
+   prompt: '<|im_start|>system\nYou are a helpful assistant. Reference material (a code base) follows; use it only if relevant.\n\n===== ANE_DELTANET_NUM'
+[23:06:50] snapshot 'system' (11 tok) kept as 'sysk' with its KV rows (0 MB, 1 ms): this prompt rewrites them
+[23:06:50] request: prompt 7562 tok | cache: cold (no reusable state), reused 0 | prefilling 7562 tok ...
+[23:07:02] v8: snapshot 'system' at 7424 (cut 7431), taken during the run
+[23:07:02] v8: snapshot 'turn' at 7552 (cut 7555), taken during the run
+[23:07:02] v8: 7562 tok (118 pad) in 11.4s (664 tok/s) + 191 ms handover / drafter context | setup 54 ms (V fill 0 ms, 0 rows)
+[23:07:02] snapshots dropped (their KV rows were rewritten): dec1
+[23:07:02] prefill: 7562 tok in 11.6s (650 tok/s) | decoding ...
+[23:07:05] tree: 19 cycles: tree 10 (3.50 tok/verify, 98.0 ms), chain 9 (6.78 tok/verify, 95.8 ms), other 0, lookup 12; accepted path off the chain rows in 5
+[23:07:05] prompt 7562 (cached 0, prefill 7562 in 11.6s) | gen 188 in 3.3s (57.5 tok/s, 6.06 tok/verify, accept 72% (accepted/7 per cycle: 0:0% 1:13% 2:10% 3:6% 4:6% 5:10% 6:3% 7:52%), ms/cycle 105 (draft 8.3 verify 95.8 sample 0.5 ctx 0.8 host 0.1), lookup 12/31 cycles, 7.67 tok/verify) | stop | ctx 7750/98304 (8K entry)
+[23:07:05] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7750 tok, prompt 7699 tok, first difference at 7455:
+   state : ' sure that it passes the tests:\n```python\n\ndef special_factorial(n):\n    """The Brazilian factorial is defined as:\n    brazilian_factorial(n) ='
+   prompt: ' sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n):\n    """\n    Given a positive integer n, return a sorted list that has the'
+[23:07:05] request: prompt 7699 tok | cache: restore 'system' snapshot, reused 7424 | prefilling 275 tok ...
+[23:07:05] v8: sync at 7424 in 12 ms
+[23:07:06] v8: snapshot 'turn' at 7680 (cut 7692), taken during the run
+[23:07:06] v8: 275 tok (109 pad) in 0.7s (406 tok/s) + 35 ms handover / drafter context | setup 2 ms (V fill 0 ms, 0 rows)
+[23:07:06] prefill: 275 tok in 0.7s (377 tok/s) | decoding ...
+[23:07:10] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system, turn
+[23:07:10] tree: 13 cycles: tree 2 (5.50 tok/verify, 101.1 ms), chain 11 (7.09 tok/verify, 95.3 ms), other 0, lookup 30; accepted path off the chain rows in 2
+[23:07:10] prompt 7699 (cached 7424, prefill 275 in 0.7s) | gen 320 in 4.3s (73.6 tok/s, 7.44 tok/verify, accept 92% (accepted/7 per cycle: 0:5% 1:0% 2:0% 3:0% 4:7% 5:2% 6:0% 7:86%), ms/cycle 101 (draft 4.6 verify 94.9 sample 0.7 ctx 0.7 host 0.1), lookup 30/43 cycles, 7.67 tok/verify) | length | ctx 8018/98304 (8K entry)
+[23:07:11] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 8018 tok, prompt 7453 tok, first difference at 7436:
+   state : '6-subnormal, and<|im_end|>\n<|im_start|>user\nWrite a solution to the following problem and make sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n'
+   prompt: '6-subnormal, and<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[23:07:11] request: prompt 7453 tok | cache: restore 'system' snapshot, reused 7424 | prefilling 29 tok ...
+[23:07:11] snapshots dropped (their KV rows were rewritten): dec2, turn
+[23:07:11] prefill: 29 tok in 0.4s (81 tok/s) | decoding ...
+[23:07:14] tree: 23 cycles: tree 10 (5.20 tok/verify, 98.8 ms), chain 13 (7.23 tok/verify, 94.6 ms), other 0, lookup 0; accepted path off the chain rows in 5
+[23:07:14] prompt 7453 (cached 7424, prefill 29 in 0.4s) | gen 146 in 2.6s (57.1 tok/s, 6.35 tok/verify, accept 76% (accepted/7 per cycle: 0:0% 1:0% 2:4% 3:17% 4:13% 5:13% 6:9% 7:43%), ms/cycle 111 (draft 13.1 verify 96.5 sample 0.6 ctx 0.9 host 0.1)) | stop | ctx 7599/98304 (8K entry)
+[23:07:14] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7599 tok, prompt 7496 tok, first difference at 7434:
+   state : ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\ndef sort'
+   prompt: ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+[23:07:14] request: prompt 7496 tok | cache: restore 'system' snapshot, reused 7431 | prefilling 65 tok ...
+[23:07:14] prefill: 65 tok in 0.3s (193 tok/s) | decoding ...
+[23:07:20] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system
+[23:07:20] tree: 47 cycles: tree 13 (4.77 tok/verify, 98.7 ms), chain 34 (7.15 tok/verify, 94.6 ms), other 0, lookup 3; accepted path off the chain rows in 6
+[23:07:20] prompt 7496 (cached 7431, prefill 65 in 0.4s) | gen 313 in 5.5s (57.2 tok/s, 6.26 tok/verify, accept 75% (accepted/7 per cycle: 0:2% 1:2% 2:18% 3:6% 4:2% 5:10% 6:8% 7:52%), ms/cycle 109 (draft 12.4 verify 95.6 sample 0.5 ctx 0.7 host 0.1), lookup 3/50 cycles, 2.67 tok/verify) | stop | ctx 7809/98304 (8K entry)
+[23:07:20] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7809 tok, prompt 7507 tok, first difference at 7434:
+   state : ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+   prompt: ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+[23:07:20] request: prompt 7507 tok | cache: restore 'system' snapshot, reused 7431 | prefilling 76 tok ...
+[23:07:20] snapshots dropped (their KV rows were rewritten): dec0
+[23:07:20] prefill: 76 tok in 0.5s (169 tok/s) | decoding ...
+[23:07:26] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, system
+[23:07:26] tree: 52 cycles: tree 17 (3.76 tok/verify, 98.7 ms), chain 35 (7.26 tok/verify, 94.5 ms), other 0, lookup 3; accepted path off the chain rows in 7
+[23:07:26] prompt 7507 (cached 7431, prefill 76 in 0.5s) | gen 320 in 6.0s (53.1 tok/s, 5.82 tok/verify, accept 70% (accepted/7 per cycle: 0:2% 1:9% 2:11% 3:13% 4:9% 5:2% 6:4% 7:51%), ms/cycle 110 (draft 12.4 verify 95.8 sample 0.5 ctx 0.7 host 0.1), lookup 3/55 cycles, 2.67 tok/verify) | length | ctx 7833/98304 (8K entry)
+[23:07:27] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7833 tok, prompt 7488 tok, first difference at 7434:
+   state : ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+   prompt: ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+[23:07:27] request: prompt 7488 tok | cache: restore 'system' snapshot, reused 7431 | prefilling 57 tok ...
+[23:07:27] snapshots dropped (their KV rows were rewritten): dec1
+[23:07:27] prefill: 57 tok in 0.2s (246 tok/s) | decoding ...
+[23:07:33] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system
+[23:07:33] tree: 48 cycles: tree 10 (3.90 tok/verify, 100.0 ms), chain 38 (7.37 tok/verify, 94.3 ms), other 0, lookup 2; accepted path off the chain rows in 5
+[23:07:33] prompt 7488 (cached 7431, prefill 57 in 0.2s) | gen 320 in 5.5s (58.5 tok/s, 6.40 tok/verify, accept 78% (accepted/7 per cycle: 0:2% 1:6% 2:8% 3:8% 4:4% 5:8% 6:4% 7:60%), ms/cycle 109 (draft 12.6 verify 95.4 sample 0.6 ctx 0.7 host 0.1), lookup 2/50 cycles, 2.00 tok/verify) | length | ctx 7811/98304 (8K entry)
+[23:07:33] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7811 tok, prompt 7619 tok, first difference at 7434:
+   state : ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+   prompt: ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+[23:07:33] request: prompt 7619 tok | cache: restore 'system' snapshot, reused 7431 | prefilling 188 tok ...
+[23:07:34] snapshots dropped (their KV rows were rewritten): dec2
+[23:07:34] prefill: 188 tok in 0.6s (293 tok/s) | decoding ...
+[23:07:34] tree: 3 cycles: tree 0 (0.00 tok/verify, 0.0 ms), chain 3 (4.67 tok/verify, 97.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[23:07:34] prompt 7619 (cached 7431, prefill 188 in 0.6s) | gen 14 in 0.3s (41.9 tok/s, 4.67 tok/verify, accept 52% (accepted/7 per cycle: 0:0% 1:0% 2:33% 3:33% 4:0% 5:0% 6:33% 7:0%), ms/cycle 111 (draft 13.3 verify 97.0 sample 0.4 ctx 0.5 host 0.1)) | stop | ctx 7633/98304 (8K entry)
+[23:07:34] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7633 tok, prompt 7473 tok, first difference at 7434:
+   state : ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+   prompt: ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+[23:07:34] request: prompt 7473 tok | cache: restore 'system' snapshot, reused 7431 | prefilling 42 tok ...
+[23:07:34] prefill: 42 tok in 0.2s (187 tok/s) | decoding ...
+[23:07:43] tree: 78 cycles: tree 78 (2.53 tok/verify, 97.1 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 30
+[23:07:43] prompt 7473 (cached 7431, prefill 42 in 0.2s) | gen 197 in 8.7s (22.7 tok/s, 2.53 tok/verify, accept 22% (accepted/7 per cycle: 0:19% 1:37% 2:19% 3:21% 4:4% 5:0% 6:0% 7:0%), ms/cycle 111 (draft 13.0 verify 97.1 sample 0.2 ctx 0.9 host 0.0)) | stop | ctx 7670/98304 (8K entry)
+[23:07:43] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7670 tok, prompt 7494 tok, first difference at 7434:
+   state : ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+   prompt: ' fp16-subnormal, and<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly'
+[23:07:43] request: prompt 7494 tok | cache: restore 'system' snapshot, reused 7431 | prefilling 63 tok ...
+[23:07:44] prefill: 63 tok in 0.2s (281 tok/s) | decoding ...
+[23:07:46] tree: 23 cycles: tree 23 (2.87 tok/verify, 97.3 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 6
+[23:07:46] prompt 7494 (cached 7431, prefill 63 in 0.2s) | gen 66 in 2.6s (25.8 tok/s, 2.87 tok/verify, accept 27% (accepted/7 per cycle: 0:26% 1:17% 2:17% 3:22% 4:17% 5:0% 6:0% 7:0%), ms/cycle 111 (draft 13.0 verify 97.3 sample 0.3 ctx 0.8 host 0.1)) | stop | ctx 7560/98304 (8K entry)
+[23:07:47] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 7560 tok, prompt 32138 tok, first difference at 7429:
+   state : '5e-8 is fp16-subnormal, and<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your'
+   prompt: "5e-8 is fp16-subnormal, and Core AI's ANE lowering mis-normalizes\n   (qkv 0.70x, per-token scalar"
+[23:07:47] snapshot 'system' (7431 tok) kept as 'sysk' with its KV rows (234 MB, 19 ms): this prompt rewrites them
+[23:07:47] request: prompt 32138 tok | cache: cold (no reusable state), reused 0 | prefilling 32138 tok ...
+[23:07:47] [ctx] 8192 -> 32768 at pos 0: segments bound, no KV rows copied (96 ms)
+[23:07:47] v8: 48 ANE KV segments registered (ctx 32768)
+[23:08:45] v8: snapshot 'system' at 32000 (cut 32007), taken during the run
+[23:08:45] v8: snapshot 'turn' at 32128 (cut 32131), taken during the run
+[23:08:45] v8: 32138 tok (118 pad) in 57.6s (558 tok/s) + 204 ms handover / drafter context | setup 124 ms (V fill 0 ms, 0 rows)
+[23:08:45] prefill: 32138 tok in 57.9s (555 tok/s) | decoding ...
+[23:08:47] tree: 12 cycles: tree 3 (6.33 tok/verify, 114.6 ms), chain 9 (8.00 tok/verify, 107.5 ms), other 0, lookup 12; accepted path off the chain rows in 1
+[23:08:47] prompt 32138 (cached 0, prefill 32138 in 58.0s) | gen 183 in 2.8s (65.6 tok/s, 7.62 tok/verify, accept 95% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:4% 4:4% 5:0% 6:8% 7:83%), ms/cycle 116 (draft 7.0 verify 107.6 sample 0.7 ctx 0.9 host 0.1), lookup 12/24 cycles, 7.67 tok/verify) | stop | ctx 32321/98304 (32K entry)
+[23:08:48] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32321 tok, prompt 32275 tok, first difference at 32031:
+   state : ' sure that it passes the tests:\n```python\n\ndef special_factorial(n):\n    """The Brazilian factorial is defined as:\n    brazilian_factorial(n) ='
+   prompt: ' sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n):\n    """\n    Given a positive integer n, return a sorted list that has the'
+[23:08:48] request: prompt 32275 tok | cache: restore 'system' snapshot, reused 32000 | prefilling 275 tok ...
+[23:08:48] v8: sync at 32000 in 9 ms
+[23:08:49] v8: snapshot 'turn' at 32256 (cut 32268), taken during the run
+[23:08:49] v8: 275 tok (109 pad) in 1.0s (281 tok/s) + 32 ms handover / drafter context | setup 1 ms (V fill 0 ms, 0 rows)
+[23:08:49] prefill: 275 tok in 1.0s (268 tok/s) | decoding ...
+[23:08:54] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system, turn
+[23:08:54] tree: 13 cycles: tree 1 (6.00 tok/verify, 116.5 ms), chain 12 (7.17 tok/verify, 106.7 ms), other 0, lookup 30; accepted path off the chain rows in 1
+[23:08:54] prompt 32275 (cached 32000, prefill 275 in 1.0s) | gen 320 in 4.8s (66.1 tok/s, 7.44 tok/verify, accept 93% (accepted/7 per cycle: 0:5% 1:0% 2:0% 3:0% 4:5% 5:2% 6:0% 7:88%), ms/cycle 112 (draft 4.9 verify 106.2 sample 0.7 ctx 0.6 host 0.1), lookup 30/43 cycles, 7.67 tok/verify) | length | ctx 32597/98304 (32K entry)
+[23:08:54] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32597 tok, prompt 32029 tok, first difference at 32012:
+   state : ' 2x the bytes<|im_end|>\n<|im_start|>user\nWrite a solution to the following problem and make sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n'
+   prompt: ' 2x the bytes<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[23:08:54] request: prompt 32029 tok | cache: restore 'system' snapshot, reused 32000 | prefilling 29 tok ...
+[23:08:54] snapshots dropped (their KV rows were rewritten): dec0, turn
+[23:08:54] prefill: 29 tok in 0.4s (69 tok/s) | decoding ...
+[23:08:56] tree: 15 cycles: tree 9 (3.78 tok/verify, 110.0 ms), chain 6 (7.33 tok/verify, 106.3 ms), other 0, lookup 0; accepted path off the chain rows in 8
+[23:08:56] prompt 32029 (cached 32000, prefill 29 in 0.4s) | gen 78 in 1.9s (42.1 tok/s, 5.20 tok/verify, accept 60% (accepted/7 per cycle: 0:0% 1:0% 2:33% 3:7% 4:27% 5:0% 6:7% 7:27%), ms/cycle 123 (draft 13.1 verify 108.5 sample 0.5 ctx 1.2 host 0.1)) | stop | ctx 32107/98304 (32K entry)
+[23:08:57] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32107 tok, prompt 32072 tok, first difference at 32010:
+   state : ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\ndef sort'
+   prompt: ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+[23:08:57] request: prompt 32072 tok | cache: restore 'system' snapshot, reused 32007 | prefilling 65 tok ...
+[23:08:57] prefill: 65 tok in 0.4s (164 tok/s) | decoding ...
+[23:09:03] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, system
+[23:09:03] tree: 47 cycles: tree 11 (4.27 tok/verify, 112.2 ms), chain 36 (7.22 tok/verify, 105.9 ms), other 0, lookup 4; accepted path off the chain rows in 6
+[23:09:03] prompt 32072 (cached 32007, prefill 65 in 0.4s) | gen 318 in 6.2s (51.5 tok/s, 6.24 tok/verify, accept 75% (accepted/7 per cycle: 0:6% 1:4% 2:10% 3:8% 4:8% 5:0% 6:8% 7:57%), ms/cycle 121 (draft 12.5 verify 107.2 sample 0.5 ctx 0.7 host 0.1), lookup 4/51 cycles, 2.75 tok/verify) | stop | ctx 32390/98304 (32K entry)
+[23:09:04] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32390 tok, prompt 32083 tok, first difference at 32010:
+   state : ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+   prompt: ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+[23:09:04] request: prompt 32083 tok | cache: restore 'system' snapshot, reused 32007 | prefilling 76 tok ...
+[23:09:04] snapshots dropped (their KV rows were rewritten): dec1
+[23:09:04] prefill: 76 tok in 0.5s (141 tok/s) | decoding ...
+[23:09:10] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system
+[23:09:10] tree: 46 cycles: tree 12 (4.67 tok/verify, 111.0 ms), chain 34 (7.50 tok/verify, 106.3 ms), other 0, lookup 3; accepted path off the chain rows in 5
+[23:09:10] prompt 32083 (cached 32007, prefill 76 in 0.5s) | gen 320 in 5.9s (53.8 tok/s, 6.53 tok/verify, accept 79% (accepted/7 per cycle: 0:2% 1:6% 2:6% 3:4% 4:12% 5:4% 6:6% 7:59%), ms/cycle 121 (draft 12.4 verify 107.5 sample 0.6 ctx 0.7 host 0.1), lookup 3/49 cycles, 2.67 tok/verify) | length | ctx 32402/98304 (32K entry)
+[23:09:10] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32402 tok, prompt 32064 tok, first difference at 32010:
+   state : ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+   prompt: ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+[23:09:10] request: prompt 32064 tok | cache: restore 'system' snapshot, reused 32007 | prefilling 57 tok ...
+[23:09:11] snapshots dropped (their KV rows were rewritten): dec2
+[23:09:11] prefill: 57 tok in 0.3s (203 tok/s) | decoding ...
+[23:09:17] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system
+[23:09:17] tree: 49 cycles: tree 12 (4.17 tok/verify, 111.8 ms), chain 37 (7.22 tok/verify, 106.0 ms), other 0, lookup 2; accepted path off the chain rows in 5
+[23:09:17] prompt 32064 (cached 32007, prefill 57 in 0.3s) | gen 320 in 6.2s (51.7 tok/s, 6.27 tok/verify, accept 75% (accepted/7 per cycle: 0:6% 1:6% 2:4% 3:8% 4:8% 5:6% 6:10% 7:53%), ms/cycle 121 (draft 12.7 verify 107.4 sample 0.5 ctx 0.7 host 0.1), lookup 2/51 cycles, 1.50 tok/verify) | length | ctx 32384/98304 (32K entry)
+[23:09:17] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32384 tok, prompt 32195 tok, first difference at 32010:
+   state : ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+   prompt: ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+[23:09:17] request: prompt 32195 tok | cache: restore 'system' snapshot, reused 32007 | prefilling 188 tok ...
+[23:09:18] snapshots dropped (their KV rows were rewritten): dec0
+[23:09:18] prefill: 188 tok in 0.8s (233 tok/s) | decoding ...
+[23:09:18] tree: 3 cycles: tree 1 (4.00 tok/verify, 116.8 ms), chain 2 (5.00 tok/verify, 109.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[23:09:18] prompt 32195 (cached 32007, prefill 188 in 0.8s) | gen 14 in 0.4s (37.0 tok/s, 4.67 tok/verify, accept 52% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:67% 4:0% 5:33% 6:0% 7:0%), ms/cycle 126 (draft 13.3 verify 111.6 sample 0.4 ctx 0.6 host 0.2)) | stop | ctx 32209/98304 (32K entry)
+[23:09:19] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32209 tok, prompt 32049 tok, first difference at 32010:
+   state : ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+   prompt: ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+[23:09:19] request: prompt 32049 tok | cache: restore 'system' snapshot, reused 32007 | prefilling 42 tok ...
+[23:09:19] prefill: 42 tok in 0.3s (150 tok/s) | decoding ...
+[23:09:29] decode: 224 tok, 10s, 22.1 tok/s, 2.73 tok/verify, accept 25%, ms/cycle 123 (draft 13.0 verify 109.2 sample 0.2 ctx 0.8 host 0.1)
+[23:09:31] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, system
+[23:09:31] tree: 95 cycles: tree 95 (2.77 tok/verify, 109.2 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 27
+[23:09:31] prompt 32049 (cached 32007, prefill 42 in 0.3s) | gen 263 in 11.7s (22.4 tok/s, 2.77 tok/verify, accept 25% (accepted/7 per cycle: 0:16% 1:27% 2:32% 3:16% 4:8% 5:1% 6:0% 7:0%), ms/cycle 123 (draft 13.0 verify 109.2 sample 0.2 ctx 0.8 host 0.1)) | stop | ctx 32312/98304 (32K entry)
+[23:09:31] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32312 tok, prompt 32070 tok, first difference at 32010:
+   state : ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+   prompt: ' decode: 2x the bytes<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly'
+[23:09:31] request: prompt 32070 tok | cache: restore 'system' snapshot, reused 32007 | prefilling 63 tok ...
+[23:09:31] snapshots dropped (their KV rows were rewritten): dec1
+[23:09:31] prefill: 63 tok in 0.3s (220 tok/s) | decoding ...
+[23:09:33] tree: 12 cycles: tree 12 (2.67 tok/verify, 109.7 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 6
+[23:09:33] prompt 32070 (cached 32007, prefill 63 in 0.3s) | gen 32 in 1.5s (21.5 tok/s, 2.67 tok/verify, accept 24% (accepted/7 per cycle: 0:8% 1:50% 2:17% 3:17% 4:8% 5:0% 6:0% 7:0%), ms/cycle 124 (draft 13.1 verify 109.7 sample 0.2 ctx 1.0 host 0.1)) | stop | ctx 32102/98304 (32K entry)
+[23:09:33] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 32102 tok, prompt 64906 tok, first difference at 32005:
+   state : ' / INT8 weights for decode: 2x the bytes<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your'
+   prompt: ' / INT8 weights for decode: 2x the bytes of LUT4, so slower per token; useful only for accuracy on small,\n  sensitive matrices or for compute'
+[23:09:33] snapshot 'system' (32007 tok) kept as 'sysk' with its KV rows (1008 MB, 62 ms): this prompt rewrites them
+[23:09:33] [ctx] 32768 -> 8192 at pos 0: segments bound, no KV rows copied (68 ms)
+[23:09:33] request: prompt 64906 tok | cache: cold (no reusable state), reused 0 | prefilling 64906 tok ...
+[23:09:34] [ctx] 8192 -> 65536 at pos 0: segments bound, no KV rows copied (137 ms)
+[23:09:34] v8: 64 ANE KV segments registered (ctx 65536)
+[23:11:53] v8: snapshot 'system' at 64768 (cut 64775), taken during the run
+[23:11:53] v8: snapshot 'turn' at 64896 (cut 64899), taken during the run
+[23:11:53] v8: 64906 tok (118 pad) in 138.9s (467 tok/s) + 192 ms handover / drafter context | setup 166 ms (V fill 0 ms, 0 rows)
+[23:11:53] prefill: 64906 tok in 139.3s (466 tok/s) | decoding ...
+[23:11:56] tree: 12 cycles: tree 3 (6.67 tok/verify, 129.1 ms), chain 9 (7.89 tok/verify, 124.1 ms), other 0, lookup 12; accepted path off the chain rows in 2
+[23:11:56] prompt 64906 (cached 0, prefill 64906 in 139.4s) | gen 183 in 3.2s (57.8 tok/s, 7.62 tok/verify, accept 95% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:4% 4:0% 5:4% 6:12% 7:79%), ms/cycle 132 (draft 7.0 verify 123.0 sample 0.7 ctx 1.0 host 0.1), lookup 12/24 cycles, 7.67 tok/verify) | stop | ctx 65089/98304 (64K entry)
+[23:11:56] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65089 tok, prompt 65043 tok, first difference at 64799:
+   state : ' sure that it passes the tests:\n```python\n\ndef special_factorial(n):\n    """The Brazilian factorial is defined as:\n    brazilian_factorial(n) ='
+   prompt: ' sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n):\n    """\n    Given a positive integer n, return a sorted list that has the'
+[23:11:56] request: prompt 65043 tok | cache: restore 'system' snapshot, reused 64768 | prefilling 275 tok ...
+[23:11:56] v8: sync at 64768 in 8 ms
+[23:11:58] v8: snapshot 'turn' at 65024 (cut 65036), taken during the run
+[23:11:58] v8: 275 tok (109 pad) in 1.2s (233 tok/s) + 33 ms handover / drafter context | setup 1 ms (V fill 0 ms, 0 rows)
+[23:11:58] prefill: 275 tok in 1.2s (223 tok/s) | decoding ...
+[23:12:03] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, system, turn
+[23:12:03] tree: 13 cycles: tree 3 (5.67 tok/verify, 129.3 ms), chain 10 (7.40 tok/verify, 123.1 ms), other 0, lookup 30; accepted path off the chain rows in 3
+[23:12:03] prompt 65043 (cached 64768, prefill 275 in 1.2s) | gen 320 in 5.5s (58.2 tok/s, 7.44 tok/verify, accept 93% (accepted/7 per cycle: 0:0% 1:2% 2:0% 3:2% 4:5% 5:5% 6:0% 7:86%), ms/cycle 128 (draft 4.5 verify 121.7 sample 0.7 ctx 0.8 host 0.1), lookup 30/43 cycles, 7.77 tok/verify) | length | ctx 65367/98304 (64K entry)
+[23:12:03] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65367 tok, prompt 64797 tok, first difference at 64780:
+   state : '.cat([anchor, c<|im_end|>\n<|im_start|>user\nWrite a solution to the following problem and make sure that it passes the tests:\n```python\n\ndef get_odd_collatz(n'
+   prompt: '.cat([anchor, c<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[23:12:03] request: prompt 64797 tok | cache: restore 'system' snapshot, reused 64768 | prefilling 29 tok ...
+[23:12:04] snapshots dropped (their KV rows were rewritten): dec2, turn
+[23:12:04] prefill: 29 tok in 0.5s (61 tok/s) | decoding ...
+[23:12:06] tree: 15 cycles: tree 9 (4.44 tok/verify, 127.0 ms), chain 6 (6.67 tok/verify, 123.4 ms), other 0, lookup 2; accepted path off the chain rows in 5
+[23:12:06] prompt 64797 (cached 64768, prefill 29 in 0.5s) | gen 86 in 2.4s (36.5 tok/s, 5.06 tok/verify, accept 58% (accepted/7 per cycle: 0:0% 1:12% 2:18% 3:18% 4:12% 5:6% 6:18% 7:18%), ms/cycle 138 (draft 11.8 verify 125.0 sample 0.4 ctx 1.0 host 0.1), lookup 2/17 cycles, 3.00 tok/verify) | stop | ctx 64883/98304 (64K entry)
+[23:12:07] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 64883 tok, prompt 64840 tok, first difference at 64778:
+   state : ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nWrite a function to sort a dictionary by value.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n```python\ndef sort'
+   prompt: ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+[23:12:07] request: prompt 64840 tok | cache: restore 'system' snapshot, reused 64775 | prefilling 65 tok ...
+[23:12:07] prefill: 65 tok in 0.5s (130 tok/s) | decoding ...
+[23:12:14] decode snapshots: 1 taken (3 ms); kept: dec0, gen, sysk, system
+[23:12:14] tree: 47 cycles: tree 10 (4.70 tok/verify, 129.3 ms), chain 37 (7.14 tok/verify, 120.9 ms), other 0, lookup 3; accepted path off the chain rows in 6
+[23:12:14] prompt 64840 (cached 64775, prefill 65 in 0.5s) | gen 320 in 6.8s (46.9 tok/s, 6.40 tok/verify, accept 78% (accepted/7 per cycle: 0:0% 1:4% 2:8% 3:10% 4:6% 5:16% 6:2% 7:54%), ms/cycle 136 (draft 12.4 verify 122.5 sample 0.6 ctx 0.8 host 0.1), lookup 3/50 cycles, 3.67 tok/verify) | length | ctx 65162/98304 (64K entry)
+[23:12:14] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65162 tok, prompt 64851 tok, first difference at 64778:
+   state : ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nCarmen has $100, Samantha has $25 more than Carmen, and Daisy has $50'
+   prompt: ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+[23:12:14] request: prompt 64851 tok | cache: restore 'system' snapshot, reused 64775 | prefilling 76 tok ...
+[23:12:15] snapshots dropped (their KV rows were rewritten): dec0
+[23:12:15] prefill: 76 tok in 0.7s (111 tok/s) | decoding ...
+[23:12:22] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, system
+[23:12:22] tree: 47 cycles: tree 12 (4.17 tok/verify, 128.5 ms), chain 35 (7.51 tok/verify, 121.2 ms), other 0, lookup 3; accepted path off the chain rows in 6
+[23:12:22] prompt 64851 (cached 64775, prefill 76 in 0.7s) | gen 320 in 6.8s (46.8 tok/s, 6.40 tok/verify, accept 77% (accepted/7 per cycle: 0:2% 1:4% 2:8% 3:4% 4:14% 5:8% 6:6% 7:54%), ms/cycle 137 (draft 12.4 verify 122.9 sample 0.6 ctx 0.8 host 0.1), lookup 3/50 cycles, 2.67 tok/verify) | length | ctx 65172/98304 (64K entry)
+[23:12:22] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65172 tok, prompt 64832 tok, first difference at 64778:
+   state : ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nA cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in '
+   prompt: ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+[23:12:22] request: prompt 64832 tok | cache: restore 'system' snapshot, reused 64775 | prefilling 57 tok ...
+[23:12:23] snapshots dropped (their KV rows were rewritten): dec1
+[23:12:23] prefill: 57 tok in 0.4s (157 tok/s) | decoding ...
+[23:12:30] decode snapshots: 1 taken (3 ms); kept: dec2, gen, sysk, system
+[23:12:30] tree: 50 cycles: tree 17 (4.29 tok/verify, 127.2 ms), chain 33 (7.06 tok/verify, 121.8 ms), other 0, lookup 2; accepted path off the chain rows in 8
+[23:12:30] prompt 64832 (cached 64775, prefill 57 in 0.4s) | gen 320 in 7.2s (44.7 tok/s, 6.15 tok/verify, accept 74% (accepted/7 per cycle: 0:4% 1:2% 2:8% 3:13% 4:10% 5:8% 6:8% 7:48%), ms/cycle 138 (draft 12.6 verify 123.5 sample 0.5 ctx 0.8 host 0.1), lookup 2/52 cycles, 7.50 tok/verify) | length | ctx 65153/98304 (64K entry)
+[23:12:30] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65153 tok, prompt 64963 tok, first difference at 64778:
+   state : ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nThe product of integers 240 and $k$ is a perfect cube. What is the smallest possible positive value'
+   prompt: ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+[23:12:30] request: prompt 64963 tok | cache: restore 'system' snapshot, reused 64775 | prefilling 188 tok ...
+[23:12:31] snapshots dropped (their KV rows were rewritten): dec2
+[23:12:31] prefill: 188 tok in 1.0s (182 tok/s) | decoding ...
+[23:12:32] tree: 3 cycles: tree 3 (3.00 tok/verify, 129.0 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[23:12:32] prompt 64963 (cached 64775, prefill 188 in 1.0s) | gen 9 in 0.4s (20.9 tok/s, 3.00 tok/verify, accept 29% (accepted/7 per cycle: 0:33% 1:0% 2:33% 3:0% 4:33% 5:0% 6:0% 7:0%), ms/cycle 143 (draft 13.2 verify 129.0 sample 0.3 ctx 0.6 host 0.3)) | stop | ctx 64972/98304 (64K entry)
+[23:12:32] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 64972 tok, prompt 64817 tok, first difference at 64778:
+   state : ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nEvaluate the following movie reviews on a scale of 1 to 5, with 1 being very negative, 3'
+   prompt: ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+[23:12:32] request: prompt 64817 tok | cache: restore 'system' snapshot, reused 64775 | prefilling 42 tok ...
+[23:12:32] prefill: 42 tok in 0.4s (113 tok/s) | decoding ...
+[23:12:43] decode: 204 tok, 10s, 20.2 tok/s, 2.79 tok/verify, accept 25%, ms/cycle 138 (draft 13.0 verify 123.9 sample 0.2 ctx 0.9 host 0.1)
+[23:12:45] tree: 90 cycles: tree 90 (2.76 tok/verify, 123.9 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 34
+[23:12:45] prompt 64817 (cached 64775, prefill 42 in 0.4s) | gen 248 in 12.4s (19.9 tok/s, 2.76 tok/verify, accept 25% (accepted/7 per cycle: 0:10% 1:37% 2:31% 3:13% 4:8% 5:1% 6:0% 7:0%), ms/cycle 138 (draft 13.1 verify 123.9 sample 0.2 ctx 0.9 host 0.1)) | stop | ctx 65065/98304 (64K entry)
+[23:12:45] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 65065 tok, prompt 64838 tok, first difference at 64778:
+   state : ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nWrite a descriptive paragraph about a bustling marketplace, incorporating sensory details such as smells, sounds, and visual elements to create an'
+   prompt: ' = torch.cat([anchor, c<|im_end|>\n<|im_start|>user\nPicture yourself as a 100-years-old tree in a lush forest, minding your own business, when suddenly'
+[23:12:45] request: prompt 64838 tok | cache: restore 'system' snapshot, reused 64775 | prefilling 63 tok ...
+[23:12:46] prefill: 63 tok in 0.4s (169 tok/s) | decoding ...
+[23:12:51] tree: 35 cycles: tree 35 (2.66 tok/verify, 124.3 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 19
+[23:12:51] prompt 64838 (cached 64775, prefill 63 in 0.4s) | gen 93 in 4.9s (19.1 tok/s, 2.66 tok/verify, accept 24% (accepted/7 per cycle: 0:17% 1:31% 2:26% 3:20% 4:6% 5:0% 6:0% 7:0%), ms/cycle 139 (draft 13.5 verify 124.3 sample 0.2 ctx 1.1 host 0.1)) | stop | ctx 64931/98304 (64K entry)
+[23:12:52] thinking off (max_tokens 8) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 64931 tok, prompt 15 tok, first difference at 1:
+   state : '<|im_start|>system\nYou are a helpful assistant. Reference material (a code base) follows; use it only if relevant.\n\n'
+   prompt: '<|im_start|>user\nSay OK.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+[23:12:53] snapshot 'system' (64775 tok) kept as 'sysk' with its KV rows (2040 MB, 669 ms): this prompt rewrites them
+[23:12:53] [ctx] 65536 -> 8192 at pos 0: segments bound, no KV rows copied (77 ms)
+[23:12:53] request: prompt 15 tok | cache: cold (no reusable state), reused 0 | prefilling 15 tok ...
+[23:12:53] snapshots dropped (their KV rows were rewritten): system
+[23:12:53] prefill: 15 tok in 0.2s (62 tok/s) | decoding ...
+[23:12:53] tree: 1 cycles: tree 1 (1.00 tok/verify, 103.2 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 0; accepted path off the chain rows in 0
+[23:12:53] prompt 15 (cached 0, prefill 15 in 1.0s) | gen 1 in 0.1s (8.4 tok/s, 1.00 tok/verify, accept 0% (accepted/7 per cycle: 0:100% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:0%), ms/cycle 118 (draft 14.5 verify 103.2 sample 0.1 ctx 0.5 host 0.1)) | stop | ctx 16/98304 (8K entry)
+[23:13:13] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 16 tok, prompt 3132 tok, first difference at 3:
+   state : '<|im_start|>user\nSay OK.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nOK'
+   prompt: '<|im_start|>user\nFile `scripts/ane_cache_cleanup.py`:\n\n```python\n"""Clean up the two ANE compile caches on macOS'
+[23:13:13] request: prompt 3132 tok | cache: cold (no reusable state), reused 0 | prefilling 3132 tok ...
+[23:13:13] v8: 16 ANE KV segments registered (ctx 8192)
+[23:13:18] v8: snapshot 'turn' at 3072 (cut 3125), taken during the run
+[23:13:18] v8: 3132 tok (68 pad) in 4.7s (674 tok/s) + 183 ms handover / drafter context | setup 122 ms (V fill 0 ms, 0 rows)
+[23:13:18] prefill: 3132 tok in 5.0s (632 tok/s) | decoding ...
+[23:13:22] decode snapshots: 1 taken (6 ms); kept: dec0, gen, sysk, turn
+[23:13:22] tree: 1 cycles: tree 1 (4.00 tok/verify, 108.2 ms), chain 0 (0.00 tok/verify, 0.0 ms), other 0, lookup 40; accepted path off the chain rows in 0
+[23:13:22] prompt 3132 (cached 0, prefill 3132 in 5.0s) | gen 320 in 4.0s (80.1 tok/s, 7.80 tok/verify, accept 99% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:2% 4:0% 5:0% 6:0% 7:98%), ms/cycle 97 (draft 1.0 verify 94.7 sample 0.7 ctx 0.6 host 0.1), lookup 40/41 cycles, 8.00 tok/verify) | length | ctx 3456/98304 (8K entry)
+[23:13:23] [cache] text match: the state's tokens kept for 7 of 3456 (token match stopped at 6); prompt 4366 -> 4366 tok (12 ms)
+[23:13:23] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3456 tok, prompt 4366 tok, first difference at 7:
+   state : '<|im_start|>user\nFile `scripts/ane_cache_cleanup.py`:\n\n```python\n"""Clean up the two ANE compile caches on macOS without breaking what is'
+   prompt: '<|im_start|>user\nFile `scripts/bench_vector_lut.py`:\n\n```python\n#!/usr/bin/env python3\n"""ANE vector palettization check'
+[23:13:23] request: prompt 4366 tok | cache: cold (no reusable state), reused 0 | prefilling 4366 tok ...
+[23:13:29] v8: snapshot 'turn' at 4352 (cut 4359), taken during the run
+[23:13:29] v8: 4366 tok (114 pad) in 6.4s (682 tok/s) + 171 ms handover / drafter context | setup 51 ms (V fill 0 ms, 0 rows)
+[23:13:29] snapshots dropped (their KV rows were rewritten): dec0
+[23:13:29] prefill: 4366 tok in 6.6s (659 tok/s) | decoding ...
+[23:13:33] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, turn
+[23:13:33] tree: 1 cycles: tree 0 (0.00 tok/verify, 0.0 ms), chain 1 (8.00 tok/verify, 104.9 ms), other 0, lookup 39; accepted path off the chain rows in 0
+[23:13:33] prompt 4366 (cached 0, prefill 4366 in 6.6s) | gen 320 in 3.9s (82.4 tok/s, 8.00 tok/verify, accept 100% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:0% 4:0% 5:0% 6:0% 7:100%), ms/cycle 97 (draft 1.0 verify 94.4 sample 0.7 ctx 0.7 host 0.1), lookup 39/40 cycles, 8.00 tok/verify) | length | ctx 4686/98304 (8K entry)
+[23:13:34] [cache] text match: the state's tokens kept for 7 of 4686 (token match stopped at 6); prompt 4032 -> 4033 tok (11 ms)
+[23:13:34] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4686 tok, prompt 4033 tok, first difference at 7:
+   state : '<|im_start|>user\nFile `scripts/bench_vector_lut.py`:\n\n```python\n#!/usr/bin/env python3\n"""ANE vector palettization check'
+   prompt: '<|im_start|>user\nFile `scripts/coreai_compile_guide.py`:\n\n```python\n"""Guided first load of Core AI packages: the first start of'
+[23:13:34] request: prompt 4033 tok | cache: cold (no reusable state), reused 0 | prefilling 4033 tok ...
+[23:13:40] v8: snapshot 'turn' at 3968 (cut 4026), taken during the run
+[23:13:40] v8: 4033 tok (63 pad) in 6.0s (671 tok/s) + 166 ms handover / drafter context | setup 55 ms (V fill 0 ms, 0 rows)
+[23:13:40] snapshots dropped (their KV rows were rewritten): dec1
+[23:13:40] prefill: 4033 tok in 6.2s (647 tok/s) | decoding ...
+[23:13:44] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, turn
+[23:13:44] tree: 6 cycles: tree 3 (3.67 tok/verify, 103.7 ms), chain 3 (6.67 tok/verify, 93.6 ms), other 0, lookup 37; accepted path off the chain rows in 1
+[23:13:44] prompt 4033 (cached 0, prefill 4033 in 6.2s) | gen 320 in 4.3s (75.3 tok/s, 7.44 tok/verify, accept 92% (accepted/7 per cycle: 0:0% 1:2% 2:2% 3:5% 4:0% 5:7% 6:0% 7:84%), ms/cycle 99 (draft 2.6 verify 94.8 sample 0.6 ctx 0.7 host 0.1), lookup 37/43 cycles, 7.78 tok/verify) | length | ctx 4352/98304 (8K entry)
+[23:13:44] [cache] text match: the state's tokens kept for 7 of 4352 (token match stopped at 6); prompt 2322 -> 2323 tok (9 ms)
+[23:13:44] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4352 tok, prompt 2323 tok, first difference at 7:
+   state : '<|im_start|>user\nFile `scripts/coreai_compile_guide.py`:\n\n```python\n"""Guided first load of Core AI packages: the first start of'
+   prompt: '<|im_start|>user\nFile `scripts/dflash2_coreai_compare.py`:\n\n```python\n"""Core ML vs Core AI DFlash2 drafter.'
+[23:13:44] request: prompt 2323 tok | cache: cold (no reusable state), reused 0 | prefilling 2323 tok ...
+[23:13:48] v8: snapshot 'turn' at 2304 (cut 2316), taken during the run
+[23:13:48] v8: 2323 tok (109 pad) in 3.7s (631 tok/s) + 166 ms handover / drafter context | setup 38 ms (V fill 0 ms, 0 rows)
+[23:13:48] snapshots dropped (their KV rows were rewritten): dec2
+[23:13:48] prefill: 2323 tok in 3.9s (598 tok/s) | decoding ...
+[23:13:52] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, turn
+[23:13:52] tree: 2 cycles: tree 1 (2.00 tok/verify, 103.1 ms), chain 1 (3.00 tok/verify, 103.7 ms), other 0, lookup 40; accepted path off the chain rows in 1
+[23:13:52] prompt 2323 (cached 0, prefill 2323 in 3.9s) | gen 320 in 4.1s (78.4 tok/s, 7.62 tok/verify, accept 96% (accepted/7 per cycle: 0:0% 1:2% 2:2% 3:0% 4:0% 5:0% 6:0% 7:95%), ms/cycle 97 (draft 1.3 verify 94.4 sample 0.7 ctx 0.6 host 0.1), lookup 40/42 cycles, 8.00 tok/verify) | length | ctx 2648/98304 (8K entry)
+[23:13:53] [cache] text match: the state's tokens kept for 10 of 2648 (token match stopped at 6); prompt 4627 -> 4628 tok (11 ms)
+[23:13:53] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 2648 tok, prompt 4628 tok, first difference at 10:
+   state : '<|im_start|>user\nFile `scripts/dflash2_coreai_compare.py`:\n\n```python\n"""Core ML vs Core AI DFlash2 drafter.\n    check'
+   prompt: '<|im_start|>user\nFile `scripts/dflash2_drafter_ref.py`:\n\n```python\n"""DFlash2 drafter (5 layers, 1.9'
+[23:13:53] request: prompt 4628 tok | cache: cold (no reusable state), reused 0 | prefilling 4628 tok ...
+[23:14:00] v8: snapshot 'turn' at 4608 (cut 4621), taken during the run
+[23:14:00] v8: 4628 tok (108 pad) in 7.3s (632 tok/s) + 163 ms handover / drafter context | setup 48 ms (V fill 0 ms, 0 rows)
+[23:14:00] snapshots dropped (their KV rows were rewritten): dec0
+[23:14:00] prefill: 4628 tok in 7.5s (614 tok/s) | decoding ...
+[23:14:04] decode snapshots: 1 taken (2 ms); kept: dec1, gen, sysk, turn
+[23:14:04] tree: 2 cycles: tree 1 (2.00 tok/verify, 102.9 ms), chain 1 (3.00 tok/verify, 103.5 ms), other 0, lookup 40; accepted path off the chain rows in 1
+[23:14:04] prompt 4628 (cached 0, prefill 4628 in 7.5s) | gen 320 in 4.1s (78.4 tok/s, 7.62 tok/verify, accept 96% (accepted/7 per cycle: 0:0% 1:2% 2:2% 3:0% 4:0% 5:0% 6:0% 7:95%), ms/cycle 97 (draft 1.3 verify 94.4 sample 0.7 ctx 0.6 host 0.1), lookup 40/42 cycles, 8.00 tok/verify) | length | ctx 4953/98304 (8K entry)
+[23:14:05] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4953 tok, prompt 2127 tok, first difference at 7:
+   state : '<|im_start|>user\nFile `scripts/dflash2_drafter_ref.py`:\n\n```python\n"""DFlash2 drafter (5 layers, '
+   prompt: '<|im_start|>user\nFile `scripts/kl512_gguf.py`:\n\n```python\n"""KL-512 of a GGUF model'
+[23:14:05] request: prompt 2127 tok | cache: cold (no reusable state), reused 0 | prefilling 2127 tok ...
+[23:14:08] v8: snapshot 'turn' at 2048 (cut 2120), taken during the run
+[23:14:08] v8: 2127 tok (49 pad) in 3.6s (593 tok/s) + 171 ms handover / drafter context | setup 54 ms (V fill 0 ms, 0 rows)
+[23:14:08] snapshots dropped (their KV rows were rewritten): dec1
+[23:14:08] prefill: 2127 tok in 3.8s (557 tok/s) | decoding ...
+[23:14:12] decode snapshots: 1 taken (6 ms); kept: dec2, gen, sysk, turn
+[23:14:12] tree: 2 cycles: tree 1 (6.00 tok/verify, 101.7 ms), chain 1 (3.00 tok/verify, 104.7 ms), other 0, lookup 39; accepted path off the chain rows in 0
+[23:14:12] prompt 2127 (cached 0, prefill 2127 in 3.8s) | gen 320 in 4.0s (80.2 tok/s, 7.80 tok/verify, accept 98% (accepted/7 per cycle: 0:0% 1:0% 2:2% 3:0% 4:0% 5:2% 6:0% 7:95%), ms/cycle 97 (draft 1.3 verify 94.4 sample 0.7 ctx 0.7 host 0.1), lookup 39/41 cycles, 8.00 tok/verify) | length | ctx 2448/98304 (8K entry)
+[23:14:13] [cache] text match: the state's tokens kept for 7 of 2448 (token match stopped at 6); prompt 2593 -> 2593 tok (9 ms)
+[23:14:13] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 2448 tok, prompt 2593 tok, first difference at 7:
+   state : '<|im_start|>user\nFile `scripts/kl512_gguf.py`:\n\n```python\n"""KL-512 of a GGUF model'
+   prompt: '<|im_start|>user\nFile `scripts/lut_rules.py`:\n\n```python\n"""Vector-LUT rule checks on the ANE via MIL (iOS18'
+[23:14:13] request: prompt 2593 tok | cache: cold (no reusable state), reused 0 | prefilling 2593 tok ...
+[23:14:17] v8: snapshot 'turn' at 2560 (cut 2586), taken during the run
+[23:14:17] v8: 2593 tok (95 pad) in 4.4s (593 tok/s) + 168 ms handover / drafter context | setup 57 ms (V fill 0 ms, 0 rows)
+[23:14:17] snapshots dropped (their KV rows were rewritten): dec2
+[23:14:17] prefill: 2593 tok in 4.6s (563 tok/s) | decoding ...
+[23:14:22] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, turn
+[23:14:22] tree: 15 cycles: tree 14 (3.57 tok/verify, 98.5 ms), chain 1 (8.00 tok/verify, 99.7 ms), other 0, lookup 33; accepted path off the chain rows in 7
+[23:14:22] prompt 2593 (cached 0, prefill 2593 in 4.6s) | gen 320 in 4.9s (65.5 tok/s, 6.67 tok/verify, accept 81% (accepted/7 per cycle: 0:4% 1:0% 2:8% 3:10% 4:4% 5:2% 6:2% 7:69%), ms/cycle 102 (draft 4.6 verify 95.6 sample 0.6 ctx 0.8 host 0.1), lookup 33/48 cycles, 7.97 tok/verify) | length | ctx 2914/98304 (8K entry)
+[23:14:23] [cache] text match: the state's tokens kept for 7 of 2914 (token match stopped at 6); prompt 3728 -> 3729 tok (9 ms)
+[23:14:23] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 2914 tok, prompt 3729 tok, first difference at 7:
+   state : '<|im_start|>user\nFile `scripts/lut_rules.py`:\n\n```python\n"""Vector-LUT rule checks on the ANE via MIL (iOS18'
+   prompt: '<|im_start|>user\nFile `scripts/m6_attn_layer_int8.py`:\n\n```python\n"""INT8 compute in one real full-attention layer'
+[23:14:23] request: prompt 3729 tok | cache: cold (no reusable state), reused 0 | prefilling 3729 tok ...
+[23:14:29] v8: snapshot 'turn' at 3712 (cut 3722), taken during the run
+[23:14:29] v8: 3729 tok (111 pad) in 6.1s (610 tok/s) + 163 ms handover / drafter context | setup 52 ms (V fill 0 ms, 0 rows)
+[23:14:29] snapshots dropped (their KV rows were rewritten): dec0
+[23:14:29] prefill: 3729 tok in 6.3s (588 tok/s) | decoding ...
+[23:14:33] decode snapshots: 1 taken (6 ms); kept: dec1, gen, sysk, turn
+[23:14:33] tree: 1 cycles: tree 0 (0.00 tok/verify, 0.0 ms), chain 1 (4.00 tok/verify, 104.5 ms), other 0, lookup 40; accepted path off the chain rows in 0
+[23:14:33] prompt 3729 (cached 0, prefill 3729 in 6.3s) | gen 320 in 4.0s (80.7 tok/s, 7.80 tok/verify, accept 99% (accepted/7 per cycle: 0:0% 1:0% 2:0% 3:2% 4:0% 5:0% 6:0% 7:98%), ms/cycle 96 (draft 1.0 verify 94.1 sample 0.7 ctx 0.7 host 0.1), lookup 40/41 cycles, 8.00 tok/verify) | length | ctx 4053/98304 (8K entry)
+[23:14:33] [cache] text match: the state's tokens kept for 9 of 4053 (token match stopped at 6); prompt 3221 -> 3222 tok (10 ms)
+[23:14:33] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4053 tok, prompt 3222 tok, first difference at 9:
+   state : '<|im_start|>user\nFile `scripts/m6_attn_layer_int8.py`:\n\n```python\n"""INT8 compute in one real full-attention layer on the'
+   prompt: '<|im_start|>user\nFile `scripts/m6_compute_roofline.py`:\n\n```python\n"""End-to-end leverage model for M6 ANE attention-compute'
+[23:14:33] request: prompt 3222 tok | cache: cold (no reusable state), reused 0 | prefilling 3222 tok ...
+[23:14:39] v8: snapshot 'turn' at 3200 (cut 3215), taken during the run
+[23:14:39] v8: 3222 tok (106 pad) in 5.4s (596 tok/s) + 169 ms handover / drafter context | setup 51 ms (V fill 0 ms, 0 rows)
+[23:14:39] snapshots dropped (their KV rows were rewritten): dec1
+[23:14:39] prefill: 3222 tok in 5.6s (572 tok/s) | decoding ...
+[23:14:43] decode snapshots: 1 taken (2 ms); kept: dec2, gen, sysk, turn
+[23:14:43] tree: 2 cycles: tree 1 (4.00 tok/verify, 102.8 ms), chain 1 (3.00 tok/verify, 103.9 ms), other 0, lookup 39; accepted path off the chain rows in 0
+[23:14:43] prompt 3222 (cached 0, prefill 3222 in 5.6s) | gen 320 in 4.0s (80.3 tok/s, 7.80 tok/verify, accept 97% (accepted/7 per cycle: 0:0% 1:0% 2:2% 3:2% 4:0% 5:0% 6:0% 7:95%), ms/cycle 97 (draft 1.3 verify 94.3 sample 0.7 ctx 0.6 host 0.1), lookup 39/41 cycles, 8.00 tok/verify) | length | ctx 3541/98304 (8K entry)
+[23:14:43] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3541 tok, prompt 4386 tok, first difference at 1:
+   state : '<|im_start|>user\nFile `scripts/m6_compute_roofline.py`:\n\n```python\n"""End-to-end leverage model'
+   prompt: '<|im_start|>system\n# Tools\n\nYou have access to the following functions:\n\n<tools>\n{"type": "function",'
+[23:14:43] request: prompt 4386 tok | cache: cold (no reusable state), reused 0 | prefilling 4386 tok ...
+[23:14:51] v8: snapshot 'system' at 640 (cut 742), taken during the run
+[23:14:51] v8: snapshot 'turn' at 4352 (cut 4379), taken during the run
+[23:14:51] v8: 4386 tok (94 pad) in 7.4s (590 tok/s) + 229 ms handover / drafter context | setup 46 ms (V fill 0 ms, 0 rows)
+[23:14:51] snapshots dropped (their KV rows were rewritten): dec2
+[23:14:51] prefill: 4386 tok in 7.7s (568 tok/s) | decoding ...
+[23:14:55] tree: 18 cycles: tree 4 (3.25 tok/verify, 100.9 ms), chain 14 (7.14 tok/verify, 93.8 ms), other 0, lookup 19; accepted path off the chain rows in 1
+[23:14:55] prompt 4386 (cached 0, prefill 4386 in 7.7s) | gen 217 in 3.8s (56.7 tok/s, 5.86 tok/verify, accept 69% (accepted/7 per cycle: 0:11% 1:8% 2:3% 3:11% 4:5% 5:3% 6:11% 7:49%), ms/cycle 103 (draft 7.0 verify 95.0 sample 0.5 ctx 0.7 host 0.1), lookup 19/37 cycles, 5.47 tok/verify) | tool_calls | ctx 4603/98304 (8K entry)
+[23:14:55] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4603 tok, prompt 4439 tok, first difference at 749:
+   state : 'll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_hwx_inspect.py, rename the function `hwx_paths` to `hwx_paths_v2` and update'
+   prompt: 'll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_int8_probe.py, add a `verbose: bool = False` keyword argument to `build` that prints its arguments'
+[23:14:55] request: prompt 4439 tok | cache: restore 'system' snapshot, reused 640 | prefilling 3799 tok ...
+[23:14:55] v8: sync at 640 in 14 ms
+[23:15:02] v8: snapshot 'turn' at 4352 (cut 4432), taken during the run
+[23:15:02] v8: 3799 tok (41 pad) in 6.6s (579 tok/s) + 187 ms handover / drafter context | setup 2 ms (V fill 0 ms, 0 rows)
+[23:15:02] prefill: 3799 tok in 6.8s (561 tok/s) | decoding ...
+[23:15:05] tree: 17 cycles: tree 5 (3.20 tok/verify, 100.6 ms), chain 12 (6.92 tok/verify, 93.7 ms), other 0, lookup 9; accepted path off the chain rows in 2
+[23:15:05] prompt 4439 (cached 640, prefill 3799 in 6.8s) | gen 146 in 2.8s (52.9 tok/s, 5.62 tok/verify, accept 66% (accepted/7 per cycle: 0:8% 1:4% 2:12% 3:12% 4:15% 5:0% 6:12% 7:38%), ms/cycle 106 (draft 9.0 verify 95.7 sample 0.5 ctx 0.8 host 0.1), lookup 9/26 cycles, 5.22 tok/verify) | tool_calls | ctx 4585/98304 (8K entry)
+[23:15:05] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4585 tok, prompt 3473 tok, first difference at 749:
+   state : 'll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_int8_probe.py, add a `verbose: bool = False` keyword argument to `build` that prints its arguments'
+   prompt: 'll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_layer_ablation.py, add a docstring to `_gdn_prefill_stub` describing its parameters.<|im_end|>\n<|im_start|>'
+[23:15:05] request: prompt 3473 tok | cache: restore 'system' snapshot, reused 640 | prefilling 2833 tok ...
+[23:15:05] v8: sync at 640 in 16 ms
+[23:15:10] v8: snapshot 'turn' at 3456 (cut 3466), taken during the run
+[23:15:10] v8: 2833 tok (111 pad) in 5.0s (565 tok/s) + 248 ms handover / drafter context | setup 2 ms (V fill 0 ms, 0 rows)
+[23:15:10] prefill: 2833 tok in 5.3s (537 tok/s) | decoding ...
+[23:15:18] decode snapshots: 1 taken (2 ms); kept: dec0, gen, sysk, system, turn
+[23:15:18] tree: 60 cycles: tree 48 (3.29 tok/verify, 97.4 ms), chain 12 (6.92 tok/verify, 95.5 ms), other 0, lookup 13; accepted path off the chain rows in 15
+[23:15:18] prompt 3473 (cached 640, prefill 2833 in 5.3s) | gen 318 in 7.9s (40.0 tok/s, 4.36 tok/verify, accept 48% (accepted/7 per cycle: 0:16% 1:16% 2:11% 3:14% 4:5% 5:8% 6:8% 7:21%), ms/cycle 109 (draft 10.9 verify 96.6 sample 0.4 ctx 0.8 host 0.1), lookup 13/73 cycles, 5.92 tok/verify) | tool_calls | ctx 3791/98304 (8K entry)
+[23:15:19] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3791 tok, prompt 3709 tok, first difference at 749:
+   state : 'll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_layer_ablation.py, add a docstring to `_gdn_prefill_stub` describing its parameters.<|im_end|>\n<|im_start|>'
+   prompt: 'll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_server_bench.py, make `main` raise ValueError when it gets an empty input.<|im_end|>\n<|im_start|>assistant\n<think>'
+[23:15:19] request: prompt 3709 tok | cache: restore 'system' snapshot, reused 640 | prefilling 3069 tok ...
+[23:15:19] v8: sync at 640 in 13 ms
+[23:15:24] v8: snapshot 'turn' at 3584 (cut 3702), taken during the run
+[23:15:24] v8: 3069 tok (3 pad) in 5.1s (602 tok/s) + 183 ms handover / drafter context | setup 3 ms (V fill 0 ms, 0 rows)
+[23:15:24] snapshots dropped (their KV rows were rewritten): dec0
+[23:15:24] prefill: 3069 tok in 5.3s (579 tok/s) | decoding ...
+[23:15:26] tree: 16 cycles: tree 6 (3.17 tok/verify, 99.6 ms), chain 10 (4.90 tok/verify, 94.1 ms), other 0, lookup 8; accepted path off the chain rows in 4
+[23:15:26] prompt 3709 (cached 640, prefill 3069 in 5.3s) | gen 104 in 2.6s (40.7 tok/s, 4.33 tok/verify, accept 48% (accepted/7 per cycle: 0:17% 1:12% 2:12% 3:12% 4:12% 5:8% 6:8% 7:17%), ms/cycle 106 (draft 9.2 verify 96.1 sample 0.4 ctx 0.8 host 0.1), lookup 8/24 cycles, 4.50 tok/verify) | tool_calls | ctx 3813/98304 (8K entry)
+[23:15:27] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3813 tok, prompt 3478 tok, first difference at 747:
+   state : '/anemll-forge<|im_end|>\n<|im_start|>user\nIn scripts/m6_server_bench.py, make `main` raise ValueError when it gets an empty input.<|im_end|>\n<|im_start|>assistant'
+   prompt: '/anemll-forge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_attn_chunk_probe.py, add type hints to `_save`.<|im_end|>\n<|im_start|>assistant\n<think>\n\n'
+[23:15:27] request: prompt 3478 tok | cache: restore 'system' snapshot, reused 640 | prefilling 2838 tok ...
+[23:15:27] v8: sync at 640 in 14 ms
+[23:15:32] v8: snapshot 'turn' at 3456 (cut 3471), taken during the run
+[23:15:32] v8: 2838 tok (106 pad) in 5.0s (567 tok/s) + 184 ms handover / drafter context | setup 2 ms (V fill 0 ms, 0 rows)
+[23:15:32] prefill: 2838 tok in 5.2s (545 tok/s) | decoding ...
+[23:15:34] tree: 14 cycles: tree 6 (2.00 tok/verify, 98.4 ms), chain 8 (5.88 tok/verify, 93.3 ms), other 0, lookup 7; accepted path off the chain rows in 1
+[23:15:34] prompt 3478 (cached 640, prefill 2838 in 5.2s) | gen 85 in 2.2s (38.0 tok/s, 4.05 tok/verify, accept 44% (accepted/7 per cycle: 0:24% 1:10% 2:19% 3:14% 4:5% 5:0% 6:5% 7:24%), ms/cycle 106 (draft 9.2 verify 96.1 sample 0.4 ctx 0.7 host 0.1), lookup 7/21 cycles, 3.71 tok/verify) | tool_calls | ctx 3563/98304 (8K entry)
+[23:15:35] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3563 tok, prompt 4485 tok, first difference at 751:
+   state : 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_attn_chunk_probe.py, add type hints to `_save`.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n<tool_call>\n'
+   prompt: 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_chat.py, move the body of `main` into a helper `_main_body` and call it from `main`.'
+[23:15:35] request: prompt 4485 tok | cache: restore 'system' snapshot, reused 640 | prefilling 3845 tok ...
+[23:15:35] v8: sync at 640 in 14 ms
+[23:15:41] v8: snapshot 'turn' at 4352 (cut 4478), taken during the run
+[23:15:41] v8: 3840 tok (0 pad) in 6.6s (586 tok/s) + 187 ms handover / drafter context | setup 2 ms (V fill 0 ms, 0 rows)
+[23:15:41] v8: the last 5 rows on the bridge (one T-row call, not a padded pair)
+[23:15:41] prefill: 3845 tok in 6.9s (560 tok/s) | decoding ...
+[23:15:46] decode snapshots: 1 taken (3 ms); kept: dec1, gen, sysk, system, turn
+[23:15:46] tree: 10 cycles: tree 1 (2.00 tok/verify, 101.6 ms), chain 9 (4.56 tok/verify, 94.1 ms), other 0, lookup 37; accepted path off the chain rows in 0
+[23:15:46] prompt 4485 (cached 640, prefill 3845 in 6.9s) | gen 320 in 4.7s (68.7 tok/s, 6.81 tok/verify, accept 84% (accepted/7 per cycle: 0:4% 1:6% 2:4% 3:4% 4:2% 5:0% 6:0% 7:79%), ms/cycle 99 (draft 3.4 verify 94.2 sample 0.6 ctx 0.6 host 0.1), lookup 37/47 cycles, 7.57 tok/verify) | tool_calls | ctx 4808/98304 (8K entry)
+[23:15:46] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 4808 tok, prompt 3245 tok, first difference at 751:
+   state : 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_chat.py, move the body of `main` into a helper `_main_body` and call it from `main`.'
+   prompt: 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_decode_ref.py, log the start and end of `load_layer_weights` with the logging module.<|im_end|>\n<|im_start|>assistant'
+[23:15:46] request: prompt 3245 tok | cache: restore 'system' snapshot, reused 640 | prefilling 2605 tok ...
+[23:15:46] v8: sync at 640 in 10 ms
+[23:15:51] v8: snapshot 'turn' at 3200 (cut 3238), taken during the run
+[23:15:51] v8: 2605 tok (83 pad) in 4.6s (568 tok/s) + 176 ms handover / drafter context | setup 2 ms (V fill 0 ms, 0 rows)
+[23:15:51] snapshots dropped (their KV rows were rewritten): dec1
+[23:15:51] prefill: 2605 tok in 4.8s (545 tok/s) | decoding ...
+[23:15:53] tree: 11 cycles: tree 4 (5.00 tok/verify, 99.5 ms), chain 7 (6.14 tok/verify, 93.7 ms), other 0, lookup 4; accepted path off the chain rows in 1
+[23:15:53] prompt 3245 (cached 640, prefill 2605 in 4.8s) | gen 77 in 1.6s (47.7 tok/s, 5.13 tok/verify, accept 59% (accepted/7 per cycle: 0:13% 1:0% 2:7% 3:20% 4:13% 5:13% 6:13% 7:20%), ms/cycle 108 (draft 10.0 verify 96.2 sample 0.4 ctx 0.8 host 0.1), lookup 4/15 cycles, 3.50 tok/verify) | tool_calls | ctx 3322/98304 (8K entry)
+[23:15:53] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3322 tok, prompt 3563 tok, first difference at 751:
+   state : 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_decode_ref.py, log the start and end of `load_layer_weights` with the logging module.<|im_end|>\n<|im_start|>assistant'
+   prompt: 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_divergence.py, replace string formatting with f-strings inside `ref`.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>'
+[23:15:53] request: prompt 3563 tok | cache: restore 'system' snapshot, reused 640 | prefilling 2923 tok ...
+[23:15:53] v8: sync at 640 in 14 ms
+[23:15:58] v8: snapshot 'turn' at 3456 (cut 3556), taken during the run
+[23:15:58] v8: 2923 tok (21 pad) in 5.0s (583 tok/s) + 186 ms handover / drafter context | setup 3 ms (V fill 0 ms, 0 rows)
+[23:15:58] prefill: 2923 tok in 5.2s (560 tok/s) | decoding ...
+[23:16:01] tree: 16 cycles: tree 7 (3.71 tok/verify, 99.5 ms), chain 9 (6.67 tok/verify, 93.7 ms), other 0, lookup 11; accepted path off the chain rows in 2
+[23:16:01] prompt 3563 (cached 640, prefill 2923 in 5.2s) | gen 138 in 2.8s (48.5 tok/s, 5.11 tok/verify, accept 59% (accepted/7 per cycle: 0:15% 1:7% 2:11% 3:15% 4:7% 5:0% 6:4% 7:41%), ms/cycle 105 (draft 8.2 verify 95.8 sample 0.4 ctx 0.7 host 0.1), lookup 11/27 cycles, 4.73 tok/verify) | tool_calls | ctx 3701/98304 (8K entry)
+[23:16:02] thinking off (max_tokens 320) | temperature 0.0, top_p 0.8, min_p 0.0, presence 1.5
+[cache] model state 3701 tok, prompt 3721 tok, first difference at 751:
+   state : 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_divergence.py, replace string formatting with f-strings inside `ref`.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>'
+   prompt: 'ge<|im_end|>\n<|im_start|>user\nIn scripts/qwen38_kv_cache.py, add a guard at the top of `prefill_rows` that returns early when its first argument is'
+[23:16:02] request: prompt 3721 tok | cache: restore 'system' snapshot, reused 640 | prefilling 3081 tok ...
+[23:16:02] v8: sync at 640 in 15 ms
+[23:16:07] v8: snapshot 'turn' at 3712 (cut 3714), taken during the run
+[23:16:07] v8: 3081 tok (119 pad) in 5.5s (557 tok/s) + 180 ms handover / drafter context | setup 3 ms (V fill 0 ms, 0 rows)
+[23:16:07] prefill: 3081 tok in 5.7s (537 tok/s) | decoding ...
+[23:16:09] tree: 12 cycles: tree 3 (3.67 tok/verify, 99.9 ms), chain 9 (6.11 tok/verify, 93.7 ms), other 0, lookup 4; accepted path off the chain rows in 0
+[23:16:09] prompt 3721 (cached 640, prefill 3081 in 5.8s) | gen 81 in 1.7s (47.1 tok/s, 5.06 tok/verify, accept 58% (accepted/7 per cycle: 0:6% 1:6% 2:12% 3:19% 4:19% 5:0% 6:19% 7:19%), ms/cycle 107 (draft 10.2 verify 96.0 sample 0.4 ctx 0.7 host 0.1), lookup 4/16 cycles, 3.75 tok/verify) | tool_calls | ctx 3802/98304 (8K entry)
