@@ -21,7 +21,7 @@ greedy plus seeds 7100 / 7200 / 7300, both orders. Mean cycle 131 ms.
 
 **Status (22 Nov):**
 - Item 2 measured 01:09: fails. Long session -5.9% vs branched in both orders; see `README.md`. Closed.
-- Item 1 step A: probe queued (see `README.md`).
+- Item 1 step A measured 01:14: pays. 48K-sliced costs 0.50 of the 32K to 64K step (linear 0.50), bit-exact; projected served verify 117.9 ms vs a 117.7 ms bar. Step B waits for Anemll.
 
 ### Details
 
