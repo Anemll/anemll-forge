@@ -38,7 +38,7 @@ def save(f,name):
     plt.close(f)
 
 # Row IDs correspond to a valid topological order. Path, matrix and compaction share this parent list.
-f,a=page(590)
+f,a=page(700)
 heading(a,"One call verifies a tree of candidate tokens","Tree8 fits the anchor and seven proposed tokens into the same eight rows as a chain.")
 t(a,44,157,"Build the tree",18,bold=True)
 t(a,454,157,"Mask each row",18,bold=True)
@@ -82,31 +82,39 @@ for i,row in enumerate(path):
     a.annotate("",xy=(x,370),xytext=(x,339),arrowprops={"arrowstyle":"-|>","color":gray,"lw":1.1,"mutation_scale":12})
     rect(a,x-24,376,48,36,sea,teal,.8)
     t(a,x,394,str(i),12,ink,True,align="center")
-t(a,810,451,"New state slots for the next cycle.",10.6,gray)
+t(a,810,451,"Consecutive chain slots.",10.6,gray)
 rect(a,44,486,1112,80,pale)
 t(a,62,507,"Chain-shaped draft",12,ink,True)
 t(a,62,537,"When all seven nodes lie on one path, use the regular chain verifier.",11.4,gray)
-t(a,691,507,"What gets compacted",12,ink,True)
-t(a,691,537,"KV, DeltaNet tape, convolution rows and drafter taps.",10.55,gray)
+t(a,691,507,"Forge chain commit",12,ink,True)
+t(a,691,537,"Pack pending tape, convolution and KV. Gather taps.",10.55,gray)
+line(a,44,590,1156,590,light)
+t(a,62,617,"Why the convolution matches on a chain",13,teal,True)
+t(a,62,647,"Tree tap map − chain shift = 0 on a chain. The correction vanishes, preserving the served convolution.",12,ink)
+t(a,62,675,"M6 controls: 12/12 group outputs bit-identical and 45/45 forced-chain replies matched.",11,gray)
 save(f,"02-tree8-method")
 
 f,a=page(595)
-heading(a,"The benefit and cost of verifier width","The throughput comparison uses the full model. The width sweep times one four-layer verifier group.")
+heading(a,"The benefit and cost of verifier width","Two 36-request sampled benchmarks and a separate four-layer timing probe on the M6.")
 t(a,44,157,"Sampled decode speed",18,bold=True)
 t(a,644,157,"Cost of widening the verifier",18,bold=True)
-t(a,44,191,"Tree8 relative to the eight-row chain",12,gray)
+t(a,44,191,"Tree8 vs chain8 • pooled client tok/s",12,gray)
 t(a,644,191,"Milliseconds per layer group at 8K and 32K context",12,gray)
 line(a,608,145,608,538,light)
-cats=["Overall","8K context","32K context","Code","Tool agent"];gains=[8.5,9.0,11.6,10.9,-1.6]
-def bx(x):return 245+21*x
-for tick in (0,5,10):
-    line(a,bx(tick),219,bx(tick),457,rule if tick==0 else light,1.1)
-    t(a,bx(tick),481,f"{tick}%",10,gray,align="center")
-for i,(c,v) in enumerate(zip(cats,gains)):
-    y=246+i*47
-    t(a,46,y,c,12,ink,c=="Overall")
-    rect(a,bx(min(v,0)),y-9,21*abs(v),18,teal if v>0 else amber)
-    t(a,bx(v)+(9 if v>0 else -8),y,("{:+.1f}%".format(v)).replace("-","−"),11.5,teal if v>0 else amber,True,align="left" if v>0 else "right")
+t(a,44,223,"Workload",10,gray)
+t(a,316,223,"Chain first",10,teal,True,align="center")
+t(a,481,223,"Tree first",10,amber,True,align="center")
+cohorts=["Overall","8K context","32K context","Code","Tool agent"]
+gains_first=[8.5,9.0,11.6,10.9,-1.6]
+gains_reverse=[10.2,5.7,19.3,14.9,-3.9]
+for i,(cohort,first,reverse) in enumerate(zip(cohorts,gains_first,gains_reverse)):
+    y=260+i*45
+    if i==0: rect(a,40,y-20,538,39,pale)
+    line(a,44,y+21,576,y+21,light)
+    t(a,50,y,cohort,13,ink,i==0)
+    for x,gain,color in [(316,first,teal),(481,reverse,amber)]:
+        t(a,x,y,f"{gain:+.1f}%".replace("-","−"),14,color,True,align="center")
+t(a,44,485,"The two blocks used different sampling seeds.",11,gray)
 # Width sweep measures actual group times (two timing blocks per width).
 width=np.arange(8,17)
 ms8=np.array([5.258,5.334,5.403,5.446,5.540,5.627,5.701,5.821,5.814])
@@ -121,8 +129,8 @@ for ms,c,label,marker in [(ms32,amber,"32K","s"),(ms8,teal,"8K","o")]:
     t(a,1106,wy(ms[-1]),label,11.5,c,True)
 for w in width:t(a,wx(w),483,str(w),10,gray,align="center")
 t(a,896,509,"Verifier rows",10.8,gray,align="center")
-t(a,44,531,"3.91 → 4.35 tokens per verify",13,teal,True)
-t(a,44,559,"Cycle time rose 2.4% in this sampled block.",11.1,gray)
+t(a,44,531,"First block: 3.91 → 4.35 tokens per verify",13,teal,True)
+t(a,44,559,"Cycle time rose 2.4% in that block.",11.1,gray)
 t(a,644,531,"At 32K, 14 → 15 rows added 0.34 ms per group.",12.2,amber,True)
 t(a,644,559,"On greedy replay, every wider option lost throughput at 32K.",11,gray)
 save(f,"03-tree8-speed-and-width")
