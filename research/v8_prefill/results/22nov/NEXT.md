@@ -24,6 +24,7 @@ greedy plus seeds 7100 / 7200 / 7300, both orders. Mean cycle 131 ms.
 - Item 1 step A measured 01:14: pays. 48K-sliced costs 0.50 of the 32K to 64K step (linear 0.50), bit-exact; projected served verify 117.9 ms vs a 117.7 ms bar. Step B waits for Anemll.
 - Item 1 step B measured 08:49: clears the keep rule. Long session pooled +1.92% (order a +1.85%, order b +1.99%), 152/152 replies identical, parity gate KL 0. Matches the +1.9% projection. Build v8_dec8ts kept; deploy is Anemll's call. 4-entry set (projected +3.0%) not timed yet.
 - Item 1 step B block 2 measured 10:43: the 4-entry set (24/40/48/56K) clears the keep rule and beats 24K+48K. Long session pooled +3.40% (order a +2.21%, order b +4.59%), +2.49% (a +2.11%, b +2.86%) without one slow served set; 152/152 replies identical, parity gate KL 0. Gain is in 32-57K (+5.4%). Same build v8_dec8ts; deploy is Anemll's call.
+- 11:15 DEPLOYED (Anemll): 4-entry set served (v8_dec8ts, w_dec8ts, RUNG_SLICE=24,40,48,56), smoke MATCH; rollback SERVED_SLICE=0.
 
 ### Details
 

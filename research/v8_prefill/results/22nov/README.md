@@ -251,3 +251,10 @@ Per set (order a / order b): greedy +2.25% / +4.03%, s7100 +2.53% / +9.82%, s720
   135, v8s_48k 64, v8s_56k 114); tree cycle 111.4 / 113.4 -> 108.2 / 108.0 ms, chain 107.0 / 109.5 -> 104.4 ms.
 - HWX: 8 referenced, 0 missing, for both w_dec8tx and v8_dec8ts_w after the run (checked twice). Pi requests 0 and
   errors 0 in every arm. 272 GiB internal free.
+
+STATUS 11:15 DEPLOYED (Anemll's call): the 4-entry set is served. `pipe/v8_server_dec8_qk.sh` defaults to build v8_dec8ts,
+GPU tables `pipe/w_dec8ts` (internal copy of v8_dec8ts_w, only the manifests' `dir` changed) and RUNG_SLICE=24,40,48,56.
+Rollback: `SERVED_SLICE=0` (v8_dec8tx + w_dec8tx, kept as they are; = v8_server_dec8_qk.pre_slice4.sh). Fresh launch at
+11:14 after 30 min Pi idle, banners checked (tree build v8_dec8ts, slice [24, 40, 48, 56]K), smoke 29aef2ec9db18a3f
+MATCH (2K 36.99 tok/s), forge pid 50411, swap watchdog armed as before (+1536 MB). Footprint after the smoke 4545 MB vs
+4461 MB for v8_dec8tx (+84 MB); swap unchanged. HWX: w_dec8ts 8 referenced, 0 missing (x2). Files: `deploy/`.
