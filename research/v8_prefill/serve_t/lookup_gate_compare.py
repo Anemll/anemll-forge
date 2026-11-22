@@ -2,11 +2,12 @@
 code / agent / math / chat): pooled client tok/s of off (lga_off1 + lga_off2, fresh), LOOKUP_GATE=len:16, yield:1.25;
 each gate's change vs off; the ungated lookup's change from the earlier A/Bs with the same prompts and seeds (code /
 agent: lk_on* vs lk_off*; sampled math / chat: lkc2_on* vs lkc2_off*); tok/verify and lookup cycle share.
-    PY lookup_gate_compare.py BENCH_DIR OUT.json"""
+    PY lookup_gate_compare.py BENCH_DIR OUT.json [PREFIX lga]   (off arms: PREFIX_off, _off1, _off2, whichever exist)"""
 import json, sys
 from pathlib import Path
 
 B, OUT = Path(sys.argv[1]), Path(sys.argv[2])
+PRE = sys.argv[3] if len(sys.argv) > 3 else "lga"
 
 
 def rows(labels, mode, cat):
@@ -34,11 +35,11 @@ print(f"{'stratum':14s} | {'off tok/s':>9s} | {'len:16':>16s} | {'yield:1.25':>1
 for mode, sfx, sets in (("greedy", "g", (("gca", "code"), ("gca", "agent"), ("grm", "math"), ("grm", "chat"))),
                         ("sampled", "s", (("sca", "code"), ("sca", "agent"), ("srm", "math"), ("srm", "chat")))):
     for part, cat in sets:
-        off = agg(rows([f"lga_off1_{part}", f"lga_off2_{part}"], mode, cat))
+        off = agg(rows([f"{PRE}_off_{part}", f"{PRE}_off1_{part}", f"{PRE}_off2_{part}"], mode, cat))
         if not off:
             continue
-        g16 = agg(rows([f"lga_len16_{part}"], mode, cat))
-        gy = agg(rows([f"lga_yield_{part}"], mode, cat))
+        g16 = agg(rows([f"{PRE}_len16_{part}"], mode, cat))
+        gy = agg(rows([f"{PRE}_yield_{part}"], mode, cat))
         if part.endswith("ca"):
             un_on = agg(rows([f"lk_on1_{sfx}", f"lk_on2_{sfx}"], mode, cat)); un_off = agg(rows([f"lk_off1_{sfx}", f"lk_off2_{sfx}"], mode, cat))
         elif mode == "sampled":

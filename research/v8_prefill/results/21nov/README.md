@@ -390,3 +390,45 @@ Before that, a repeat in the reverse order and a check on long Pi-like agent ses
 prudent.
 
 Served config restored 15:15:16: forge pid 93698, smoke 29aef2ec9db18a3f, tree8 sampled=on, lookup off, ring fix.
+
+## 15:26 to 16:27: lookup gate, reverse order + long Pi-like agent session (`lookup_gate/ab_rev_long.log`)
+
+`serve_t/gate_reverse_long.sh`; fresh launches, banner first; no Pi traffic, 0 errors in all 6 arms. Served config
+restored 16:26 (forge pid 26797, smoke 29aef2ec9db18a3f).
+
+**Reverse order (off, yield:1.25, len:16)** reproduces the first order within ±0.2 points. The outputs are
+deterministic per config, so only the timing could move:
+
+| stratum | len:16 (1st / reverse) | yield:1.25 (1st / reverse) | ungated (earlier) |
+|---|---|---|---|
+| greedy code | +85.2 / +85.4% | +92.1 / **+92.3%** | +94.9% |
+| greedy agent | −1.7 / −1.8% | +10.9 / **+11.0%** | +0.3% |
+| greedy math | −0.2 / −0.2% | −0.0 / **−0.2%** | |
+| greedy chat | −2.9 / −2.7% | −2.7 / −2.8% | |
+| sampled code | +20.1 / +20.0% | +27.4 / **+27.4%** | +26.0% |
+| sampled agent | −1.3 / −1.3% | +4.6 / **+4.8%** | +6.6% |
+| sampled math | +3.4 / +3.4% | +0.5 / **+0.6%** | −4.2% |
+| sampled chat | +3.3 / +3.5% | −1.0 / −0.9% | +4.0% |
+
+**Long Pi-like agent session.**
+- **Set:** `bench_tree/long_agent_v1.json`, `make_prompts_long.py`. Synthetic, from repo files, no user data.
+  - A 5,474-token system prompt with the coding-agent tools.
+  - 19 turns of user request, read call and file result, growing from 8.6K to 55.5K of context.
+  - Earlier turns carry fixed replies, so every arm sees the same prompts and the server continues from its cache.
+- **Run:** sampled with Pi settings, seed 7100, 512 tokens. Arms off1 / yield:1.25 / off2. off1 vs off2: 19/19
+  identical texts, ±0.8% by band.
+
+| context band | turns | off tok/s (tok/verify) | yield:1.25 tok/s (tok/verify, lookup cycles) | change | faster turns |
+|---|---|---|---|---|---|
+| 8-16K | 4 | 37.71 (4.42) | 36.69 (4.26, 4%) | −2.7% | 2/4 |
+| 16-32K | 6 | 35.16 (4.30) | 33.70 (4.14, 4%) | −4.2% | 1/6 |
+| 32-57K | 9 | 29.54 (3.99) | 31.91 (4.40, 10%) | **+8.0%** | 5/9 |
+| all | 19 | 33.73 (4.22) | 33.92 (4.28, 6%) | +0.6% | 8/19 |
+
+**Verdict.**
+- **Short sets:** `yield:1.25` holds in both orders (code +92% / +27%, agent +11% / +5%, math −0.2% / +0.6%).
+- **The long agent session:** neutral overall, +0.6%. It loses 3-4% at 8-32K (lookup cycles there accept less than
+  the tree they replace: tok/verify 4.42 -> 4.26, 4.30 -> 4.14) and wins 8% at 32-57K, where the tree's yield falls
+  and the copies are longer.
+- **Not yet a default.** A context-aware margin (stricter below 32K) or a calibration of E on long agent traces is the
+  next lookup step if wanted. Defaults unchanged.

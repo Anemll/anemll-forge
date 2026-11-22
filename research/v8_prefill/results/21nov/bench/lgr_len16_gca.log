@@ -1,0 +1,23 @@
+BANNER [lgr_len16_gca] prompts u1_code_agent.json sha dd1cee6ce18b40f3 gen 320 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on lookup_gate=len:16 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)
+[lgr_len16_gca] warmup ttft 0.35s
+[lgr_len16_gca] idle 11.2 W
+[lgr_len16_gca] code code edit-full-file:0 prompt 3132 ttft 5.1s | gen 320 77.5 tok/s | 7.44 tok/verify, cycle 98 ms (verify 94.9) | 33.5 W | sha 4be3226800357249
+[lgr_len16_gca] code code edit-full-file:1 prompt 4366 ttft 7.0s | gen 320 79.4 tok/s | 7.62 tok/verify, cycle 98 ms (verify 94.9) | 33.0 W | sha c8bb2248e31aec48
+[lgr_len16_gca] code code edit-full-file:2 prompt 4032 ttft 6.8s | gen 320 74.0 tok/s | 7.27 tok/verify, cycle 101 ms (verify 95.3) | 36.8 W | sha d965dfb22d29ad0e
+[lgr_len16_gca] code code edit-full-file:3 prompt 2322 ttft 4.3s | gen 320 77.5 tok/s | 7.44 tok/verify, cycle 98 ms (verify 94.7) | 32.2 W | sha a8da31242e3d6cb1
+[lgr_len16_gca] code code edit-full-file:4 prompt 4627 ttft 8.2s | gen 320 79.5 tok/s | 7.62 tok/verify, cycle 98 ms (verify 94.8) | 33.2 W | sha 0cafcb9387f4b6ad
+[lgr_len16_gca] code code edit-full-file:5 prompt 2127 ttft 4.1s | gen 320 81.8 tok/s | 7.80 tok/verify, cycle 98 ms (verify 94.8) | 34.5 W | sha e591aea829ce4395
+[lgr_len16_gca] code code edit-full-file:6 prompt 2593 ttft 5.0s | gen 320 61.0 tok/s | 6.15 tok/verify, cycle 103 ms (verify 95.7) | 29.4 W | sha ab2b22ac9d89d331
+[lgr_len16_gca] code code edit-full-file:7 prompt 3728 ttft 6.8s | gen 320 77.3 tok/s | 7.44 tok/verify, cycle 99 ms (verify 94.9) | 33.1 W | sha 5e528c08bd4cdb8d
+[lgr_len16_gca] code code edit-full-file:8 prompt 3221 ttft 6.1s | gen 320 77.3 tok/s | 7.44 tok/verify, cycle 99 ms (verify 95.0) | 34.6 W | sha 2b099daf701cad6a
+[lgr_len16_gca] code SUMMARY tok/s 75.64 (token-weighted), tok/verify 7.326, output checksum a634066110fb0590
+[lgr_len16_gca] agent agent pi-edit:0 prompt 4386 ttft 8.3s | gen 217 63.4 tok/s | 6.38 tok/verify, cycle 107 ms (verify 95.3) | 31.4 W | sha 055584d339f6b7d0
+[lgr_len16_gca] agent agent pi-edit:1 prompt 4439 ttft 7.2s | gen 146 58.0 tok/s | 5.62 tok/verify, cycle 109 ms (verify 95.9) | 39.5 W | sha 8ea9885707008e78
+[lgr_len16_gca] agent agent pi-edit:2 prompt 3473 ttft 5.5s | gen 320 38.2 tok/s | 4.10 tok/verify, cycle 110 ms (verify 96.6) | 28.3 W | sha f46a5341b8585d33
+[lgr_len16_gca] agent agent pi-edit:3 prompt 3709 ttft 5.6s | gen 104 46.9 tok/s | 4.73 tok/verify, cycle 110 ms (verify 96.6) | 39.5 W | sha bc61b2a4e7fd22e6
+[lgr_len16_gca] agent agent pi-edit:4 prompt 3478 ttft 5.5s | gen 85 42.5 tok/s | 4.25 tok/verify, cycle 110 ms (verify 96.3) | 38.8 W | sha 20d78dc9079f069b
+[lgr_len16_gca] agent agent pi-edit:5 prompt 4485 ttft 7.1s | gen 320 73.9 tok/s | 7.11 tok/verify, cycle 101 ms (verify 94.4) | 29.8 W | sha 46cbe2232845be45
+[lgr_len16_gca] agent agent pi-edit:6 prompt 3245 ttft 5.1s | gen 77 57.8 tok/s | 5.50 tok/verify, cycle 110 ms (verify 96.0) | 44.3 W | sha b40d9535c6bde32c
+[lgr_len16_gca] agent agent pi-edit:7 prompt 3563 ttft 5.5s | gen 141 52.9 tok/s | 5.22 tok/verify, cycle 106 ms (verify 95.8) | 41.1 W | sha b0c89dc0948c5d7f
+[lgr_len16_gca] agent agent pi-edit:8 prompt 3721 ttft 6.0s | gen 81 66.6 tok/s | 6.23 tok/verify, cycle 110 ms (verify 95.8) | 44.6 W | sha 40120ce854e86a27
+[lgr_len16_gca] agent SUMMARY tok/s 53.10 (token-weighted), tok/verify 5.343, output checksum e39e44cc7f5c5ca9
