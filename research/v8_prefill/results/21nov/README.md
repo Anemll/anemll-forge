@@ -808,3 +808,105 @@ the LUT4 / LUT6 adapter tensors and the captures on the SSD.
 
 **Verdict:** not worth porting as a serial ANE drafter. Keep it parked until there is a second execution unit, or an
 adapter that is 2-3x cheaper per pass.
+
+## 21:45 onward: second evening batch (M6 ANE bot): handoff probe, DRAFT_PROF, drafter-split decision, chunked GDN recurrence
+
+### 1. ANE ↔ GPU handoff probe, standalone (`handoff/`)
+
+STATUS 22:06: stopped, so the probe produced no handoff medians. It stalled the ANE for 100 s and then got "Request
+cancelled", in 2 of 3 runs. The ANE recovered each time, no Pi traffic arrived during either stall, and forge was not
+touched. Item 3 uses the 16-17 Nov handoff measurement instead.
+
+**Setup** (sources in `handoff/src/`):
+- **Package:** `v8/build_hop_probe.py`, a scratch build of 49.2 MB, deleted after with `coreai_cache_delete.py` and
+  then the files. Its input x is (1, 5120, 1, 16) fp16, the drafter's width and rows. Three functions:
+  - `cp`: y = x + z
+  - `mm`: a 5120 x 5120 matrix as a 6-bit vector LUT over output-channel pairs (the drafter's format, 9.8 MB)
+  - `mm4`: four such matrices in one call
+- **Compile and loads:** compiled via forge.py (`journal_compile.py`); every load is journaled.
+- **HWX check** (`hwx_mode.py`), before timing in every run: 47.1 MB, zin_ane_compiler v10.302.2, bonded only over ANE
+  instances [0, 1], 6 streams, 10 fp16-lut6bit NE tasks (ActiveNE 4). The second check, after timing, was never reached.
+- **GPU side:** `hop_gpu.swift` wraps the ANE's IOSurface buffers zero-copy (`makeBuffer(bytesNoCopy:)`, the served
+  `dec_wrap`'s method).
+- **Driver:** `hop_probe.py`. Banner first. It times the serial (served) pattern and the fork-join (body-split)
+  pattern, and redoes a block if Pi traffic overlaps it.
+
+| run | time | where it stopped |
+|---|---|---|
+| 1 | 21:57 | At the cross-device value check. The data did cross both ways (each ANE output equalled the GPU's previous output exactly), but my tolerance was wrong: Metal's half add moved the value by one fp16 step (0.00049), not 0.001. Fixed. |
+| 2 | 21:58:52 to 22:00:32 | The first `cp` call hung 100 s, then `ANEProgramProcessRequestDirect() Failed with status=0xf : statusType=0x9: Request cancelled`. |
+| 3 | 22:02:45 to 22:04:26 | Warm-up of all three functions passed, run before Metal loaded. The value chain passed both ways. Calibration passed: ANE `mm` 0.297 ms back to back, GPU busy kernel 0.288 ms. Then the first back-to-back `cp` block hit the same 100 s stall and cancel. |
+
+**After each stall:**
+- A fresh process without Metal ran cp / mm / mm4 / cp normally (0.48-0.98 ms single calls), so the ANE itself
+  recovered.
+- Forge (pid 56175) logged no request in that time.
+
+**Not root-caused.**
+- The same zero-copy wrap runs in the served split verify without stalls. Run 1 also made 6 `cp` calls with Metal
+  loaded.
+- The stall appeared only in processes with the Metal library loaded and the buffers wrapped.
+- Each attempt can block the ANE for 100 s, and a Pi request arriving then would hit forge. So I made no further
+  attempt. A rerun belongs in a window with forge stopped, which is Anemll's call.
+
+**Handoff numbers used instead** (16-17 Nov, `pipe/unit/DECODE_GPU_ATTENTION.md`). These were measured on the served
+split verify (ANE part A, GPU attention, ANE part B). Its IOSurface tensors are about 100 KB each, against the
+drafter's 160 KB. They are typical values; no p90 was recorded.
+- **Each GPU round trip:** about 0.65 ms on top of the kernel.
+  - commit to GPU start: 0.28-0.34 ms (the GPU idles during the ANE call)
+  - GPU end to CPU wake: about 0.1 ms
+  - encoding: 6 us
+- **One extra ANE call:** about 0.25 ms. Fusing part B of chunk k with part A of chunk k+1 saved about 0.25 ms per
+  chunk.
+- **Already tried then, and worse:**
+  - spinning on `cb.status` or a shared event
+  - a GPU-side flag spin (the GPU never sees the store)
+  - a warm-up kick (the ANE call gets about 1.3 ms longer)
+
+### 2. DRAFT_PROF=1 launch, tree8 draft phase (`draft_prof/`, `serve_t/draft_prof.sh`)
+
+STATUS 22:17: done. The tree8 draft phase is 13.3 ms per cycle, and 12.3 ms of it is ANE work. Only about 1.0 ms is host
+work. Served config restored (pid 95936, banner tree8 sampled=on, lookup off, ring fix), smoke 29aef2ec9db18a3f.
+
+**Run:**
+- **Precondition:** Pi had been idle for 4,294 s at 22:06:20, and no reviewer window was running.
+- **Launch:** one fresh launch of the standard launcher with `DRAFT_PROF=1` and otherwise the served config, banner
+  first. The banner shows "DRAFT_PROF timing armed".
+- **Bench:** the long Pi-like agent session, greedy and then sampled seed 7100 (thinking on, 512 tokens).
+- **Output identity:** both runs gave exactly the served off texts (greedy 119a784ffdd31d68, seed 7100
+  6dc42bac15e9127d).
+- **Conditions:** Pi requests 0, errors 0, 42 `drafter prof:` lines. The abort guard (on Pi traffic or a reviewer
+  window) never fired.
+- **Speed:** 38.32 / 32.73 tok/s, against 38.97-39.02 / 33.27-33.28 for the off arms of the 18:59 run on the same texts
+  (−1.7%). The cause was not checked. This flag is never served.
+
+**The draft phase per propose.** Medians over the 29 requests with at least 30 proposes, 8.6K to 55K. The ANE parts do
+not change with context: body 6.75-6.94 ms, head 4.37-4.44 ms.
+
+| part | where | ms per propose |
+|---|---|---|
+| drafter body (`draft` entry) | ANE | 6.86 |
+| target head on the 7 draft rows | ANE | 4.41 |
+| ctx64 context calls (1.97 ms per call, 0.50 calls per propose) | ANE | 0.99 |
+| host work inside propose (top-k, selector, rope / mask fill) | CPU | 0.78 |
+| outside propose (tree assembly), draft minus propose | CPU | about 0.22 (0.12-0.35) |
+| total (the cycle split's draft) | | 13.3, of a 129 ms cycle (10%) |
+
+The 19 Nov chain-era split had "host 1.8-2.0 ms" plus a 1 ms gap. That host figure included the ctx calls, which
+today's `propose host` (1.76 ms) also does. Without the ctx calls the CPU part is 0.78 ms, and the gap is gone.
+
+### 3. Drafter-split proposal
+
+STATUS 22:20: not written, because items 1 and 2 together come nowhere near 3%. The best case of any drafter placement
+change is about 0.8% per cycle, and the split options lose once handoffs are paid. Nothing changed.
+
+| option (item 3 of the first batch) | ceiling before handoffs | handoffs it needs | net |
+|---|---|---|---|
+| C. body split across ANE + GPU | ≤2.4 ms | about 20 joins. A fork-join costs at least an extra ANE call (about 0.25 ms) plus the CPU wake (about 0.1 ms), and a serial round trip about 0.65 ms (16-17 Nov). | −4.6 to −10.6 ms per cycle: loses |
+| D. head split by vocab | ≤0.4 ms | at least 1 join (0.35-0.65 ms) | about 0 or a loss |
+| E. host draft work onto a device | ≤1.0 ms (0.78 inside propose + 0.22 outside, measured in item 2) | at least 1 dispatch; below 64K the GPU is at its low clock | ≤0.8% of a 129 ms cycle |
+| merge the ctx64 call into the body call | the per-call overhead only: about 0.25 ms x 0.5 calls = 0.13 ms | none | about 0.1% |
+
+The drafter's 13.3 ms is 12.3 ms of ANE work that already streams near its DRAM ceiling: the body at about 104 GB/s
+and the head at about 148 GB/s against the 164 GB/s that both units reach together. Moving it does not shorten it.
+The only remaining lever is less drafter work per cycle, which is not a placement question.
