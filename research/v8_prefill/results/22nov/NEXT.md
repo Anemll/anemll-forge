@@ -19,6 +19,10 @@ greedy plus seeds 7100 / 7200 / 7300, both orders. Mean cycle 131 ms.
 
 **Above 2%:** only items 1 and 2, and neither is measured yet. Items 3-7 project below 2% for Pi traffic.
 
+**Status (22 Nov):**
+- Item 2 measured 01:09: fails. Long session -5.9% vs branched in both orders; see `README.md`. Closed.
+- Item 1 step A: probe queued (see `README.md`).
+
 ### Details
 
 **1. Finer decode entries.**

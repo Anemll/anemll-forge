@@ -1,0 +1,601 @@
+{
+ "label": "dk_dk_b_sco4100",
+ "banner": "BANNER [dk_dk_b_sco4100] prompts u1_code_agent.json sha dd1cee6ce18b40f3 gen 384 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=dink topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=dink topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup off",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "dd1cee6ce18b40f3",
+ "gen": 384,
+ "temp": 1.0,
+ "think": 1,
+ "seed": 4100,
+ "started": "2026-11-22 00:08:53",
+ "rungs": {
+  "code": [
+   {
+    "t0": 1795334938.554116,
+    "t_first": 1795334944.099176,
+    "t_last": 1795334954.318496,
+    "t_end": 1795334954.3185642,
+    "ttft_s": 5.5450599193573,
+    "completion_tokens": 384,
+    "prompt_tokens": 3132,
+    "tool_calls": 0,
+    "decode_tps": 37.478031590697185,
+    "usage": {
+     "prompt_tokens": 3172,
+     "completion_tokens": 384,
+     "total_tokens": 3556,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 37.1,
+     "tok_verify": 4.31,
+     "accept_pct": 44,
+     "hist": "0:4% 1:19% 2:22% 3:21% 4:11% 5:3% 6:9% 7:9%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 98.4,
+     "tree_cycles": 64,
+     "tree_tv": 3.3,
+     "tree_ms": 98.8,
+     "chain_cycles": 25,
+     "chain_tv": 6.04,
+     "chain_ms": 97.5,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: add Python type hints to every function signature in file, output complete updated file only, no explanations. Need think carefully about existing code and add type hints to all functions. Need ensure complete updated file. Need likely add return types too? \"Add Python type hints to every function signature\" means all parameters and return types likely. Existing file has many functions with return hints already: user_home() -> Path, os_build() -> str, du(p: Path) -> int, stale_compile_dirs() -> list[Path], failed_specializations(entries, mode: int | None, cutoff: float) -> list[tuple[Path, str]] (entries missing param type), program_refs(entry: Path) -> set[str], main() no hint. Also inner functions scan(), report_orphans(orphans, recent) missing hints. Need add to every function signature including nested? \"every function signature in this file\" likely yes\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"Clean up the two ANE compile caches on macOS without breaking what is still in use.\n\nCore AI keeps an entry per package and Python in ~/Library/Caches/coreai-cache/<macOS build>/<client>/<hash>/; its\nmanifest.plist names the compiled ANE program in aned's cache (ANERegionsHash {soc: \"<a>_<b>\"} ->\n/Library/Caches/com.apple.aned/<build>/ModelAssetsCache/<client>/<a>/<b>/). The two drift apart:\n  - orphaned programs: aned programs no Core AI entry names any more (research builds whose Core AI entries were\n    purged or replaced). They only take disk space: 273 programs, 176 GB on the M6 on 17 Oct",
+    "seed": 4100,
+    "server_prefill": [
+     [
+      3172,
+      5.4
+     ]
+    ],
+    "sha": "393f58361ed6b251",
+    "decode_power": {
+     "samples": 8,
+     "seconds": 10.219320058822632,
+     "mean_w": {
+      "system_power": 21.84064435429084,
+      "total_power": 27.444495916366577,
+      "cpu_power": 2.244643246118019,
+      "gpu_power": 0.003739625562361422,
+      "ane_power": 0.0,
+      "dram_power": 3.3554686903953552
+     },
+     "energy_j": 280.46408762240077,
+     "net_total_w": 17.726128339767456,
+     "net_energy_j": 181.14897890784988
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 0
+   },
+   {
+    "t0": 1795334954.6295428,
+    "t_first": 1795334962.340933,
+    "t_last": 1795334973.492736,
+    "t_end": 1795334973.492797,
+    "ttft_s": 7.711390256881714,
+    "completion_tokens": 384,
+    "prompt_tokens": 4366,
+    "tool_calls": 0,
+    "decode_tps": 34.34422213410119,
+    "usage": {
+     "prompt_tokens": 4406,
+     "completion_tokens": 384,
+     "total_tokens": 4790,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 34.1,
+     "tok_verify": 3.96,
+     "accept_pct": 38,
+     "hist": "0:11% 1:19% 2:22% 3:19% 4:11% 5:11% 6:2% 7:5%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 98.9,
+     "tree_cycles": 78,
+     "tree_tv": 3.35,
+     "tree_ms": 98.8,
+     "chain_cycles": 19,
+     "chain_tv": 5.05,
+     "chain_ms": 99.3,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: Add a one-line docstring to every function that lacks one. Output complete updated file only, no explanations. Need inspect provided file. Need ensure final contains full updated file. Must preserve code except docstrings. Need identify functions lacking docstring: top-level? There is module docstring already. Functions:\n- _unique_blockwise_compress(original_data, mode, *args, **kwargs): no docstring. Add one-line docstring.\n- _groups1_cluster_dim_valid(op, cluster_dim: int, channel_axis: int) -> bool: has comment not docstring? It has comment line, no docstring. Need add one-line docstring. Could replace comment? They ask add one-line docstring to every function that lacks one. We can add docstring, maybe keep comment? But to be minimal, likely add docstring after def and maybe keep comment? If add docstring, comment remains okay\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n#!/usr/bin/env python3\n\"\"\"ANE vector palettization check: does a LUT entry of several weights run natively?\n\nScalar palettization stores one weight per LUT entry; vector palettization\n(coreai-opt ``cluster_dim > 1``) stores ``cluster_dim`` consecutive output-channel\nweights per entry, so one index fetches a whole vector. The ANE compiler has a\nvector-palette path (``palette_vector_size``, \"only supported at Cout for ANE\").\n\nWorkload: S sequential 1x1 nn.Conv2d(C, C) on a (1, C, H, W) input with small\nH*W, so the run is weight-bandwidth bound. Every layer's weights are generated\nfrom a random LUT (",
+    "seed": 4101,
+    "server_prefill": [
+     [
+      4406,
+      7.6
+     ]
+    ],
+    "sha": "14209b8a6bb4dda5",
+    "decode_power": {
+     "samples": 10,
+     "seconds": 11.151803016662598,
+     "mean_w": {
+      "system_power": 22.75469946011031,
+      "total_power": 28.835541915893554,
+      "cpu_power": 2.1447480866393596,
+      "gpu_power": 0.5304554359621241,
+      "ane_power": 0.0,
+      "dram_power": 3.4056389331817627
+     },
+     "energy_j": 321.5682833247625,
+     "net_total_w": 19.117174339294433,
+     "net_energy_j": 213.19096246700846
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 1
+   },
+   {
+    "t0": 1795334973.7935848,
+    "t_first": 1795334980.8221319,
+    "t_last": 1795334991.828303,
+    "t_end": 1795334991.828361,
+    "ttft_s": 7.028547048568726,
+    "completion_tokens": 384,
+    "prompt_tokens": 4032,
+    "tool_calls": 0,
+    "decode_tps": 34.79865905391191,
+    "usage": {
+     "prompt_tokens": 4073,
+     "completion_tokens": 384,
+     "total_tokens": 4457,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 34.5,
+     "tok_verify": 4.0,
+     "accept_pct": 39,
+     "hist": "0:11% 1:18% 2:25% 3:17% 4:8% 5:10% 6:4% 7:6%",
+     "ms_cycle": 116,
+     "draft_ms": 13.1,
+     "verify_ms": 98.6,
+     "tree_cycles": 81,
+     "tree_tv": 3.26,
+     "tree_ms": 98.6,
+     "chain_cycles": 15,
+     "chain_tv": 6.2,
+     "chain_ms": 98.6,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: replace every print(...) call with logging (logger = logging.getLogger(__name__)). Output complete updated file only. Need ensure no prints left? Need inspect file. There are print? Actually module uses self.log = print default, hints? There is print in watch_parent: print(f\"[forge] ...\", file=sys.stderr, flush=True). User says replace every print(...) call with logging (logger = logging.getLogger(__name__)). So include that print. Also default log=print in functions? Those are references to built-in print, not print(...) calls? \"Replace every print(...) call\" strictly calls. But also default parameters log=print are not print calls. However if we want use logging, maybe change defaults to logger? The user specifically says replace every print(...) call with logging (logger = logging.getLogger(__name__)). Output complete updated file only. Need decide whether to change log=print defaults? If only replacing\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"Guided first load of Core AI packages: the first start of a build on a macOS build compiles every package for the\nANE once (then it is cached and later starts take seconds). This module tells the user what is being compiled, how\nfar along it is, how long is left, that stopping is safe, and which build options compile faster.\n\nStandard library only; the package loads are passed in as callables. A cold load runs in a worker thread so the main\nthread can print a heartbeat and react to Ctrl-C immediately (finished packages stay cached; the next start resumes).\nEstimates come from cold compiles measured on the M6 (docs/research/M6_COMPUTE_ACCELERATION_2026-10-03.md) and are\n",
+    "seed": 4102,
+    "server_prefill": [
+     [
+      4073,
+      6.9
+     ]
+    ],
+    "sha": "2972185b8c2ac260",
+    "decode_power": {
+     "samples": 9,
+     "seconds": 11.006171226501465,
+     "mean_w": {
+      "system_power": 22.27396958045015,
+      "total_power": 27.956114451090496,
+      "cpu_power": 2.2330475122370483,
+      "gpu_power": 0.0035333532932967393,
+      "ane_power": 0.0,
+      "dram_power": 3.4455640051099987
+     },
+     "energy_j": 307.68978247637403,
+     "net_total_w": 18.237746874491375,
+     "net_energy_j": 200.727764886244
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 2
+   },
+   {
+    "t0": 1795334992.138479,
+    "t_first": 1795334996.469431,
+    "t_last": 1795335006.265982,
+    "t_end": 1795335006.266036,
+    "ttft_s": 4.330951929092407,
+    "completion_tokens": 384,
+    "prompt_tokens": 2322,
+    "tool_calls": 0,
+    "decode_tps": 39.095391880688,
+    "usage": {
+     "prompt_tokens": 2363,
+     "completion_tokens": 384,
+     "total_tokens": 2747,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 38.7,
+     "tok_verify": 4.52,
+     "accept_pct": 47,
+     "hist": "0:5% 1:20% 2:20% 3:15% 4:9% 5:13% 6:6% 7:12%",
+     "ms_cycle": 117,
+     "draft_ms": 13.2,
+     "verify_ms": 98.8,
+     "tree_cycles": 65,
+     "tree_tv": 3.63,
+     "tree_ms": 98.9,
+     "chain_cycles": 20,
+     "chain_tv": 6.3,
+     "chain_ms": 98.3,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: \"Add `from __future__ import annotations` at the top and change nothing else. Output the complete updated file only.\"\n\nWe need produce final with complete updated file only. Need inspect code. It already has `from __future__ import annotations` after docstring? The file starts:\n\"\"\"Core ML vs Core AI DFlash2 drafter.\n...\"\"\"\nfrom __future__ import annotations\n\nimport json\n...\nActually user asks add at top and change nothing else. It already exists. Need output complete updated file only. Could just output file as given? Need ensure at very top? \"at the top\" maybe after docstring? In Python, future import must appear before any other code except docstring/comments. Existing is after docstring, which is top. If they want literally first line? They say add `from __future__ import annotations` at the top and change nothing else. Since already\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"Core ML vs Core AI DFlash2 drafter.\n    check                torch reference (same GPTQ weights, dequantized) vs the Core ML and Core AI drafters on random\n                         target-like features: hidden cosine, top-16 overlap, drafted tokens, per cycle\n    replay coreml|coreai exact greedy acceptance on saved target traces (TRACES), draft-call time, memory (system wired\n                         and the aned program size); run each in its own process\nenv: COREML_PKG, COREAI_PKG, TRACES, DRAFT_EXPORT (GPTQ export the Core ML package was built from)\"\"\"\nfrom __future__ import annotations\n\nimport json\nimport os\nimport re\nimport subprocess\nimport sys\nimport time\nfrom pathlib import",
+    "seed": 4103,
+    "server_prefill": [
+     [
+      2363,
+      4.2
+     ]
+    ],
+    "sha": "07abbd227ee9dc5b",
+    "decode_power": {
+     "samples": 8,
+     "seconds": 9.796550989151001,
+     "mean_w": {
+      "system_power": 21.674352689879964,
+      "total_power": 27.654330253601074,
+      "cpu_power": 2.255612828461819,
+      "gpu_power": 0.3345478252308335,
+      "ane_power": 0.0,
+      "dram_power": 3.3898169100284576
+     },
+     "energy_j": 270.91705640022406,
+     "net_total_w": 17.935962677001953,
+     "net_energy_j": 175.71057290475892
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 3
+   },
+   {
+    "t0": 1795335006.576247,
+    "t_first": 1795335014.826984,
+    "t_last": 1795335025.071768,
+    "t_end": 1795335025.071829,
+    "ttft_s": 8.250736951828003,
+    "completion_tokens": 384,
+    "prompt_tokens": 4627,
+    "tool_calls": 0,
+    "decode_tps": 37.38487757628688,
+    "usage": {
+     "prompt_tokens": 4668,
+     "completion_tokens": 384,
+     "total_tokens": 5052,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 37.0,
+     "tok_verify": 4.31,
+     "accept_pct": 43,
+     "hist": "0:6% 1:17% 2:21% 3:24% 4:12% 5:6% 6:7% 7:8%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 98.7,
+     "tree_cycles": 68,
+     "tree_tv": 3.5,
+     "tree_ms": 98.8,
+     "chain_cycles": 21,
+     "chain_tv": 5.76,
+     "chain_ms": 98.2,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: \"Rename the first function defined in this file to have a `_impl` suffix and update every call site. Output the complete updated file only.\" Need inspect file: first function defined? The file imports, constants, then first function defined is `load_drafter(path=DRAFTER, dtype=torch.float32)`. But also TargetShared class has methods; \"first function defined\" likely top-level function? Need rename first function defined in file to have `_impl` suffix. Could be `load_drafter` is first top-level function. Need update every call site. Does `load_drafter` called anywhere? In shown code, validate uses DFlash2DraftModel.from_pretrained and DFlash2Drafter(cfg, w), not load_drafter. It is defined but not called in file? Need output complete updated file only. So rename to `load_drafter_impl`. If no\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"DFlash2 drafter (5 layers, 1.92 B params) as a plain torch reference with an explicit, ANE-shaped context\nstore: per draft layer a K/V ring of W = 2048 slots indexed by absolute position (slot = pos % W), and an\nexplicit additive mask built from absolute positions (|q - k| < 2048, non-causal). Mirrors the bundle's\nreference (dflash-07ebd93/dflash/model.py, DFlash2DraftModel + dflash_generate) op for op:\n\n  features (N, 25600) = concat of target layer outputs [5, 19, 33, 47, 61] (",
+    "seed": 4104,
+    "server_prefill": [
+     [
+      4668,
+      8.1
+     ]
+    ],
+    "sha": "36270feb610029bf",
+    "decode_power": {
+     "samples": 8,
+     "seconds": 10.244784116744995,
+     "mean_w": {
+      "system_power": 22.434774777686563,
+      "total_power": 27.990195274353027,
+      "cpu_power": 2.1346785914729844,
+      "gpu_power": 0.0027537240792840133,
+      "ane_power": 0.0,
+      "dram_power": 3.4179881811141968
+     },
+     "energy_j": 286.7535079712827,
+     "net_total_w": 18.271827697753906,
+     "net_energy_j": 187.1909301818505
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 4
+   },
+   {
+    "t0": 1795335025.38149,
+    "t_first": 1795335029.482972,
+    "t_last": 1795335038.0750809,
+    "t_end": 1795335038.0751429,
+    "ttft_s": 4.101481914520264,
+    "completion_tokens": 384,
+    "prompt_tokens": 2127,
+    "tool_calls": 0,
+    "decode_tps": 44.57578477690595,
+    "usage": {
+     "prompt_tokens": 2167,
+     "completion_tokens": 384,
+     "total_tokens": 2551,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 44.0,
+     "tok_verify": 5.12,
+     "accept_pct": 54,
+     "hist": "0:7% 1:13% 2:21% 3:15% 4:4% 5:7% 6:7% 7:27%",
+     "ms_cycle": 116,
+     "draft_ms": 13.3,
+     "verify_ms": 97.8,
+     "tree_cycles": 30,
+     "tree_tv": 3.17,
+     "tree_ms": 100.8,
+     "chain_cycles": 45,
+     "chain_tv": 5.82,
+     "chain_ms": 95.9,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: sort import lines alphabetically and change nothing else. Need output complete updated file only. Need analyze file.\n\nImports currently:\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport json\nimport time\nfrom pathlib import Path\n\nimport numpy as np\n\nWe need sort import lines alphabetically. What does \"import lines\" mean? All import statements? Need sort alphabetically by line? There are:\nfrom __future__ import annotations\nimport argparse\nimport hashlib\nimport json\nimport time\nfrom pathlib import Path\nimport numpy as np\n\nAlphabetically by string:\n\"from __future__ import annotations\" starts with 'f'\n\"import argparse\" 'i'\n\"import hashlib\" 'i'\n\"import json\" 'i'\n\"import time\" 'i'\n\"from pathlib import Path\" 'f'\n\"import numpy as np\" 'i'\n\nIf\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\nfrom __future__ import annotations\n\nfrom pathlib import Path\n\nimport argparse\nimport hashlib\nimport json\nimport numpy as np\nimport time\n\n\"\"\"KL-512 of a GGUF model through llama.cpp: the same 64 cached BF16-teacher sequences, positions and metric as\nscripts/m6_kl512_eval.py (per position, KL over the teacher's top-512 tokens plus one tail bucket, FP64 log-softmax,\npositions weighted equally), so a GPU runtime's model file (e.g. the Unsloth GGUF Splash serves) can be compared with\nthe ANE builds. Self-contained: numpy and llama-cpp-python (Metal) only, no Core AI, so it runs on any Mac.\n\n    pip install llama",
+    "seed": 4105,
+    "server_prefill": [
+     [
+      2167,
+      4.0
+     ]
+    ],
+    "sha": "f80f5730e55db57f",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.592108964920044,
+     "mean_w": {
+      "system_power": 21.932731135145918,
+      "total_power": 27.695641108921595,
+      "cpu_power": 2.190348852279186,
+      "gpu_power": 0.22969034109662692,
+      "ane_power": 0.0,
+      "dram_power": 3.3428707803998674
+     },
+     "energy_j": 237.96396626117334,
+     "net_total_w": 17.977273532322474,
+     "net_energy_j": 154.46269308188775
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 5
+   },
+   {
+    "t0": 1795335038.379895,
+    "t_first": 1795335043.3738549,
+    "t_last": 1795335053.9150999,
+    "t_end": 1795335053.915165,
+    "ttft_s": 4.993959903717041,
+    "completion_tokens": 384,
+    "prompt_tokens": 2593,
+    "tool_calls": 0,
+    "decode_tps": 36.33346920531807,
+    "usage": {
+     "prompt_tokens": 2633,
+     "completion_tokens": 384,
+     "total_tokens": 3017,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 36.0,
+     "tok_verify": 4.17,
+     "accept_pct": 42,
+     "hist": "0:10% 1:14% 2:27% 3:15% 4:11% 5:12% 6:2% 7:9%",
+     "ms_cycle": 116,
+     "draft_ms": 13.4,
+     "verify_ms": 98.2,
+     "tree_cycles": 69,
+     "tree_tv": 3.33,
+     "tree_ms": 98.6,
+     "chain_cycles": 23,
+     "chain_tv": 5.65,
+     "chain_ms": 96.7,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: Add a short comment above every function describing what it does. Output complete updated file only. Need preserve code and add docstrings/comments? \"short comment above every function\" likely comment line above each function definition. Functions: make_lut_weight, build, reference, placement, main. Also maybe build has nested prog function? \"every function\" could include nested `prog` inside build? It says above every function. To be safe add comment above nested prog too? It's inside build; comment above def prog. But \"short comment above every function\" can include nested. Need output complete updated file only, no extra explanation. Need ensure valid Python. Existing file already has docstring for make_lut_weight. User wants comment above every function describing what it does. Could keep docstrings and add # comments. But if add comment above make_lut_weight and still docstring? \"above\" means comment line. Maybe\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"Vector-LUT rule checks on the ANE via MIL (iOS18 constexpr_lut_to_dense).\nEach case: one or two layers; report MLComputePlan placement, cosine of CPU_AND_NE output\nvs numpy reference, and writes the .mlpackage for a direct ane_mil_bench compile.\"\"\"\nimport sys\nfrom pathlib import Path\n\nimport numpy as np\nimport coremltools as ct\nfrom coremltools.converters.mil import Builder as mb\nfrom coremltools.converters.mil.mil import types\n\nOUT = Path(__file__).parent / \"lut_rules\"\nOUT.mkdir(exist_ok=True)\nIDX = {1: types.np_uint1_dtype, 2: types.np_uint2_dtype, 3: types.np_uint3",
+    "seed": 4106,
+    "server_prefill": [
+     [
+      2633,
+      4.8
+     ]
+    ],
+    "sha": "c6d965705ce9b5bf",
+    "decode_power": {
+     "samples": 9,
+     "seconds": 10.541244983673096,
+     "mean_w": {
+      "system_power": 20.788381218162748,
+      "total_power": 26.380483839246963,
+      "cpu_power": 2.2335417664765056,
+      "gpu_power": 0.00492427191524422,
+      "ane_power": 0.0,
+      "dram_power": 3.3536365826924643
+     },
+     "energy_j": 278.0831429373312,
+     "net_total_w": 16.662116262647842,
+     "net_energy_j": 175.63944947101447
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 6
+   },
+   {
+    "t0": 1795335054.226215,
+    "t_first": 1795335061.019615,
+    "t_last": 1795335072.699799,
+    "t_end": 1795335072.699857,
+    "ttft_s": 6.793400049209595,
+    "completion_tokens": 384,
+    "prompt_tokens": 3728,
+    "tool_calls": 0,
+    "decode_tps": 32.79057897304163,
+    "usage": {
+     "prompt_tokens": 3769,
+     "completion_tokens": 384,
+     "total_tokens": 4153,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 32.5,
+     "tok_verify": 3.76,
+     "accept_pct": 36,
+     "hist": "0:10% 1:24% 2:28% 3:13% 4:11% 5:6% 6:2% 7:7%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 98.5,
+     "tree_cycles": 84,
+     "tree_tv": 3.0,
+     "tree_ms": 98.7,
+     "chain_cycles": 18,
+     "chain_tv": 5.89,
+     "chain_ms": 97.9,
+     "other_cycles": 0
+    },
+    "content": "We need answer to user: replace single quotes with double quotes in every string literal and change nothing else. Need output complete updated file only. Need carefully transform Python file. Need ensure only string literals single quotes become double quotes. What about docstrings? The module docstring uses triple double quotes already. The user: Replace single quotes with double quotes in every string literal. This likely includes single-quoted string literals, e.g. 'x', \"output\"? Already double. Also string literals containing apostrophes? Need inspect. Must output complete updated file only, no explanations.\n\nNeed be careful with quotes inside strings. If a string literal contains single quote, replacing single quotes in every string literal could mean inside string content too? Wording: \"Replace single quotes with double quotes in every string literal\" probably means delimiter quotes? Could also mean any single quote character inside string literals? Need infer from common tasks. Usually they want change single-quoted string literals\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"INT8 compute in one real full-attention layer on the M6 ANE, step by step.\n\nBuilds layer 3 (the first full-attention layer) the way a chunk entry runs it: input RMSNorm, the production AttnW\nwith the exported weights and a kv8 cache (INT8 keys and values), residual. Entries: verify (8 rows) and prefill\n(64 rows) at 8K and 64K. Variants swap only the projection weights:\n  base     production: q / o vector-LUT (palettized), k / v INT8 export dequantized to dense FP16 by QConv\n  kvi8     k / v as compile-time INT8 constants (blockwise_shift_scale with the export",
+    "seed": 4107,
+    "server_prefill": [
+     [
+      3769,
+      6.6
+     ]
+    ],
+    "sha": "e39899299a345076",
+    "decode_power": {
+     "samples": 10,
+     "seconds": 11.680184125900269,
+     "mean_w": {
+      "system_power": 22.28797818512537,
+      "total_power": 27.858269119262694,
+      "cpu_power": 2.170479602290917,
+      "gpu_power": 0.003369299986054417,
+      "ane_power": 0.0,
+      "dram_power": 3.3964420318603517
+     },
+     "energy_j": 325.3897127418698,
+     "net_total_w": 18.139901542663573,
+     "net_energy_j": 211.87739004401286
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 7
+   },
+   {
+    "t0": 1795335073.01042,
+    "t_first": 1795335079.046886,
+    "t_last": 1795335088.933552,
+    "t_end": 1795335088.933606,
+    "ttft_s": 6.036465883255005,
+    "completion_tokens": 384,
+    "prompt_tokens": 3221,
+    "tool_calls": 0,
+    "decode_tps": 38.7390448605484,
+    "usage": {
+     "prompt_tokens": 3262,
+     "completion_tokens": 384,
+     "total_tokens": 3646,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 384,
+     "tps": 38.4,
+     "tok_verify": 4.47,
+     "accept_pct": 46,
+     "hist": "0:3% 1:14% 2:30% 3:16% 4:8% 5:12% 6:6% 7:10%",
+     "ms_cycle": 116,
+     "draft_ms": 13.2,
+     "verify_ms": 98.6,
+     "tree_cycles": 63,
+     "tree_tv": 3.67,
+     "tree_ms": 99.0,
+     "chain_cycles": 23,
+     "chain_tv": 5.74,
+     "chain_ms": 97.6,
+     "other_cycles": 0
+    },
+    "content": "We need answer user's request: \"Wrap the module's top-level code (if any) in a main() function and keep all functions unchanged. Output the complete updated file only.\"\n\nNeed inspect code. Top-level code currently: docstring, imports, constants WEIGHT_BYTES_PER_VERIFY, CHUNK_BYTES, HEAD_BYTES, KV_BYTES..., OPTION_CEILINGS, function definitions, and at bottom:\nif __name__ == \"__main__\":\n    sys.exit(main())\n\nNeed \"Wrap the module's top-level code (if any) in a main() function and keep all functions unchanged.\" This likely means all top-level executable code should be inside main, but constants? Top-level code includes constants assignments, imports? Usually \"top-level code\" maybe code outside functions. They want complete updated file only. Need decide. They say keep all functions unchanged. Existing functions unchanged. Need wrap module's top-level code (if any) in a main()\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n```python\n\"\"\"End-to-end leverage model for M6 ANE attention-compute changes.\n\nCompanion to scripts/m6_attn_compute.py. That harness explores the attention\nkernel dtype (INT8-INT8 / FP8-FP8 versus the current V8 dequant-to-FP16). This\nmodule answers a different question: if such a kernel really ran faster on the\nM6 ANE, how much would end-to-end prefill/decode move?\n\nEverything here is arithmetic on documented bytes and an Amdahl split. It is not\nan ANE measurement. The attention time fraction is an on-device input, not a\nconstant. See docs/research/M6_COMPUTE_FEASIBILITY_2026-10-02.md.\n\"\"\"\nfrom __",
+    "seed": 4108,
+    "server_prefill": [
+     [
+      3262,
+      5.9
+     ]
+    ],
+    "sha": "c64f3609db995244",
+    "decode_power": {
+     "samples": 8,
+     "seconds": 9.886666059494019,
+     "mean_w": {
+      "system_power": 22.437890874305825,
+      "total_power": 28.262361526489258,
+      "cpu_power": 2.2082221472249492,
+      "gpu_power": 0.24797938927206556,
+      "ane_power": 0.0,
+      "dram_power": 3.3682691156864166
+     },
+     "energy_j": 279.4205304650909,
+     "net_total_w": 18.543993949890137,
+     "net_energy_j": 183.33827559184124
+    },
+    "cat": "code",
+    "set": "edit-full-file",
+    "index": 8
+   }
+  ]
+ },
+ "idle": {
+  "samples": 2,
+  "seconds": 5.0013427734375,
+  "mean_w": {
+   "system_power": 9.145461902065374,
+   "total_power": 9.718367576599121,
+   "cpu_power": 0.5064653268806656,
+   "gpu_power": 0.004436124187161486,
+   "ane_power": 0.0,
+   "dram_power": 0.062004223465919495
+  },
+  "energy_j": 48.604887448833324
+ },
+ "ended": "2026-11-22 00:11:29"
+}
