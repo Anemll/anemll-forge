@@ -1,0 +1,23 @@
+BANNER [tgl_ctx_b_g] prompts long_agent_v1.json sha 3d75cb7684c06fa6 gen 512 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on lookup_gate=ctx:32768:48:1.25 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)
+[tgl_ctx_b_g] warmup ttft 0.36s
+[tgl_ctx_b_g] idle 7.7 W
+[tgl_ctx_b_g] long agent pi-long:0 prompt 8622 ttft 14.2s | gen 455 50.4 tok/s | 5.83 tok/verify, cycle 119 ms (verify 100.8) | 27.1 W | sha 46dcb8d61f87234f
+[tgl_ctx_b_g] long agent pi-long:1 prompt 10446 ttft 3.6s | gen 512 43.7 tok/s | 5.12 tok/verify, cycle 118 ms (verify 101.2) | 27.3 W | sha 709850c25add436f
+[tgl_ctx_b_g] long agent pi-long:2 prompt 14850 ttft 8.4s | gen 222 36.6 tok/s | 4.11 tok/verify, cycle 116 ms (verify 102.0) | 30.5 W | sha 9eedf3ed29e5ead1
+[tgl_ctx_b_g] long agent pi-long:3 prompt 16187 ttft 3.2s | gen 316 39.4 tok/s | 4.94 tok/verify, cycle 127 ms (verify 107.6) | 28.9 W | sha 195d2a696c6a8655
+[tgl_ctx_b_g] long agent pi-long:4 prompt 18207 ttft 4.7s | gen 208 35.5 tok/s | 4.33 tok/verify, cycle 125 ms (verify 109.7) | 29.7 W | sha 97c757942245b0d5
+[tgl_ctx_b_g] long agent pi-long:5 prompt 20134 ttft 4.5s | gen 405 41.6 tok/s | 5.19 tok/verify, cycle 128 ms (verify 109.7) | 26.9 W | sha 78adc3e9194f2f41
+[tgl_ctx_b_g] long agent pi-long:6 prompt 24208 ttft 8.9s | gen 301 48.2 tok/s | 6.14 tok/verify, cycle 130 ms (verify 109.4) | 29.1 W | sha 98dce39168dbd31c
+[tgl_ctx_b_g] long agent pi-long:7 prompt 25649 ttft 3.9s | gen 296 36.2 tok/s | 4.62 tok/verify, cycle 130 ms (verify 110.4) | 28.5 W | sha 56f33ed676baa465
+[tgl_ctx_b_g] long agent pi-long:8 prompt 27807 ttft 5.7s | gen 67 35.5 tok/s | 3.94 tok/verify, cycle 126 ms (verify 111.3) | 36.6 W | sha de2b2b344405fa17
+[tgl_ctx_b_g] long agent pi-long:9 prompt 30175 ttft 6.1s | gen 125 43.8 tok/s | 5.00 tok/verify, cycle 125 ms (verify 110.2) | 41.6 W | sha eee873868cfd8b39
+[tgl_ctx_b_g] long agent pi-long:10 prompt 33336 ttft 8.1s | gen 299 34.3 tok/s | 4.90 tok/verify, cycle 145 ms (verify 125.2) | 29.2 W | sha df86d057107a3e1b
+[tgl_ctx_b_g] long agent pi-long:11 prompt 38007 ttft 12.3s | gen 299 32.0 tok/s | 4.60 tok/verify, cycle 146 ms (verify 126.3) | 27.2 W | sha f16c0c27278bf8cb
+[tgl_ctx_b_g] long agent pi-long:12 prompt 39497 ttft 4.8s | gen 179 39.8 tok/s | 5.42 tok/verify, cycle 141 ms (verify 126.3) | 33.6 W | sha 7db6defd2e785a7e
+[tgl_ctx_b_g] long agent pi-long:13 prompt 43285 ttft 10.7s | gen 16 37.1 tok/s | 4.00 tok/verify, cycle 141 ms (verify 132.0) | 44.9 W | sha f901d7bf31e14ef8
+[tgl_ctx_b_g] long agent pi-long:14 prompt 45212 ttft 6.0s | gen 18 63.5 tok/s | 6.00 tok/verify, cycle 141 ms (verify 133.4) | nan W | sha 4feebbd5bd1c43c4
+[tgl_ctx_b_g] long agent pi-long:15 prompt 47116 ttft 6.2s | gen 17 37.9 tok/s | 4.25 tok/verify, cycle 146 ms (verify 136.3) | nan W | sha 3ee489937c89d37c
+[tgl_ctx_b_g] long agent pi-long:16 prompt 49297 ttft 7.1s | gen 154 37.1 tok/s | 4.81 tok/verify, cycle 139 ms (verify 125.5) | 30.5 W | sha 2f8fc72fb08cce3a
+[tgl_ctx_b_g] long agent pi-long:17 prompt 52813 ttft 10.9s | gen 297 29.5 tok/s | 4.24 tok/verify, cycle 146 ms (verify 125.6) | 27.8 W | sha 490aa3ff7748c052
+[tgl_ctx_b_g] long agent pi-long:18 prompt 55454 ttft 8.7s | gen 296 36.0 tok/s | 5.19 tok/verify, cycle 147 ms (verify 125.8) | 29.3 W | sha 9cb6567eb11f3646
+[tgl_ctx_b_g] long SUMMARY tok/s 38.72 (token-weighted), tok/verify 4.945, output checksum ff4b95e493b8fc9b

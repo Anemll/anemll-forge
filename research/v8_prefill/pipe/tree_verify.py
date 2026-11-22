@@ -45,8 +45,9 @@ LOOKUP_OBSERVE = os.environ.get("LOOKUP_OBSERVE", "0") == "1"
 # draft only when its match is >= L tokens; yield:M = only when E(lookup tokens | match length) / (cycle - drafter ms) > M x
 # the request's running tree / chain tokens per ms (no tree history yet: match >= 16). E from the observe-mode logs
 # (results/21nov/lookup_gate/e_table.json). ctx:C:L:M = context-aware: below C positions only a match >= L that also
-# passes yield:M (L = off: no lookup below C), at / above C yield:M (e.g. ctx:32768:48:1.25). Anything else: the
-# served lookup rule unchanged.
+# passes yield:M (L = off: no lookup below C), at / above C yield:M (e.g. ctx:32768:48:1.25). think:T:BASE = inside
+# the reasoning span (the last <think> after the last </think> in the history + anchor) no lookup (T = off) or only
+# matches >= T, and BASE; outside it BASE (e.g. think:24:yield:1.25). Anything else: the served lookup rule unchanged.
 LOOKUP_GATE = os.environ.get("LOOKUP_GATE", "")
 LK_E = {"greedy": {6: 4.0, 8: 5.38, 12: 6.837, 16: 7.194, 24: 7.528, 32: 7.72, 48: 7.967},
         "sampled": {6: 4.842, 8: 5.974, 12: 6.721, 16: 6.965, 24: 6.872, 32: 7.422, 48: 7.889}}
@@ -190,7 +191,7 @@ class Tree:
 
     def _req_stats(self):
         return {"cycles": 0, "tree": 0, "chain": 0, "other": 0, "lookup": 0, "tok": 0, "tree_tok": 0, "chain_tok": 0,
-                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0, "sampled": 0, "gated": 0}
+                "tree_ms": 0.0, "chain_ms": 0.0, "nonprefix": 0, "sampled": 0, "gated": 0, "lk_think": 0, "gated_think": 0}
 
     # ---- split path (dec8): tdva / tdvba + GPU attention with the tree mask ----
     def _init_split(self):
@@ -376,9 +377,39 @@ class Tree:
         c_l = max(self._cyc_ema - self._draft_ema, 1.0)
         return e / c_l > margin * ref
 
-    def _gate(self, L, temp, pos=0):
-        """LOOKUP_GATE: take this lookup proposal (match length L, context position pos)?"""
-        kind, _, arg = LOOKUP_GATE.partition(":")
+    def _in_think(self, eng, anchor):
+        """Is the cycle inside the reasoning span: the last <think> after the last </think> in the committed tokens +
+        the anchor? Scanned incrementally per request (eng.tokens only grows within a request)."""
+        if getattr(self, "_think_ids", None) is None:
+            t = getattr(eng, "tok", None)
+            self._think_ids = (int(t.convert_tokens_to_ids("<think>")) if t is not None else 248068,
+                               int(getattr(eng, "think_close", 248069)))
+        o_id, c_id = self._think_ids
+        h = eng.tokens
+        v = h.view()
+        c = getattr(self, "_thc", None)
+        if c is None or c[0] is not h or c[1] > len(v):
+            c = [h, 0, -1, -1]
+        seg = v[c[1]:]
+        io, ic = np.flatnonzero(seg == o_id), np.flatnonzero(seg == c_id)
+        if len(io):
+            c[2] = c[1] + int(io[-1])
+        if len(ic):
+            c[3] = c[1] + int(ic[-1])
+        c[1] = len(v)
+        self._thc = c
+        if int(anchor) == c_id:
+            return False
+        return int(anchor) == o_id or c[2] > c[3]
+
+    def _gate(self, L, temp, pos=0, think=False, spec=None):
+        """LOOKUP_GATE: take this lookup proposal (match length L, context position pos, inside the reasoning span)?"""
+        kind, _, arg = (LOOKUP_GATE if spec is None else spec).partition(":")
+        if kind == "think":   # think:T:BASE
+            t, _, base = arg.partition(":")
+            if think and (t == "off" or L < int(t)):
+                return False
+            return self._gate(L, temp, pos, think, base)
         if kind == "len":
             return L >= int(arg or 16)
         if kind == "yield":
@@ -424,8 +455,10 @@ class Tree:
             else:
                 import ngram_draft as NG
                 hit = NG.lookup(eng.tokens.with_anchor(anchor), eng.ngram.k, eng.ngram.need, eng.ngram.max_match)
-                take = hit is not None and self._gate(hit[1], temp, mb.pos)
+                th = hit is not None and LOOKUP_GATE.startswith("think") and self._in_think(eng, anchor)
+                take = hit is not None and self._gate(hit[1], temp, mb.pos, th)
                 self.req["gated"] += int(hit is not None and not take)
+                self.req["gated_think"] += int(th and not take); self.req["lk_think"] += int(th and take)
             if take:
                 self.req["lookup"] += 1
                 return orig(anchor, samp, rng, seen, hist, dry)
@@ -592,7 +625,8 @@ class Tree:
             self.log(f"tree: {q['cycles']} cycles: tree {q['tree']} ({tv('tree'):.2f} tok/verify, "
                      f"{q['tree_ms'] / max(1, q['tree']):.1f} ms), chain {q['chain']} ({tv('chain'):.2f} tok/verify, "
                      f"{q['chain_ms'] / max(1, q['chain']):.1f} ms), other {q['other']}, lookup {q['lookup']}; accepted path off the chain rows "
-                     f"in {q['nonprefix']}; sampled {q['sampled']}; lookup gated {q['gated']}")
+                     f"in {q['nonprefix']}; sampled {q['sampled']}; lookup gated {q['gated']}"
+                     + (f"; in reasoning: lookup {q['lk_think']}, gated {q['gated_think']}" if LOOKUP_GATE.startswith("think") else ""))
         if self.rec is not None:   # one file per request (an empty one too: files stay aligned with requests)
             od = Path(LOGDIR); od.mkdir(parents=True, exist_ok=True)
             fn = od / f"tree_{int(time.time() * 1e3)}.npz"
@@ -617,6 +651,7 @@ class Tree:
             self.rec.clear()
         self.req = self._req_stats()
         self._yield_ema = None   # per request (the cycle / drafter ms references carry over)
+        self._thc = None         # the reasoning-span scan, per request
 
 
 def install(eng, log=print):

@@ -1,0 +1,23 @@
+BANNER [tgl_thk_a_s7100] prompts long_agent_v1.json sha 3d75cb7684c06fa6 gen 512 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on lookup_gate=think:24:yield:1.25 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)
+[tgl_thk_a_s7100] warmup ttft 0.48s
+[tgl_thk_a_s7100] idle 9.4 W
+[tgl_thk_a_s7100] long agent pi-long:0 prompt 8622 ttft 6.5s | gen 397 41.5 tok/s | 4.78 tok/verify, cycle 118 ms (verify 100.5) | 25.7 W | sha f698cd8578541fa7
+[tgl_thk_a_s7100] long agent pi-long:1 prompt 10446 ttft 3.9s | gen 512 35.1 tok/s | 4.06 tok/verify, cycle 117 ms (verify 101.1) | 27.0 W | sha 670f982e207aa5f6
+[tgl_thk_a_s7100] long agent pi-long:2 prompt 14850 ttft 8.7s | gen 126 38.8 tok/s | 4.34 tok/verify, cycle 116 ms (verify 101.8) | 38.9 W | sha 81aae0fff1a124b3
+[tgl_thk_a_s7100] long agent pi-long:3 prompt 16187 ttft 3.3s | gen 147 37.0 tok/s | 4.20 tok/verify, cycle 116 ms (verify 101.4) | 39.1 W | sha 5d357f2f3d2e42ed
+[tgl_thk_a_s7100] long agent pi-long:4 prompt 18207 ttft 4.7s | gen 462 39.1 tok/s | 4.86 tok/verify, cycle 127 ms (verify 109.1) | 26.1 W | sha 732e90a58e554575
+[tgl_thk_a_s7100] long agent pi-long:5 prompt 20134 ttft 4.6s | gen 293 39.1 tok/s | 4.80 tok/verify, cycle 127 ms (verify 109.8) | 30.1 W | sha de114614d04672ca
+[tgl_thk_a_s7100] long agent pi-long:6 prompt 24208 ttft 9.0s | gen 356 32.2 tok/s | 4.00 tok/verify, cycle 127 ms (verify 109.2) | 27.5 W | sha 9479b85346265220
+[tgl_thk_a_s7100] long agent pi-long:7 prompt 25649 ttft 4.0s | gen 314 28.8 tok/s | 3.65 tok/verify, cycle 128 ms (verify 110.0) | 29.1 W | sha a53746eb4a98062a
+[tgl_thk_a_s7100] long agent pi-long:8 prompt 27807 ttft 5.5s | gen 189 31.7 tok/s | 3.86 tok/verify, cycle 124 ms (verify 109.5) | 30.6 W | sha db60fc6cb67a2465
+[tgl_thk_a_s7100] long agent pi-long:9 prompt 30175 ttft 6.1s | gen 288 27.9 tok/s | 3.39 tok/verify, cycle 124 ms (verify 109.8) | 27.4 W | sha f57c4c6b4a030df8
+[tgl_thk_a_s7100] long agent pi-long:10 prompt 33336 ttft 8.0s | gen 335 25.9 tok/s | 3.68 tok/verify, cycle 144 ms (verify 124.8) | 27.3 W | sha 9454b33dbee560a2
+[tgl_thk_a_s7100] long agent pi-long:11 prompt 38007 ttft 12.5s | gen 277 24.5 tok/s | 3.38 tok/verify, cycle 141 ms (verify 126.0) | 26.7 W | sha f5c9cda576e628cb
+[tgl_thk_a_s7100] long agent pi-long:12 prompt 39497 ttft 4.7s | gen 45 28.9 tok/s | 3.75 tok/verify, cycle 142 ms (verify 128.5) | 44.9 W | sha 6c3d1d35df5f061b
+[tgl_thk_a_s7100] long agent pi-long:13 prompt 43285 ttft 10.9s | gen 16 37.5 tok/s | 3.20 tok/verify, cycle 144 ms (verify 133.3) | 45.1 W | sha f901d7bf31e14ef8
+[tgl_thk_a_s7100] long agent pi-long:14 prompt 45212 ttft 6.0s | gen 18 61.9 tok/s | 6.00 tok/verify, cycle 148 ms (verify 138.1) | 44.2 W | sha 4feebbd5bd1c43c4
+[tgl_thk_a_s7100] long agent pi-long:15 prompt 47116 ttft 6.2s | gen 17 38.8 tok/s | 4.25 tok/verify, cycle 147 ms (verify 135.7) | 44.2 W | sha 3ee489937c89d37c
+[tgl_thk_a_s7100] long agent pi-long:16 prompt 49297 ttft 7.1s | gen 20 34.4 tok/s | 4.00 tok/verify, cycle 144 ms (verify 132.2) | nan W | sha c6e3709375c20a59
+[tgl_thk_a_s7100] long agent pi-long:17 prompt 52813 ttft 11.1s | gen 18 30.3 tok/s | 3.60 tok/verify, cycle 138 ms (verify 127.7) | nan W | sha e2cda23fa0b2b07f
+[tgl_thk_a_s7100] long agent pi-long:18 prompt 55454 ttft 9.2s | gen 14 31.8 tok/s | 2.33 tok/verify, cycle 146 ms (verify 133.0) | 41.3 W | sha d665859c2133499f
+[tgl_thk_a_s7100] long SUMMARY tok/s 32.71 (token-weighted), tok/verify 4.041, output checksum 8d983c7c8020e429

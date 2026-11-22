@@ -527,3 +527,140 @@ Each yield:1.25 change is measured against the off arms of its own run (lga + lg
   - `lcg_*.driver.log` and `lcg_*.server.log`
   - `restore_ctx.driver.log`
 - Raw bench rows: `bench/lcg_*`, `bench/served_after_lcg.*`.
+
+## 18:38 to 20:55: lookup gate inside the reasoning span (`think_gate/`)
+
+The offline sim finished at 18:38. The live run took 18:59 to 20:55. It started once the reviewer's window ended
+(18:58) and Pi was idle.
+
+**Gate.** `LOOKUP_GATE=think:T:BASE` in `pipe/tree_verify.py`, default off, served defaults unchanged.
+- **Inside the reasoning span:** a lookup proposal is taken only when its match is at least T tokens (`T = off`: none)
+  and it also passes BASE.
+- **Outside the span:** BASE alone.
+- **Span test:** the last `<think>` (248068) comes after the last `</think>` (248069) in history plus anchor. The scan
+  is incremental per request.
+- **Tree line:** a think gate adds `in reasoning: lookup N, gated M`.
+- **Checks:**
+  - `serve_t/think_gate_unit.py`: 17 checks, ALL OK.
+  - The refactored `_gate` decides as before for yield, ctx and len rules (16,000 random cases, 0 differ).
+  - The tree unit tests pass.
+
+**Offline sim.** `serve_t/think_gate_sim.py`, output in `think_gate/sim.log` and `.json`.
+- **A. Short sets, exact cycles** from the lgo21 tree traces.
+  - Reasoning is 44-55% of the sampled tokens.
+  - The short greedy benches run thinking off, so the rule never acts there.
+
+| sampled stratum | yield:1.25 | ctx:32768:48:1.25 | think:off:yield:1.25 | think:24:yield:1.25 | measured yield / ctx |
+|---|---|---|---|---|---|
+| code | +43.6% | +30.2% | +41.8% | +44.2% | +27.4% / +18.0% |
+| agent | +5.7% | +1.7% | +2.4% | +4.8% | +4.7% / +1.1% |
+| math | −0.2% | +0.0% | +0.0% | −0.0% | +0.5% / −0.1% |
+| chat | −0.1% | −0.2% | +0.0% | −0.1% | −1.0% / +0.8% |
+| all | +13.9% | +9.2% | +12.7% | +14.0% | |
+
+  - **The sim runs high** (code +43.6% vs +27.4% measured) but keeps the measured order.
+  - **Why it runs high:** the tree yields more on cycles where lookup has a match. Sampled tree tokens per cycle are
+    3.65 overall, 5.58 at a 6+ match, and 6.32 at 16+. A replay with one average tree yield therefore overstates what
+    lookup adds.
+  - **On the short sets, reasoning lookups pay.** Turning them off (think:off) loses half the agent gain. A 24-token
+    minimum there costs almost nothing.
+- **B. Long session replay.**
+  - Each reply is rebuilt from the bench text: reasoning, `</think>`, answer, and the tool-call XML from the template.
+    It lands within 1 token of the server's counts. Lookup is then run at every position.
+  - **Validation is weak.** On the 10,446-token turn the sim finds 4 ctx lookups where the live run took 0 on the same
+    text. At 32-57K it gives −1.1% to −2.9% where the live run measured +8%.
+  - **What it does show:** 17 of the 40-44 yield lookups below 32K fall in reasoning. The think rules move 8-32K by
+    about +1 point. The 16-32K dip comes from lookups in the answer, which the think rule leaves in place.
+  - **Totals** (tree yield scaled by match length): yield −1.6%, think:24:yield −0.6%, ctx −1.1%.
+- **Picked for the live run: `think:24:yield:1.25`.** It keeps yield's short-set gain and is tied or best in the long
+  replay.
+
+**Live run.** `serve_t/think_gate_ab.sh`, results in `think_gate/ab.log` and `compare.json`.
+- **Arms:** six fresh launches in ABBA order (off_a, ctx_a, thk_a, thk_b, ctx_b, off_b), banner first.
+  - ctx = `ctx:32768:48:1.25`, thk = `think:24:yield:1.25`.
+- **Per arm:** the long Pi-like agent session (19 turns, 8.6K to 55.5K, 512 tokens, thinking on, budget 256).
+  - Greedy once.
+  - Then sampled (Pi settings, temperature 1.0) with seeds 7100, 7200 and 7300.
+  - Unlike the short greedy benches, greedy here has thinking on, so the rule acts in greedy too.
+- **Conditions:**
+  - Every banner shows the right gate. Pi requests 0 and errors 0 in all six arms.
+  - ctx turned down 447 proposals per arm.
+  - thk turned down 358 / 367. Of those, 207 were in reasoning, and 29 reasoning lookups passed.
+- **Restore:** served config back at 20:55 (forge pid 56175). Banner: tree8 sampled=on, lookup off, ring fix. Smoke
+  29aef2ec9db18a3f.
+
+**Determinism.** Repeats of one config give the same texts:
+- **off:** 19/19 greedy, 57/57 sampled.
+- **ctx:** 19/19 and 57/57.
+- **thk:** 19/19 and 56/57.
+  - The one thk difference is seed 7100 on the 24,208-token turn: 3 lookup cycles in thk_a, 6 in thk_b.
+  - The yield rule reads measured cycle times, so a borderline decision can flip from run to run. In sampled mode a
+    different draft changes the sampled text.
+- **Timing drift:** off_a and off_b agree within 0.3% (38.97 / 39.02 tok/s greedy), so drift is negligible.
+
+| stratum | off tok/s | ctx (order a / b) | ctx, same text | think:24:yield (order a / b) | think, same text | think vs ctx |
+|---|---|---|---|---|---|---|
+| greedy 8-16K | 43.39 | −0.3% (−0.1 / −0.5) | −0.3% (4/4) | +0.4% (+0.4 / +0.5) | +0.1% (3/4) | +0.7% |
+| greedy 16-32K | 40.41 | −0.1% (−0.0 / −0.2) | −0.1% (6/6) | −0.8% (−0.8 / −0.9) | −0.8% (6/6) | −0.7% |
+| greedy 32-57K | 34.56 | −1.2% (−1.0 / −1.4) | −1.4% (6/9) | −3.7% (−3.6 / −3.7) | −3.1% (5/9) | −2.5% |
+| greedy all | 38.99 | −0.6% (−0.5 / −0.8) | −0.5% (16/19) | −1.6% (−1.6 / −1.6) | −1.0% (14/19) | −1.0% |
+| sampled 8-16K | 37.80 | +0.0% (+0.0 / −0.0) | −0.1% (11/12) | +0.1% (+0.2 / −0.1) | −0.1% (6/12) | +0.0% |
+| sampled 16-32K | 35.14 | −4.6% (−4.6 / −4.6) | −0.0% (13/18) | −1.2% (−1.6 / −0.8) | +0.9% (7/18) | +3.5% |
+| sampled 32-57K | 30.05 | −1.7% (−1.7 / −1.8) | −4.4% (10/27) | +1.4% (+1.5 / +1.4) | −2.6% (11/27) | +3.2% |
+| sampled all | 33.56 | −1.5% (−1.5 / −1.5) | −0.4% (34/57) | +1.6% (+1.5 / +1.7) | −0.2% (24/57) | +3.1% |
+
+**Per seed, sampled whole session:**
+
+| seed | ctx | think:24:yield |
+|---|---|---|
+| 7100 | −3.1% | −1.1% |
+| 7200 | −4.5% | −1.0% |
+| 7300 | +4.1% | +7.3% |
+
+From the seed spread, the standard error is about 2.7% for either gate.
+
+**Text-only noise** came from very few requests this time (greedy n=1, sampled n=6 at 19.2%). So the per-stratum
+noise columns in `compare.json` are rough. The seed spread gives a similar size.
+
+**Findings.**
+- **Neither gate is a measured gain on the long session.**
+  - Sampled pooled: ctx −1.5%, think +1.6%. Both are within one seed standard error.
+  - The think gate's +1.6% comes from seed 7300 (+7.3%). Seeds 7100 and 7200 lose 1.0-1.1%.
+- **On same-text sampled requests, the gate effect is about zero:** ctx −0.4%, think −0.2%. The whole-session changes
+  are text divergence. The ctx 16-32K −4.6% is the clearest case: same text −0.0% (13/18), with 1% of cycles taking
+  lookup.
+- **Greedy shows a small real cost.** Its texts repeat exactly, so these numbers are clean.
+  - ctx −0.6%, think −1.6% (same text −0.5% / −1.0%), mostly above 32K (−1.2% / −3.7%).
+  - Above 32K, think differs from ctx only by the 24-token minimum inside reasoning. On the 33,336-token turn (same
+    text) ctx took 4 lookup cycles at 34.30 tok/s and think took 2 at 32.55 (off 32.94). So long-context reasoning
+    lookups can pay, and blocking them is not free.
+- **The earlier single-seed +2.8% for ctx on this session (16:51 section) did not hold.** At seed 7100 it now measures
+  −3.1%.
+  - The off texts also differ from that run (checksum 6dc42bac vs 22bc6790).
+  - The reason: here the greedy pass ran first in each process, so the first sampled turn reused 5,376 cached prompt
+    tokens. That is a different process history (see `leftover/`). Inside this run every arm has the same history.
+  - One seed moves this session by about ±4%, which covers the earlier +2.8%.
+- **The offline sim's long-session answer held** (no gain within about ±2%), and so did its caveat: its sizes do not
+  predict per-band results.
+- **It agrees with the reviewer's fresh holdout** (`../22nov_review/lookup_adaptation/RESULTS.md`, commit 5c6393a).
+  On 19 new coding turns: yield +1.5%, ctx +0.6%, with ctx going from −4.5% on one seed to +6.1% on the other above
+  32K.
+
+**Verdict.**
+- **Keep lookup off for serving Pi.** On the long session no gate gives a gain that survives three seeds.
+- **think:24:yield:1.25 adds nothing over yield:1.25.**
+  - Offline on the short sets it ties yield (+14.0% vs +13.9% sampled).
+  - On the long session it is within seed noise of ctx and off. Greedy above 32K it costs more than ctx.
+  - The flag stays in, default off.
+- **If lookup is served for code edits:** yield:1.25, or the reviewer's next test (route by request type: full-file
+  rewrites vs ordinary tool turns).
+- **Served defaults are unchanged.**
+
+**Files.**
+- Gate: `pipe/tree_verify.py` (`think:T:BASE`, `_in_think`, reasoning counts on the tree line).
+- Scripts in `serve_t/`: `think_gate_unit.py`, `think_gate_sim.py`, `think_gate_ab.sh`, `think_gate_compare.py`.
+- Results in `think_gate/`:
+  - `sim.log` and `sim.json`
+  - `ab.log` and `compare.json`
+  - `driver.log`, `tgl_*.driver.log`, `tgl_*.server.log`, `restore.driver.log`
+- Raw bench rows: `bench/tgl_*`, `bench/served_after_tgl.*`.

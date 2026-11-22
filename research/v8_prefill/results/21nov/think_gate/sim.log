@@ -1,0 +1,66 @@
+A. short sets, exact cycles (treelog_lgo21). Reasoning share of the tokens: sampled agent 49%, sampled chat 44%, sampled code 54%, sampled math 55%
+stratum        | sim vs off:     yield:1.25 | ctx:32768:48:1.25 | think:off:yield:1.25 | think:24:yield:1.25 | think:48:yield:1.25 | think:off:ctx:32768:48:1.25 | think:24:ctx:32768:48:1.25 | think:off:ctx:32768:24:1.25 || measured yield / ctx
+greedy code    |              +97.2% (  0t) |  +75.2% (  0t) |  +97.2% (  0t) |  +97.2% (  0t) |  +97.2% (  0t) |  +75.2% (  0t) |  +75.2% (  0t) |  +88.2% (  0t) || +92.2% / +60.6%
+greedy agent   |              +13.3% (  0t) |   +0.0% (  0t) |  +13.3% (  0t) |  +13.3% (  0t) |  +13.3% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +1.0% (  0t) || +11.0% /  +0.1%
+greedy math    |               +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) ||  -0.1% /  +0.5%
+greedy chat    |               +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) ||  -2.8% /  -3.3%
+sampled code   |              +43.6% ( 58t) |  +30.2% ( 12t) |  +41.8% (  0t) |  +44.2% ( 20t) |  +43.8% ( 12t) |  +28.3% (  0t) |  +30.2% ( 12t) |  +36.3% (  0t) || +27.4% / +18.0%
+sampled agent  |               +5.7% ( 59t) |   +1.7% ( 16t) |   +2.4% (  0t) |   +4.8% ( 26t) |   +4.2% ( 16t) |   +0.0% (  0t) |   +1.7% ( 16t) |   -0.2% (  0t) ||  +4.7% /  +1.1%
+sampled math   |               -0.2% ( 18t) |   +0.0% (  0t) |   +0.0% (  0t) |   -0.0% (  8t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) |   +0.0% (  0t) ||  +0.5% /  -0.1%
+sampled chat   |               -0.1% (  8t) |   -0.2% (  1t) |   +0.0% (  0t) |   -0.1% (  4t) |   -0.2% (  1t) |   +0.0% (  0t) |   -0.2% (  1t) |   +0.0% (  0t) ||  -1.0% /  +0.8%
+greedy all     |              +33.2% (  0t) |  +24.3% (  0t) |  +33.2% (  0t) |  +33.2% (  0t) |  +33.2% (  0t) |  +24.3% (  0t) |  +24.3% (  0t) |  +28.3% (  0t) || 
+sampled all    |              +13.9% (143t) |   +9.2% ( 29t) |  +12.7% (  0t) |  +14.0% ( 58t) |  +13.7% ( 29t) |   +8.3% (  0t) |   +9.2% ( 29t) |  +10.5% (  0t) || 
+
+sampled tree tokens per cycle by lookup match bucket (short traces): L>=0: 3.65, L>=6: 5.58, L>=8: 5.43, L>=12: 5.95, L>=16: 6.32, L>=24: 5.34, L>=32: 5.12, L>=48: 5.07
+
+B. long session replay, tree yield flat: per turn (prompt, reply tokens rebuilt / server, thinking tokens), lookup cycles sim vs measured (yield: lgl_yield, ctx: lcg_ctx_a; texts = off below 32K for ctx)
+    8622  reply 508/512  think 280 | yield sim 13 ( 4 in think) meas  5 | ctx sim  0 meas  0
+   10446  reply 513/512  think 279 | yield sim 14 ( 2 in think) meas  1 | ctx sim  4 meas  0
+   14850  reply 164/163  think 120 | yield sim  6 ( 4 in think) meas  6 | ctx sim  0 meas  0
+   16187  reply 135/134  think  97 | yield sim  2 ( 2 in think) meas  1 | ctx sim  0 meas  0
+   18207  reply 265/264  think 173 | yield sim  3 ( 3 in think) meas  4 | ctx sim  0 meas  0
+   20134  reply  74/ 73  think  27 | yield sim  1 ( 0 in think) meas  1 | ctx sim  0 meas  0
+   24208  reply 297/297  think 282 | yield sim  2 ( 2 in think) meas  2 | ctx sim  0 meas  0
+   25649  reply  89/ 88  think  34 | yield sim  2 ( 0 in think) meas  2 | ctx sim  0 meas  0
+   27807  reply 169/168  think 120 | yield sim  0 ( 0 in think) meas  0 | ctx sim  0 meas  0
+   30175  reply  47/ 47  think  17 | yield sim  1 ( 0 in think) meas  1 | ctx sim  0 meas  0
+   33336  reply 303/303  think 284 | yield sim  4 ( 4 in think) meas  1 | ctx sim  4 meas  1
+   38007  reply 293/292  think 234 | yield sim  7 ( 7 in think) meas  3 | ctx sim  7 meas  3
+   39497  reply  51/ 50  think  19 | yield sim  3 ( 0 in think) meas  4 | ctx sim  3 meas  4
+   43285  reply  15/ 16  think   1 | yield sim  0 ( 0 in think) meas  2 | ctx sim  0 meas  2
+   45212  reply  17/ 18  think   1 | yield sim  0 ( 0 in think) meas  2 | ctx sim  0 meas  2
+   47116  reply  16/ 17  think   1 | yield sim  0 ( 0 in think) meas  2 | ctx sim  0 meas  2
+   49297  reply  19/ 20  think   1 | yield sim  1 ( 0 in think) meas  2 | ctx sim  1 meas  2
+   52813  reply 415/414  think 280 | yield sim  6 ( 4 in think) meas  8 | ctx sim  6 meas  8
+   55454  reply 127/126  think  28 | yield sim  6 ( 0 in think) meas  7 | ctx sim  6 meas  7
+band     |     yield:1.25 | ctx:32768:48:1.25 | think:off:yield:1.25 | think:24:yield:1.25 | think:48:yield:1.25 | think:off:ctx:32768:48:1.25 | think:24:ctx:32768:48:1.25 | think:off:ctx:32768:24:1.25 || measured yield / ctx
+8-16K    |   +6.3% ( 35lk) |   +1.2% (  4lk) |   +5.5% ( 24lk) |   +5.2% ( 27lk) |   +5.5% ( 24lk) |   +1.2% (  4lk) |   +1.2% (  4lk) |   +2.1% ( 10lk) ||  -2.7% /  -0.3%
+16-32K   |   -1.4% (  9lk) |   +0.0% (  0lk) |   -1.0% (  8lk) |   -1.0% (  8lk) |   -1.0% (  8lk) |   +0.0% (  0lk) |   +0.0% (  0lk) |   +0.0% (  0lk) ||  -4.2% /  -0.0%
+32-57K   |   +1.4% ( 27lk) |   +1.4% ( 27lk) |   +2.0% ( 23lk) |   +2.0% ( 23lk) |   +2.0% ( 23lk) |   +2.0% ( 23lk) |   +2.0% ( 23lk) |   +2.0% ( 23lk) ||  +8.0% /  +8.3%
+all      |   +2.2% ( 71lk) |   +1.0% ( 31lk) |   +2.3% ( 55lk) |   +2.2% ( 58lk) |   +2.3% ( 55lk) |   +1.2% ( 27lk) |   +1.2% ( 27lk) |   +1.5% ( 33lk) ||  +0.6% /  +2.8%
+
+B. long session replay, tree yield match: per turn (prompt, reply tokens rebuilt / server, thinking tokens), lookup cycles sim vs measured (yield: lgl_yield, ctx: lcg_ctx_a; texts = off below 32K for ctx)
+    8622  reply 508/512  think 280 | yield sim  6 ( 3 in think) meas  5 | ctx sim  0 meas  0
+   10446  reply 513/512  think 279 | yield sim 12 ( 2 in think) meas  1 | ctx sim  4 meas  0
+   14850  reply 164/163  think 120 | yield sim  6 ( 4 in think) meas  6 | ctx sim  0 meas  0
+   16187  reply 135/134  think  97 | yield sim  2 ( 2 in think) meas  1 | ctx sim  0 meas  0
+   18207  reply 265/264  think 173 | yield sim  7 ( 3 in think) meas  4 | ctx sim  0 meas  0
+   20134  reply  74/ 73  think  27 | yield sim  1 ( 0 in think) meas  1 | ctx sim  0 meas  0
+   24208  reply 297/297  think 282 | yield sim  3 ( 3 in think) meas  2 | ctx sim  0 meas  0
+   25649  reply  89/ 88  think  34 | yield sim  2 ( 0 in think) meas  2 | ctx sim  0 meas  0
+   27807  reply 169/168  think 120 | yield sim  0 ( 0 in think) meas  0 | ctx sim  0 meas  0
+   30175  reply  47/ 47  think  17 | yield sim  1 ( 0 in think) meas  1 | ctx sim  0 meas  0
+   33336  reply 303/303  think 284 | yield sim  3 ( 3 in think) meas  1 | ctx sim  3 meas  1
+   38007  reply 293/292  think 234 | yield sim  6 ( 6 in think) meas  3 | ctx sim  6 meas  3
+   39497  reply  51/ 50  think  19 | yield sim  3 ( 0 in think) meas  4 | ctx sim  3 meas  4
+   43285  reply  15/ 16  think   1 | yield sim  1 ( 0 in think) meas  2 | ctx sim  1 meas  2
+   45212  reply  17/ 18  think   1 | yield sim  0 ( 0 in think) meas  2 | ctx sim  0 meas  2
+   47116  reply  16/ 17  think   1 | yield sim  0 ( 0 in think) meas  2 | ctx sim  0 meas  2
+   49297  reply  19/ 20  think   1 | yield sim  1 ( 0 in think) meas  2 | ctx sim  1 meas  2
+   52813  reply 415/414  think 280 | yield sim  9 ( 7 in think) meas  8 | ctx sim  9 meas  8
+   55454  reply 127/126  think  28 | yield sim  8 ( 0 in think) meas  7 | ctx sim  8 meas  7
+band     |     yield:1.25 | ctx:32768:48:1.25 | think:off:yield:1.25 | think:24:yield:1.25 | think:48:yield:1.25 | think:off:ctx:32768:48:1.25 | think:24:ctx:32768:48:1.25 | think:off:ctx:32768:24:1.25 || measured yield / ctx
+8-16K    |   +0.6% ( 26lk) |   +0.5% (  4lk) |   +1.4% ( 20lk) |   +1.5% ( 21lk) |   +1.4% ( 20lk) |   +0.5% (  4lk) |   +0.5% (  4lk) |   +1.0% (  8lk) ||  -2.7% /  -0.3%
+16-32K   |   -2.5% ( 14lk) |   +0.0% (  0lk) |   -2.3% (  9lk) |   -2.3% (  9lk) |   -2.3% (  9lk) |   +0.0% (  0lk) |   +0.0% (  0lk) |   +0.0% (  0lk) ||  -4.2% /  -0.0%
+32-57K   |   -2.9% ( 31lk) |   -2.9% ( 31lk) |   -1.1% ( 27lk) |   -1.1% ( 27lk) |   -1.1% ( 27lk) |   -1.1% ( 27lk) |   -1.1% ( 27lk) |   -1.1% ( 27lk) ||  +8.0% /  +8.3%
+all      |   -1.6% ( 71lk) |   -1.1% ( 35lk) |   -0.6% ( 56lk) |   -0.6% ( 57lk) |   -0.6% ( 56lk) |   -0.3% ( 31lk) |   -0.3% ( 31lk) |   -0.2% ( 35lk) ||  +0.6% /  +2.8%
