@@ -30,6 +30,15 @@ These results apply to the recorded 32 GB M6, macOS 27.2/27.3, build and workloa
 
 - **Shared DRAM bandwidth.** The GPU stream reached 156 GB/s, the ANE split-call stream 121 GB/s, and the two together 164 GB/s against a nominal 170 GB/s. Concurrent streaming slowed both engines even with a steady GPU clock. This supports bandwidth contention in those runs.
 - **Drafter placement.** A synthetic GPU cost twin took 8.9 ms alone and 13.3–14.5 ms in selected overlapping arms. Its matrices used synthetic indices and did not implement the full draft path. The served ANE draft phase took about 13.3 ms including 12.3 ms of ANE work. These figures and the concurrent verify slowdown supported retaining the ANE drafter.
+- **Engine occupancy in decode.** The served decode keeps the ANE 98-99% busy (draft 14.4 ms + verify 94-135 ms of a
+  110-151 ms cycle; the rest is host work), while the GPU is idle below 64K. A batched GPU draft of B candidate
+  outcomes took 8.64 / 8.97 / 9.61 / 11.70 ms alone at B = 1 / 2 / 4 / 8 (synthetic-index twin), and run once per
+  cycle beside the served ANE verify it slowed the verify by +1.8-2.7% at 2K and 32K. The GPU therefore has room for
+  draft-ahead; the drafter's inputs do not (Section 5.3).
+- **Memory at a context-entry switch.** On fresh launches, the 32K -> 64K switch added 1.06 GB of KV buffers
+  (IOSurface) on both the sliced and the unsliced build, with swap flat; forge peaked at 6.6 GB over a 55.5K session.
+  The sliced build costs about 75 MB more. A 22 Nov watchdog kill came after 93 requests on one process, from state
+  accumulated over many turns, not from the switch.
 - **GPU clock hold on split decode.** Between short attention bursts the GPU ran at 502 MHz in the GPU-only test and about 860 MHz in the server. Keeping one SIMD group busy held 1735 MHz and took the split verify from 138.2 to 122.4 ms over four on/off pairs at 66–70K tokens, at +2.1 W combined. The served policy used a 60 ms hold. The ordinary ANE-only verify does not use this route.
 - **Cross-engine ordering.** A serial GPU round trip added about 0.65 ms beyond the kernel in the recorded probe. The tested Core AI compute stream on 27.3 failed to enforce the required cross-engine ordering, so the split runtime orders those operations on the host. A separate probe at drafter shapes stalled before producing a usable join timing.
 - **Concurrent calls to one function.** In the experimental prefill schedule, overlapping the same `ffn2_L` function with different bindings corrupted outputs. A per-function lock restored exact output in that test. Other functions and runtime releases require separate tests.
@@ -137,6 +146,12 @@ The 48 DeltaNet layers are recurrent, so a tree needs two things a chain gets fo
   rejected, sample the next token from `r`. This is multi-candidate recursive rejection sampling [3, 8], so the output
   has the distribution of plain sampling. A one-child node makes exactly the chain's random draws. Checked against the release loop, including
   the RNG state.
+- **No better lossless rule exists for these drafts.** The drafts are deterministic (top-k from the selector, not
+  sampled). For a fixed tree, any lossless rule can accept through a node at most with the target probability of its
+  path, so expected tokens per verify are bounded by 1 + the sum of those path probabilities. The child-by-child rule
+  reaches the bound (its acceptance equals "sample from the target, follow the matching child"). Rules that gain by
+  coupling sampled drafts to their proposal, such as traversal verification, block verification, SpecTr and optimal
+  multi-draft acceptance [34, 35], reduce to it for point-mass drafts. Section 5.3.
 
 ### 3.5 Commit: back to a chain
 
@@ -252,6 +267,35 @@ cheap on this ANE target.
 | JetSpec++ [12] (B16 drafter) by replay | x1.42 to x1.81 tokens per round, but component timings and oracle replay project 12–46% lower throughput on the serial ANE schedule. Parked until drafting can overlap the verify |
 | Drafter on the GPU | synthetic GPU twin slows under concurrent ANE verify load (§2.2) |
 
+### 5.3 Selection, acceptance and draft-ahead (22 Nov paper sweep)
+
+A sweep of 27 recent papers (tree selection for block-diffusion drafters, sampled acceptance, hybrid-model verify,
+drafter overlap) was checked against the logs; untried and applicable ideas were measured offline on 4,529 logged
+sampled cycles (`results/22nov/PAPER_SWEEP.md`). The metric is expected tok/verify, 1 + the sum of target path
+probabilities, exact for the served tree (4.08).
+
+| probe | realistic 2K-32K | long Pi-like session |
+|---|---|---|
+| ceiling: best 7 nodes from the same 16 drafter candidates per depth (lower bound) | +8.6% | +10.2% |
+| ceiling: perfect proposer (lower bound) | +10.8% | +13.2% |
+| calibrated edge scorer (rank, score, depth, fork distance; TAPS / D3Tree / TreeSpark style [38]) | -0.1% | -0.1% |
+| trigram PMI rescoring from Pi's own outputs (DForkTree [11]) | -0.2% to -4.3% | -0.2% to -3.7% |
+| one sampled child at the anchor (RheoSampling [36]) | -4.4% | -3.8% |
+| verification-only rules [34, 35] | 0 (Section 3.4) | 0 |
+
+- **The ceiling is real but not reachable from the host.** The drafter already proposes the better nodes; choosing
+  them needs the target's distribution at the verified rows, which exists only after the verify. Relaying verifier
+  information into the drafter (DFlow [37]) or training the drafter's scores for path acceptance (VSD [39]) target
+  this gap; both need drafter training (Section 7).
+- **Draft-ahead fails on the drafter's inputs, not on the hardware.** Drafting cycle c + 1 during cycle c's verify
+  (JetSpec++ foresight [12], Mirror-SD [30]) would hide up to about 7 ms per cycle on the idle GPU (hit rate of the
+  verify outcome among 8 predicted (endpoint, bonus) pairs: 53-57%). But DFlash2 then lacks the target features of
+  the tokens it continues. Replaying the 20 Nov tap captures with the drafter's context stopping at the previous
+  anchor cut tree8 tok/verify from 7.30 to 2.67 (humaneval, 353 cycles, -63%), 6.22 to 2.50 (mbpp, -60%) and 3.84 to
+  2.00 (mt-bench, 935 cycles, -48%); even a one-position gap cost mt-bench 23%. Draft-ahead needs a trained feature
+  predictor, as JetSpec++'s adapter provides.
+- **Committing inside the next verify** (SpecLA [25]) would save part of a 1.1-1.4 ms commit, about 1% of a cycle.
+
 ## 6. Correctness and reproducibility
 
 - **Identity criterion.** A tree can change the cycle split and subsequently the floating-point decisions. A
@@ -265,8 +309,10 @@ cheap on this ANE target.
 
 ## 7. Limitations and next steps
 
-- The tree's gain is capped by the 8 rows. More tokens per cycle need a better drafter (JetSpec++-style blocks), not
-  a wider tree, unless the ANE's per-row DeltaNet cost comes down.
+- The tree's gain is capped by the 8 rows. More tokens per cycle need a better drafter, not a wider tree, unless the
+  ANE's per-row DeltaNet cost comes down. The measured selection ceiling (+8.6-10.2% from the same candidates) needs
+  verifier information in the drafter (DFlow [37], VSD [39]); a DFlow prototype plan is in
+  `results/22nov/DFLOW_PLAN.md`. Draft-ahead needs a feature predictor (Section 5.3).
 - Tree verify adds 2-4% per cycle. The cost is the conv correction and the mask inputs, not the FFN.
 - Gains are measured on one machine and one model pair. A same-output restart control differed by 4.4%. Launch order, seed, output trajectory and workload all matter when interpreting small gains.
 
@@ -368,6 +414,15 @@ cheap on this ANE target.
 31. Y. Oda et al. [Trees from Marginals: Autoregressive drafting with factorized priors](https://arxiv.org/abs/2607.06763v3).
 32. L. Wang et al. [Twig: Parallel and Memory-Efficient Tree Speculative Decoding for Hybrid-Attention LLMs](https://arxiv.org/abs/2608.01651v2).
 33. AWS Neuron. [Decode context-length bucketing](https://awsdocs-neuron.readthedocs-hosted.com/en/v2.33.1/vllm-neuron/docs/design/vllm/decode-context-length-bucketing.html), v2.33.1 design document.
+34. Hu et al. Optimal multi-draft speculative decoding. [arXiv:2502.18779](https://arxiv.org/abs/2502.18779); with
+    Z. Sun et al., SpecTr (arXiv:2310.15141), Block Verification (arXiv:2403.10444) and Hierarchical Speculative
+    Decoding (arXiv:2601.05724).
+35. [Traversal Verification for Speculative Tree Decoding](https://arxiv.org/abs/2505.12398), 2025.
+36. [RheoSampling](https://arxiv.org/abs/2609.21827), arXiv:2609.21827, 2026.
+37. [DFlow: Enabling Verifier Information Flow in Block Diffusion Speculative Decoding](https://arxiv.org/abs/2609.06498), 2026.
+38. TAPS: Target-Aware Prefix Tree Selection (arXiv:2606.00487); D3Tree: Learning to Prune Block-Diffusion Draft
+    Trees (arXiv:2611.11371); TreeSpark: Calibrated, Load-Adaptive Draft Trees (arXiv:2609.22098). 2026.
+39. [Variational Speculative Decoding](https://arxiv.org/abs/2602.05774), arXiv:2602.05774, 2026.
 
 ## Appendix A: served configuration (22 Nov 2026)
 
