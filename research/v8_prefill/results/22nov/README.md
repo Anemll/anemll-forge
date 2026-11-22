@@ -213,3 +213,41 @@ Sources in sliced/src/.
 OS update recovery (04:51 to 05:32): 27.3 recreated aned's cache without the read ACL (Anemll re-granted it); served
 v8_dec8tx recompiled (17 packages, 19m36s); w_dec8tx GPU tables regenerated (1346 files byte-identical, manifests differ
 only in the HWX path build dir; old manifests kept as manifest*.26C5035r.json).
+
+STATUS 10:43 item 1 step B, block 2 (4-entry set RUNG_SLICE=24,40,48,56 on v8_dec8ts): CLEARS the keep rule, and
+beats 24K+48K. Long session pooled +3.40% (order a +2.21%, order b +4.59%), 152/152 replies identical. Order b is
+inflated by one slow served set (sv_d seed 7100, see below); without that seed: +2.49% (a +2.11%, b +2.86%). Build
+kept; deploy waits for Anemll. Served config restored, forge pid 45022, smoke 29aef2ec9db18a3f MATCH.
+
+### Step B block 2 (22 Nov, 09:19 to 10:43, macOS 27.3 26C5047e)
+
+`serve_t/slice_ab4.sh` (= slice_ab.sh with arms kc2, sv_c, s4_a, s4_b, sv_d), `serve_t/slice_compare.py` (block 2
+added). Raw files: `sliced/block2/` (ab.log, compare.json, gate.txt, per-arm logs), `bench/sl_{kc2,sv_c,s4_a,s4_b,sv_d}_*`.
+
+Parity gate (kc2, RUNG_SLICE=24,40,48,56 RUNG_SLICE_CHECK=1, long greedy): 471 sliced calls over 22 requests, max
+|logit diff| 0, max KL 0, argmax 3762/3762 rows. PASS.
+
+ABBA (sv_c, s4_a, s4_b, sv_d), pooled client decode tok/s, long session (19 turns, 8.6K to 55.5K), 4 sets:
+
+| band   | served | 4-entry | pooled | order a | order b | identical replies |
+|--------|-------:|--------:|-------:|--------:|--------:|------------------:|
+| 8-16K  | 39.60  | 40.09   | +1.24% | -0.46%  | +2.94%  | 32/32   |
+| 16-32K | 36.15  | 37.13   | +2.72% | +1.40%  | +4.04%  | 48/48   |
+| 32-57K | 29.64  | 31.33   | +5.69% | +5.02%  | +6.36%  | 72/72   |
+| all    | 34.65  | 35.82   | +3.40% | +2.21%  | +4.59%  | 152/152 |
+
+Per set (order a / order b): greedy +2.25% / +4.03%, s7100 +2.53% / +9.82%, s7200 +2.52% / +2.41%, s7300 +1.48% /
++2.40%.
+
+- **Outlier:** served arm sv_d, seed 7100, ran turns 0 to 6 (8.6K to 24K) about 11% slower than sv_c (47.50 vs 41.86
+  tok/s on turn 0), then matched sv_c from turn 7 on. Those turns use no sliced entry in either arm, so this is a
+  transient slowdown of the served arm, not a slice effect; cause not found (Pi requests 0 in every arm).
+- **Without seed 7100** (recomputed from the bench json, same token-weighted pooling, reproduces the table above to
+  0.03): 8-16K -0.16% (a -0.55 / b +0.24), 16-32K +1.51% (+1.29 / +1.73), 32-57K +5.42% (+4.91 / +5.92), all +2.49%
+  (+2.11 / +2.86).
+- **vs block 1 (24K+48K):** +1.92% pooled there; 4-entry adds about +0.5 to +0.6 points (clean estimate +2.49% vs
+  +1.92%), all of it in 32-57K (+5.4% vs +3.15%). 8-16K gains nothing in either block (no sliced entry below 24K).
+- **Verify calls:** 2393 of 4212 sliced (t8s_24k 687, t8s_40k 490, t8s_48k 136, t8s_56k 490, v8s_24k 277, v8s_40k
+  135, v8s_48k 64, v8s_56k 114); tree cycle 111.4 / 113.4 -> 108.2 / 108.0 ms, chain 107.0 / 109.5 -> 104.4 ms.
+- HWX: 8 referenced, 0 missing, for both w_dec8tx and v8_dec8ts_w after the run (checked twice). Pi requests 0 and
+  errors 0 in every arm. 272 GiB internal free.

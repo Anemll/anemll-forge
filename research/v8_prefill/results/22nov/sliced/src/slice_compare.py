@@ -9,7 +9,7 @@
   calls     verify calls per entry from the server's "slice: verify calls" lines (sliced vs ladder)
   check     the kc arm (RUNG_SLICE_CHECK=1): max |logit diff|, max KL(big || sliced), argmax agreement
     PY slice_compare.py BENCH_DIR SERVER_LOG_DIR OUT.json"""
-import json, re, sys
+import json, os, re, sys
 from pathlib import Path
 
 B, SLD, OUT = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
@@ -28,7 +28,7 @@ def load(arm, s):
     return out
 
 
-ARMS = [a for a in ("sv_a", "s2_a", "s2_b", "sv_b", "s4_a", "sv_c", "s4_b") if (B / f"sl_{a}_g.json").exists()]
+ARMS = [a for a in ("sv_a", "s2_a", "s2_b", "sv_b", "sv_c", "s4_a", "s4_b", "sv_d") if (B / f"sl_{a}_g.json").exists()]
 D = {(a, s): load(a, s) for a in ARMS for s in SETS}
 
 
@@ -58,7 +58,7 @@ def same(x, y, sets, sel=lambda r: True):
 f = lambda v: "   n/a" if v is None else f"{v:+6.2%}"  # noqa: E731
 res = {"arms": ARMS, "blocks": {}, "calls": {}, "check": {}}
 blocks = [("24K+48K (block 1, ABBA)", "s2", [("a", "s2_a", "sv_a"), ("b", "s2_b", "sv_b")]),
-          ("24K/40K/48K/56K (block 2, ABA)", "s4", [("a", "s4_a", "sv_c"), ("b", "s4_b", "sv_c")])]
+          ("24K/40K/48K/56K (block 2, ABBA)", "s4", [("a", "s4_a", "sv_c"), ("b", "s4_b", "sv_d" if "sv_d" in ARMS else "sv_c")])]
 for title, s, pairs in blocks:
     pairs = [p for p in pairs if p[1] in ARMS and p[2] in ARMS]
     if not pairs:
@@ -86,7 +86,8 @@ for title, s, pairs in blocks:
                                    + f" (identical {per[st]['identical'][0]}/{per[st]['identical'][1]})" for st in SETS))
     res["blocks"][s] = blk
 # verify calls per entry, per arm (server logs)
-for a in ARMS + ["kc"]:
+KC = os.environ.get("CHECK_ARM", "kc")
+for a in ARMS + [KC]:
     lg = SLD / f"sl_{a}.server.log"
     if not lg.exists():
         continue
@@ -104,7 +105,7 @@ for a in ARMS + ["kc"]:
         sl = sum(n for e, n in tot.items() if "s_" in e)
         print(f"calls {a}: sliced {sl} of {sum(tot.values())} ({', '.join(f'{e} {n}' for e, n in sorted(tot.items()))}) | "
               f"tree {nt:.0f} cycles {res['calls'][a]['tree_ms'] or 0:.1f} ms, chain {nc:.0f} cycles {res['calls'][a]['chain_ms'] or 0:.1f} ms")
-    if a == "kc":
+    if a == KC:
         ck = re.findall(r"check: (\d+) sliced calls, max \|logit diff\| ([\d.eE+-]+), max KL ([\d.eE+-]+), argmax equal (\d+)/(\d+) rows", txt)
         if ck:
             res["check"] = {"requests": len(ck), "sliced_calls": sum(int(x[0]) for x in ck),
