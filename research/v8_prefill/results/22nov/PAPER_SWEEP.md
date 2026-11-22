@@ -57,3 +57,32 @@ proven not to apply, or worth about 0-3%.
    Go / no-go for a GPU DFlash2 port.
 3. A2 and A4 offline on TREE_LOG_DIST, only if A3 shows a gap of more than about 3%.
 4. A5 (DFlow) is the only roughly 10% item that needs drafter training; a separate project.
+
+## Probe results (22 Nov, offline, forge untouched)
+
+`serve_t/probe_tree_ceiling.py` (A3 + A1), `serve_t/probe_rescore.py` (A2 + A4); raw `results/22nov/probes/`. Data:
+`treelog_s21` (1,887 sampled cycles, realistic 2K / 8K / 32K, 21 Nov) and `treelog_lgo21` (2,642 sampled cycles with
+distributions, long Pi-like session). Metric: expected tok/verify = 1 + sum of target path probabilities (served
+reproduces 21 Nov forkrank: 4.083 / 4.075).
+
+| probe | realistic 2K-32K | long session | verdict |
+|---|---|---|---|
+| A3 served tok/verify | 4.083 | 4.075 | reference |
+| A3 best 7 nodes from the same drafter candidates (lower bound) | 4.435 (**+8.6%**) | 4.490 (**+10.2%**) | real headroom |
+| A3 best 7 nodes, perfect proposer (lower bound) | 4.526 (+10.8%) | 4.612 (+13.2%) | |
+| A1 foresight hit, (endpoint, bonus) in top 1 / 2 / 4 / 8 | 26.8 / 35.4 / 46.8 / 57.0% | 23.2 / 31.6 / 41.5 / 52.8% | weak |
+| A1 endpoint only in top 1 / 2 / 4 | 38.6 / 59.0 / 82.1% | 35.5 / 56.4 / 79.9% | |
+| A2 trigram PMI, lam (spine, fork) = (0.15, 0.3) / (0.3, 0.6) / (0.6, 1.2) | -0.22 / -1.43 / -4.28% | -0.15 / -1.11 / -3.65% | no gain |
+| A4 one sampled anchor slot replacing the weakest node | -4.36% (slot accepted 0.046, dropped node 0.224) | -3.80% (0.037 vs 0.192) | no gain |
+
+- **A3:** the same 16 candidates per depth hold about +9-10% more expected tokens per verify than the served
+  selection. But the 21 Nov calibrated ranking (drafter-side features) captured none of it and the PMI table makes it
+  worse: the information that picks the better nodes is the target's own distribution at the verified rows, which
+  only exists after the verify. That points at verifier-to-drafter relays (DFlow, A5), not at host-side rescoring.
+  The rebuilt trees are scored as lower bounds (subtrees under an unverified node count 0), which biases A2 down a
+  little; the oracle uses the same metric and still shows +9-10%, so the metric can show a gain.
+- **A1:** to hide the drafter, the next block must be drafted for the right (endpoint, bonus). Even 8 guesses hit only
+  53-57%. A rough ceiling (estimate): hit 0.55 x about 12 ms hidden of about 110 ms = 6%, before the cost of 8 GPU
+  drafts per cycle (64 rows) against the ANE verify and the unknown acceptance loss from features that stop at the
+  anchor. Likely 0 to +4%. Step 2 (an ANE drafter replay with stale features, forge stopped) decides it.
+- **A2, A4:** dead on this target and budget.
