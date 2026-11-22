@@ -139,3 +139,20 @@ next verify saves at most part of that: under the 2% bar, not pursued.
   | T 0.6 + min_p 0.05 | +5.0% | +4.3% |
 
   Tok/verify only; it changes Pi's output distribution (quality not measured here). Not a served change.
+
+## A1 step 2: stale-feature replay (CPU, forge serving): draft-ahead with DFlash2 is a no-go
+
+`serve_t/dflash_stale_replay.py --compute cpu` (drafter + target head through Core AI on the CPU; stale and fresh share
+the numerics; fresh humaneval 7.30 tok/verify matches the ANE chain's 7.1-7.3), 20 Nov tap captures, greedy, exact
+acceptance from the text (`probes/stale_cpu.json`, swap flat):
+
+| set | cycles | tree8 fresh | tree8 stale (ring stops at the previous anchor) | change |
+|---|---|---|---|---|
+| humaneval | 353 | 7.30 | 2.67 | **-63.4%** |
+| mbpp | 181 | 6.22 | 2.50 | **-59.9%** |
+| mt-bench | 935 | 3.84 | 2.00 | **-48.0%** |
+
+Even a 1-position gap (only the previous anchor's feature missing) costs mt-bench 3.33 -> 2.55. DFlash2 needs the
+target's features of the tokens it continues; drafting before the verify ends loses half or more of the accepted
+tokens, against at most 7 ms of hidden draft time. Draft-ahead needs a trained feature predictor (JetSpec++'s adapter)
+or a drafter trained to draft from stale context; the GPU DFlash2 port is not started.
