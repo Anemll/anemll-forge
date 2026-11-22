@@ -1,0 +1,121 @@
+{
+ "parity_gc64_vs_cpu_double": {
+  "2K_48_heads_rho0.3": {
+   "out_max_rel": 0.000675,
+   "out_rms_rel": 0.0005,
+   "state_max_rel": 0.000586
+  },
+  "2K_48_heads_rho0.7": {
+   "out_max_rel": 0.000735,
+   "out_rms_rel": 0.000584,
+   "state_max_rel": 0.000889
+  },
+  "8K_6_heads": {
+   "out_max_rel": 0.000637,
+   "out_rms_rel": 0.000517,
+   "state_max_rel": 0.000608
+  },
+  "32K_6_heads": {
+   "out_max_rel": 0.000677,
+   "out_rms_rel": 0.000517,
+   "state_max_rel": 0.000646
+  },
+  "gdn_rec_fp32_vs_cpu_double_out_rms_rel": 4.4e-07,
+  "drift": "none over 256 calls"
+ },
+ "timing_ms_per_call_median": {
+  "gdn_rec": {
+   "alone": 0.2885,
+   "dram_hog_2": 0.337
+  },
+  "gdn_chunk_v1": {
+   "GC64": {
+    "alone": 0.7072,
+    "hog": 1.0317
+   },
+   "GC32": {
+    "alone": 0.4708,
+    "hog": 0.6314
+   },
+   "GC16": {
+    "alone": 0.5213
+   }
+  },
+  "ablation_8K_alone": {
+   "GC64": {
+    "base": 0.7089,
+    "S0H": 0.7546,
+    "S0H+XH+PH": 0.8423,
+    "NOSOLVE": 0.5724
+   },
+   "GC32": {
+    "base": 0.4691,
+    "S0H": 0.552,
+    "S0H+XH+PH": 0.5509,
+    "NOSOLVE": 0.4104
+   },
+   "GC16": {
+    "base": 0.5213,
+    "NOSOLVE": 0.5136
+   }
+  },
+  "gdn_chunk2_split_rows": {
+   "GC64": {
+    "NP2": 0.9337,
+    "NP4": 1.3466
+   },
+   "GC32": {
+    "NP2": 0.5795,
+    "NP4": 0.753
+   }
+  },
+  "gdn_chunk3_stacked": {
+   "GC64": 0.9194,
+   "GC32": 0.5411
+  }
+ },
+ "best_chunk": {
+  "GC": 32,
+  "alone": 0.4708,
+  "hog": 0.6314
+ },
+ "projection_vs_served_gdn_rec": {
+  "2K": {
+   "calls": 768,
+   "wall_s": 3.1,
+   "bound": "ANE-bound (GPU 83% / ANE 96% busy)",
+   "delta_s_alone": 0.1400064,
+   "delta_s_load": 0.22609919999999994,
+   "wall_change_if_gpu_critical_alone_pct": 4.516335483870968,
+   "wall_change_if_gpu_critical_load_pct": 7.29352258064516
+  },
+  "8K": {
+   "calls": 3072,
+   "wall_s": 11.8,
+   "bound": "co-bound (GPU 95% / ANE 97%)",
+   "delta_s_alone": 0.5600256,
+   "delta_s_load": 0.9043967999999998,
+   "wall_change_if_gpu_critical_alone_pct": 4.745979661016949,
+   "wall_change_if_gpu_critical_load_pct": 7.664379661016947
+  },
+  "32K": {
+   "calls": 12288,
+   "wall_s": 57.8,
+   "bound": "GPU-bound (99% / 85%)",
+   "delta_s_alone": 2.2401024,
+   "delta_s_load": 3.617587199999999,
+   "wall_change_if_gpu_critical_alone_pct": 3.8756096885813154,
+   "wall_change_if_gpu_critical_load_pct": 6.258801384083044
+  },
+  "95K": {
+   "calls": 35712,
+   "wall_s": 243.0,
+   "bound": "GPU-bound (99% / 58%)",
+   "delta_s_alone": 6.5102976,
+   "delta_s_load": 10.513612799999997,
+   "wall_change_if_gpu_critical_alone_pct": 2.6791348148148146,
+   "wall_change_if_gpu_critical_load_pct": 4.326589629629629
+  }
+ },
+ "verdict": "the ~4% at 8K does not hold: the best chunked form is 1.63x (alone) / 1.87x (DRAM load) slower than gdn_rec"
+}

@@ -910,3 +910,67 @@ change is about 0.8% per cycle, and the split options lose once handoffs are pai
 The drafter's 13.3 ms is 12.3 ms of ANE work that already streams near its DRAM ceiling: the body at about 104 GB/s
 and the head at about 148 GB/s against the 164 GB/s that both units reach together. Moving it does not shorten it.
 The only remaining lever is less drafter work per cycle, which is not a placement question.
+
+### 4. Chunked fp16 GDN recurrence on the matrix units, standalone prototype (`gdn_chunk/`)
+
+STATUS 23:05: done. The ~4% at 8K does not hold. The chunked form matches the reference, but even its best version
+(chunk 32) is 1.6x slower than the served `gdn_rec` alone (0.471 vs 0.288 ms per 128-token call) and 1.9x slower
+under DRAM load (0.631 vs 0.337). Nothing was integrated. Forge was not touched, and every timed run waited for my
+timing lock and for Pi to be idle.
+
+**Setup.** `pipe/unit/power/gdn_chunk_proto.swift` and `gdn_chunk.metal`, copied to `gdn_chunk/src/`.
+- **Served kernel:** run exactly as served (kernels.metal sha 421b61512afa8ead, T=128).
+- **Shapes:** q, k [16][128][128]; v, o [48][128][128]; g, beta [48][128]; state S [48][128][128] fp32.
+- **Chunked form:** fp16 operands on simdgroup matrices, fp32 accumulation. The S0 / P / X copies stay fp32.
+- **Inputs:** synthetic but realistic: unit-norm q / k with key correlation rho 0.3 (0.7 as a stress case), decay near
+  1, beta in (0, 1).
+- **Banner** first in every timing log.
+
+**Parity.** Against a CPU double-precision reference, starting from S = 0 and carrying the state from call to call:
+
+| chain | heads checked | output RMS rel | output max rel | state max rel |
+|---|---|---|---|---|
+| 2K (16 calls) | 48 | 5.0e-4 | 6.8e-4 | 5.9e-4 |
+| 2K, rho 0.7 | 48 | 5.8e-4 | 7.4e-4 | 8.9e-4 |
+| 8K (64 calls) | 6 | 5.2e-4 | 6.4e-4 | 6.1e-4 |
+| 32K (256 calls) | 6 | 5.2e-4 | 6.8e-4 | 6.5e-4 |
+
+- There is no drift over 256 calls; the error stays at fp16 operand level.
+- For comparison, the served fp32 `gdn_rec` is at 4.4e-7 RMS against the same reference.
+
+**Timing.** Milliseconds per 128-token call for one layer, median of 15, back to back. The same at the 2K, 8K and 32K
+chain lengths; p90 within 2% of the median.
+
+| kernel | alone | under `dram_hog 2` |
+|---|---|---|
+| `gdn_rec` (served) | 0.288 | 0.337 |
+| chunked, chunk 64 | 0.707 | 1.032 |
+| chunked, chunk 32 (best) | 0.471 | 0.631 |
+| chunked, chunk 16 | 0.521 | not run |
+
+**Ablations** (8K, alone). None closes the gap:
+- fp16 copies of S0 / X / P: slower (0.55-0.84).
+- Each head's value rows split over 2 to 4 threadgroups: slower (0.58-1.35). The redundant per-head work costs about
+  0.1 ms per extra copy, so the kernel is limited by total work, not by latency.
+- Operands stacked so it needs 5 matrix ops instead of 9: slower (0.54-0.92).
+- The triangular solve is not the main cost: 0.06 ms at chunk 32, 0.14 ms at chunk 64.
+- On these small per-head tiles the matrix units reach about 1.8 TFLOP/s.
+
+**Projected prefill change** (the measured per-call change x calls, over the 19 Nov section 3 wall; positive means
+slower):
+
+| prefill | calls | alone | under load | what bounds the wall |
+|---|---|---|---|---|
+| 2K | 768 | +0.14 s | +0.23 s | the ANE, so about 0 |
+| 8K | 3,072 | +0.56 s (+4.7%) | +0.90 s (+7.7%) | both |
+| 32K | 12,288 | +2.2 s (+3.9%) | +3.6 s (+6.3%) | the GPU |
+| 95K | 35,712 | +6.5 s (+2.7%) | +10.5 s (+4.3%) | the GPU |
+
+**Why the estimate was wrong.** The 19 Nov estimate (2.4% / 3.5% at 95K / 32K) assumed the chunked form would cut the
+recurrence to about 0.1 ms per call at large-matrix tensor-op efficiency. To reach that, this form would have to run
+about 4.7x faster than the best version here. The served per-token fp32 loop is already the faster form on this GPU.
+
+**Not recorded:** the DRAM load's achieved bandwidth. `dram_hog` was stopped before it printed; 19 Nov measured this
+setting at about 140 GB/s.
+
+**Verdict:** drop the chunked recurrence. The served DeltaNet recurrence stays as it is.
