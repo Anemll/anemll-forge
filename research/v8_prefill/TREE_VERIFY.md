@@ -3,6 +3,9 @@
 ANEMLL forge research notes, 20 to 22 November 2026. Every number below is measured on the M6 and logged in
 `research/v8_prefill/results/{19,20,21,22}nov/README.md` unless marked as a projection.
 
+**Jump to:** [What's new](#whats-new) · [M6-specific findings](#m6-specific-findings) · [Related work](#8-related-work) ·
+[References](#references)
+
 ## Abstract
 
 We serve Qwen3.8-27B (64 layers: 48 Gated DeltaNet, 16 full attention; 3-bit MLP weights, INT8 KV) on an Apple M6 with
@@ -17,6 +20,68 @@ rule. On the user's real workload (a Pi coding-agent session, sampled at tempera
 chain; greedy gains are +1.9 to +6.5% on realistic 2K-64K prompts. Wider trees (16 or 32 rows) do not pay on the ANE,
 because DeltaNet's per-row solve and the tree conv grow with the width. A final change, sliced verify entries that
 attend only to the occupied KV prefix, adds +2.5% on the long agent session at identical outputs. Both are served.
+
+## What's new
+
+What this work adds beyond the cited papers, to our knowledge (from a targeted search on 22 Nov 2026, not an
+exhaustive review). Each item says what is prior art and where the evidence is. Tree verification for Gated DeltaNet
+hybrids is an active area [24-29]: verifying each node against the committed state with an ancestor-masked chunk form,
+gathering short-conv windows along parent pointers, and committing only the accepted path are all published. Our
+contribution is making that work on a fixed-shape accelerator and a split ANE + GPU target.
+
+1. **A tree inside the chain's fixed verify width.** The ANE runs precompiled programs of fixed shape, so the tree
+   (anchor + 7 nodes) replaces the chain inside the same 8 rows. Ancestor masks and depth positions are extra inputs on
+   the same weight constants (no extra weight memory). The tree program runs only when the tree is not the chain
+   (policy `branched`). Prior tree work sizes the tree to the hardware [5, 7, 10]; here the width is a compile-time
+   constant and the tree must earn its place against the chain in the same rows. Sections 3.1-3.2.
+2. **An ANE-exact tree form of DeltaNet's short convolution (`corrx0`).** Published tree convs gather each node's
+   window along parent pointers [27]. On the ANE that gather (a one-hot matmul) is not exact and flips near-ties. Our
+   form keeps the served conv and adds one correction matmul with `D = ctap - shift`, the chain shift a numpy constant.
+   It is bit-identical to the chain entry under chain masks (45/45 replies) at +4.5% per layer group. Section 3.3.
+3. **Commit back to chain rows, recurrent state included.** After acceptance the DeltaNet pending tape, conv rows, new
+   KV rows and the drafter's tap features are moved to rows 0..k in place, so snapshots, prompt caching and the
+   continuation prefill only ever see a chain. Prior work rebuilds or recomputes the accepted state [24, 26]; ours
+   moves rows within the verify's own buffers. Section 3.5.
+4. **A split ANE + GPU tree verify.** In the 96K entry the ANE programs bind no KV; GPU attention applies each row's
+   ancestor mask and writes the new K / V rows straight into the ANE's INT8 KV buffers (zero copy). One set of ANE
+   programs serves every context, with no recompile for 128K. Mirror speculative decoding [30] splits drafter (NPU)
+   and target (GPU); we split the target's own verify call. Section 2.1, `pipe/dec_split.py`.
+5. **Sliced verify entries.** Compile-time key widths (24/40/48/56K) bind the bigger entry's KV buffers and attend
+   only to the occupied prefix: bit-exact (471 calls, KL 0), cost linear in width, +2.5% on the long session at
+   identical replies. A static-shape problem that dynamic GPU kernels do not have. Section 3.6.
+6. **Where a wider verify's cost goes on an accelerator like this one.** Measured by decomposition: FFN rows are
+   nearly free (+2 / +4% at 16 / 32 rows); the DeltaNet UT solve (+27 / +130% for 3 layers) and the tree conv taps
+   dominate, so tree16 costs +26-39% and tree32 +87-116% per group, and wider trees lose. Hardware-aware tree sizing
+   [7] and DDTree [10] assume cheap extra rows; this is a measured counterexample for a hybrid model on an NPU-class
+   accelerator. Section 5.1.
+
+Prior art we use, not claim: best-first trees by path probability [5, 10], ancestor-mask tree attention [3], lossless
+sampled tree acceptance [3, 8], path-local DeltaNet verification [24-29] (also in Splash's code [18]), prompt lookup
+[17].
+
+### M6-specific findings
+
+Measured on the Apple M6 (32 GB), macOS 27.2 / 27.3; results/17nov to 22nov.
+
+- **Memory bandwidth is the shared resource.** GPU streaming 156 GB/s, ANE split calls 121, both at once 164 of a
+  170 GB/s peak. ANE / GPU coupling is DRAM contention, not power.
+- **Drafter placement by DRAM contention, not compute.** The GPU twin of the drafter takes 8.9 ms alone but 13.3-14.5
+  ms against the ANE verify; on the ANE the draft phase is 12.3 ms of ANE work. The drafter stays on the ANE.
+- **GPU clock keep-alive.** Split-verify GPU bursts ran at 502-860 MHz; a continuous 20 us one-simdgroup keep-alive
+  holds 1735 MHz: verify 138 -> 122 ms at 66-70K keys, +2.1 W. Served (60 ms hold).
+- **ANE <-> GPU round trip** about 0.65 ms per handoff; Core AI's compute stream does not order ANE and GPU work on
+  27.3, so the split is ordered by the host.
+- **ANE same-function concurrency.** Two simultaneous runs of the same ANE function with different bindings corrupt
+  outputs silently. The schedule takes a lock per function.
+- **ANE program limits.** Functions fail past about 51 bound tensors; there are no IOSurface views, so a sliced
+  entry must bind whole KV segment buffers.
+- **ANE exactness.** A one-hot gather matmul is not exact on the ANE, while the cumulative decay matmul with a mask
+  input is; an in-place `index_put` in the traced forward makes the package fall off the ANE.
+- **Wide verify on the ANE** costs as in item 6 above; a 16-row chain is x1.085 at 8K, x1.17 at 32K, x1.27 at 64K.
+- **JetSpec++ as a serial ANE drafter.** Its 16-row LUT4 adapter pass is bandwidth-bound (22.2 ms at 8K, 110 GB/s);
+  W4A8 gains nothing there. End to end it is 12-46% slower than DFlash2 on this machine.
+- **Run-to-run noise.** The served chain gives byte-identical outputs across restarts but about 4% tok/s noise, so
+  every comparison here is ABBA across both orders with seeds pooled.
 
 ## 1. Introduction
 
@@ -275,13 +340,17 @@ cheap on this ANE target.
   to our tree construction is DDTree [10], which builds a draft tree from one block diffusion pass and verifies it in
   one target pass. DForkTree [11] makes that tree fork-aware; our fork-aware ranking experiment (section 5.2) gave no
   gain in 8 rows. We implemented the tree independently on DFlash2's candidate selector and did not use code from [10]
-  or [11]; the novel parts here are the fixed-width ANE verify, the exact tree conv for DeltaNet, and the commit step
-  back to a chain.
+  or [11]. What we add is listed in [What's new](#whats-new).
 - **Parallel drafting.** JetSpec [12] and JetSpec++ [12] draft larger blocks or trees with a learned head and
   self-refinement. We replayed JetSpec++'s published Qwen3.8-27B drafter on our target (section 5.2) and measured its
   cost on the ANE.
 - **Linear attention in a tree.** Gated DeltaNet [13] and the chunkwise delta-rule algorithm [14] are the layers our
-  verify must handle per path; the pending tape is our adaptation of that algorithm to ancestor masks.
+  verify must handle per path. Tree verification for DeltaNet / SSM hybrids is published: STree [29], TreeWY [24]
+  (a tree-shaped WY transform, rebuilding only the accepted state), SpecLA [25], LumoTree [26], HybridSpec [28] and
+  the mixture block drafters of [27] (short-conv windows along parent pointers). Our pending tape with an ancestor
+  mask is the same path-local idea, built for fixed ANE shapes; we did not use their code.
+- **NPU + GPU speculative decoding.** Mirror speculative decoding [30] runs the drafter on the NPU and the target on
+  the GPU. Our drafter runs on the ANE and the target's verify is itself split between ANE and GPU.
 - **DFlash2 trees on the same target (Metal).** TensorFold [23] (v1.3.2) runs DFlash2 trees for Qwen3.8-27B on Apple
   GPUs. It measures a row-cost table, keeps ancestor-closed node sets, and allocates rows by expected accepted tokens
   per measured millisecond; its default window is 16 rows. That allocator is the same idea as our cost-model policy
@@ -351,6 +420,13 @@ cheap on this ANE target.
 22. Qwen Team. Qwen3.8-27B. huggingface.co/Qwen/Qwen3.8-27B.
 23. TensorFold. github.com/ashhart/TensorFold, v1.3.2 (docs/recipes/qwen3.8-27b.md; PR 3326, the
     DeepSeek-V4.1 sibling-slot experiment).
+24. TreeWY: Speculative Verification for Gated DeltaNet Hybrids. arXiv:2608.20961, 2026.
+25. SpecLA: Efficient Speculative Decoding for Linear-Attention Models. arXiv:2607.16673, 2026.
+26. LumoTree: Path-Parallel Speculative Verification for Hybrid Language Models. arXiv:2609.23900, 2026.
+27. Multi-Future Drafting: Mixture Block Drafters for Tree-Verified Speculative Decoding. arXiv:2611.13017, 2026.
+28. HybridSpec: Throughput-Aware Speculative Decoding for Hybrid GDN-MoE Models. arXiv:2611.04055, 2026.
+29. STree: speculative tree decoding for hybrid state-space models (as cited by [27]).
+30. Mirror Speculative Decoding: Breaking the Serial Barrier in LLM Inference (Apple). arXiv:2510.13161.
 
 ## Appendix A: served configuration (22 Nov 2026)
 
