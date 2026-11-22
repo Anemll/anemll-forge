@@ -20,9 +20,10 @@ attend only to the occupied KV prefix, adds +2.5% on the long agent session at i
 
 ## 1. Introduction
 
-Speculative decoding hides the cost of a large target model behind a cheap drafter: the drafter proposes k tokens, the
-target scores all of them in one call, and an acceptance rule keeps a prefix. On a GPU the verify call's cost grows
-slowly with the number of rows, so recent systems verify a tree of candidates (16 rows or more) instead of one chain.
+Speculative decoding [1, 2] hides the cost of a large target model behind a cheap drafter: the drafter proposes k
+tokens, the target scores all of them in one call, and an acceptance rule keeps a prefix. On a GPU the verify call's
+cost grows slowly with the number of rows, so many systems verify a tree of candidates instead of one chain
+[3, 4, 5, 6, 7], including trees built from a block diffusion drafter's per-position distributions [10, 11].
 Our target runs largely on the ANE, which executes precompiled programs of fixed shape, and whose cost per extra row is
 not small for this hybrid model. The questions were:
 
@@ -51,6 +52,9 @@ not small for this hybrid model. The questions were:
 
 ### 2.2 Drafter (DFlash2)
 
+The drafter is DFlash2, a DFlash-style block drafter [9] conditioned on target features, derived from a public
+checkpoint [19] and converted to Core AI for the ANE.
+
 - 5 layers, 32 heads, conditioned on 5 target tap features (layers 5, 19, 33, 47, 61), drafting a block of 7 tokens
   per pass. LUT4 weights (Hadamard + GPTQ), on the ANE.
 - A **candidate selector** (predecessor and successor codebooks, rank 256, top-16 candidates) scores each candidate
@@ -71,7 +75,7 @@ tree can help.
 
 Per cycle, from the anchor token (the last committed token):
 
-1. Expand best-first by **path probability** under the selector score, `softmax(s_i(c | parent) / tau)` over the
+1. Expand best-first by **path probability** (as in dynamic draft trees [5, 10]) under the selector score, `softmax(s_i(c | parent) / tau)` over the
    top `TOPC` children of each node (`TOPC = 4`; `tau = 1.5`, calibrated offline in results/20nov).
 2. Stop at the anchor + 7 nodes. Rows are filled in pop order, which is topological.
 3. If the 7 nodes form the chain, the cycle runs the served chain entry (policy `branched`); otherwise the tree entry.
@@ -91,10 +95,11 @@ on the same weight constants, so they add no weight memory:
 
 The 48 DeltaNet layers are recurrent, so a tree needs two things a chain gets for free.
 
-- **Pending tape, not a state per row.** The verify keeps the block's DeltaNet rows (k / u / wk) and cumulative decay
+- **Pending tape, not a state per row.** Gated DeltaNet [13] is computed chunkwise with the UT / WY form of the delta
+  rule [14]. The verify keeps the block's DeltaNet rows (k / u / wk) and cumulative decay
   columns as a pending tape, and the in-block recurrence is a matmul over a mask input. With the ancestor mask in place
   of the causal one, each row sees only its own path, and no state is copied per branch. (The same design as Splash's
-  DeltaNet tree handling.)
+  DeltaNet tree handling [18].)
 - **Exact tree convolution (`corrx0`).** DeltaNet's short causal conv must read each row's ancestors, not the
   previous rows.
   - A one-hot gather (`ctap @ rows`) was the first form. It is not exact on the ANE (rel 1.8e-3 per group) and flips
@@ -112,8 +117,8 @@ The 48 DeltaNet layers are recurrent, so a tree needs two things a chain gets fo
   last accepted row's argmax.
 - **Sampled (`TREE_SAMPLED=1`):** at each node, the chain's own rule child by child: accept child `c` with probability
   `r(c)`, where `r` is the row's sampling distribution with the rejected siblings removed and renormalized; if all are
-  rejected, sample the next token from `r`. This is recursive rejection sampling, so the output has the distribution of
-  plain sampling. A one-child node makes exactly the chain's random draws. Checked against the release loop, including
+  rejected, sample the next token from `r`. This is multi-candidate recursive rejection sampling [3, 8], so the output
+  has the distribution of plain sampling. A one-child node makes exactly the chain's random draws. Checked against the release loop, including
   the RNG state.
 
 ### 3.5 Commit: back to a chain
@@ -220,19 +225,19 @@ Where a wider verify's cost goes:
 - **Attention at long context:** the score passes.
 
 Measured widths 8 to 16: no width beats tree8 by more than 1.6% greedy, and all lose at 32K. Splash 1.7.0
-(GPU-only) gets +17-22% tok/cycle from its 16-row tree at 0-2% cycle cost. That width is cheap on a GPU and is not
+[18] (GPU-only) gets +17-22% tok/cycle from its 16-row tree at 0-2% cycle cost. That width is cheap on a GPU and is not
 cheap on this ANE target.
 
 ### 5.2 Other policies and drafters
 
 | idea | result |
 |---|---|
-| Per-cycle tree / chain choice by a cost model (`TREE_POLICY=dink`) | long session -5.9% (-10.8% at 32-57K): the running-mean chain estimate is inflated by confident cycles |
+| Per-cycle tree / chain choice by a cost model (`TREE_POLICY=dink`, a Dinkelbach-style ratio rule [21]) | long session -5.9% (-10.8% at 32-57K): the running-mean chain estimate is inflated by confident cycles |
 | Per-cycle size selection 8/16/32 (offline) | +0.3% to +1.6%; oracle only +5-9% |
 | Fork-aware ranking, tau sweeps | no gain; served tau 1.5 already best |
-| Prompt lookup (n-gram) drafts | full-file code edits +101%; gated (`yield:1.25`) code +92% greedy / +27% sampled; long Pi session: no gate gains at 3 seeds. Off for Pi |
+| Prompt lookup (n-gram) drafts [17] | full-file code edits +101%; gated (`yield:1.25`) code +92% greedy / +27% sampled; long Pi session: no gate gains at 3 seeds. Off for Pi |
 | Lookup + drafter tree combined | loses: it pays for both the drafter and the tree verify |
-| JetSpec++ (B16 drafter) by replay | x1.42 to x1.81 tokens per round, but as a serial ANE drafter 12-46% slower end to end. Parked until drafting can overlap the verify |
+| JetSpec++ [12] (B16 drafter) by replay | x1.42 to x1.81 tokens per round, but as a serial ANE drafter 12-46% slower end to end. Parked until drafting can overlap the verify |
 | Drafter on the GPU | slower under DRAM contention (13.3-14.5 ms vs 12.3 ms ANE) |
 
 ## 6. Correctness and reproducibility
@@ -256,6 +261,85 @@ cheap on this ANE target.
 - Tree verify adds 2-4% per cycle. The cost is the conv correction and the mask inputs, not the FFN.
 - Gains are measured on one machine and one model pair. They are noisy at the 2-4% level, so every change was judged
   ABBA across both orders, with seeds pooled.
+
+## 8. Related work
+
+- **Speculative decoding.** Draft-then-verify with a lossless acceptance rule [1, 2].
+- **Tree verification.**
+  - SpecInfer [3] introduced token-tree verification with tree attention (our ancestor masks).
+  - Medusa [4], EAGLE / EAGLE-2 / EAGLE-3 [5, 6] and Sequoia [7] build static or dynamic draft trees for GPU verifiers.
+  - Recursive speculative decoding [8] studies sampling without replacement in trees.
+  - Our setting differs in one constraint: the verify width is fixed at 8 rows by a precompiled ANE program, so the
+    tree replaces the chain inside the same rows.
+- **Block diffusion drafters and their trees.** Our drafter is a DFlash-style block drafter [9]. The closest prior art
+  to our tree construction is DDTree [10], which builds a draft tree from one block diffusion pass and verifies it in
+  one target pass. DForkTree [11] makes that tree fork-aware; our fork-aware ranking experiment (section 5.2) gave no
+  gain in 8 rows. We implemented the tree independently on DFlash2's candidate selector and did not use code from [10]
+  or [11]; the novel parts here are the fixed-width ANE verify, the exact tree conv for DeltaNet, and the commit step
+  back to a chain.
+- **Parallel drafting.** JetSpec [12] and JetSpec++ [12] draft larger blocks or trees with a learned head and
+  self-refinement. We replayed JetSpec++'s published Qwen3.8-27B drafter on our target (section 5.2) and measured its
+  cost on the ANE.
+- **Linear attention in a tree.** Gated DeltaNet [13] and the chunkwise delta-rule algorithm [14] are the layers our
+  verify must handle per path; the pending tape is our adaptation of that algorithm to ancestor masks.
+- **Apple silicon engines.** Splash [18] (Inco AI) is the GPU + ANE reference we compared against throughout; its
+  16-row tree motivated the width study, and its DeltaNet tree handling matches ours.
+- **Quantization of the drafter.** GPTQ [15] with a Hadamard rotation [16].
+- **Attention kernels.** The split verify's GPU attention is a flash-decoding style kernel [20].
+
+## Acknowledgements
+
+- The Qwen Team (Alibaba Cloud) for Qwen3.8-27B [22].
+- The DFlash2 drafter is derived from ProCreations/Ternary-Bonsai-2-27B-DFlash2 [19] (Apache 2.0, upstream NOTICE
+  preserved), with selector codebooks extracted from it; drafter parity uses the vendored DFlash reference code
+  (MIT) [9].
+- The JetSpec++ drafter, adapter and calibration used in the replay are the authors' published artifacts [12].
+- Inco AI's Splash [18] served as the measured GPU + ANE reference (versions 1.3.x to 1.7.0).
+- An outside review of the 21 Nov code found the empty-ring restore crash, the non-atomic 'sysk' restore and the
+  split tree mask ordering (section 6), and corrected the lookup replay's row budget.
+- The M6 ANE bot proposed several of the experiments in section 5 (fork-aware ranking, the cost-model policy, the
+  lookup gates).
+
+## References
+
+1. Y. Leviathan, M. Kalman, Y. Matias. Fast Inference from Transformers via Speculative Decoding. ICML 2023.
+   arXiv:2211.17192.
+2. C. Chen, S. Borgeaud, G. Irving, J.-B. Lespiau, L. Sifre, J. Jumper. Accelerating Large Language Model Decoding
+   with Speculative Sampling. arXiv:2302.01318, 2023.
+3. X. Miao et al. SpecInfer: Accelerating Large Language Model Serving with Tree-based Speculative Inference and
+   Verification. ASPLOS 2024. arXiv:2305.09781.
+4. T. Cai et al. Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads. ICML 2024.
+   arXiv:2401.10774.
+5. Y. Li, F. Wei, C. Zhang, H. Zhang. EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty (ICML 2024,
+   arXiv:2401.15077) and EAGLE-2: Faster Inference of Language Models with Dynamic Draft Trees (EMNLP 2024,
+   arXiv:2406.16858).
+6. Y. Li, F. Wei, C. Zhang, H. Zhang. EAGLE-3: Scaling up Inference Acceleration of Large Language Models via
+   Training-Time Test. arXiv:2503.01840, 2025.
+7. Z. Chen et al. Sequoia: Scalable, Robust, and Hardware-aware Speculative Decoding. arXiv:2402.12374, 2024.
+8. W. Jeon, M. Gagrani, R. Goel, J. Park, M. Lee, C. Lott. Recursive Speculative Decoding: Accelerating LLM Inference
+   via Sampling Without Replacement. arXiv:2402.14160, 2024.
+9. J. Chen, Y. Liang, Z. Liu. DFlash: Block Diffusion for Flash Speculative Decoding. ICML 2026 (PMLR 306).
+   arXiv:2602.06036.
+10. L. Ringel, Y. Romano. Accelerating Speculative Decoding with Block Diffusion Draft Trees (DDTree).
+    arXiv:2604.12989, 2026.
+11. DForkTree: Accelerating Speculative Decoding with Fork-Aware Block Diffusion Draft Trees. arXiv:2611.12356, 2026.
+12. JetSpec: Breaking the Scaling Ceiling of Speculative Decoding with Parallel Tree Drafting (arXiv:2606.18394,
+    2026), and Z. Feng et al., JetSpec++: Foresight Parallel Drafting with Self Refinements (arXiv:2610.19792, 2026).
+    Code: github.com/hao-ai-lab/JetSpec.
+13. S. Yang, J. Kautz, A. Hatamizadeh. Gated Delta Networks: Improving Mamba2 with Delta Rule. ICLR 2025.
+    arXiv:2412.06464.
+14. S. Yang, B. Wang, Y. Zhang, Y. Shen, Y. Kim. Parallelizing Linear Transformers with the Delta Rule over Sequence
+    Length. NeurIPS 2024. arXiv:2406.06484.
+15. E. Frantar, S. Ashkboos, T. Hoefler, D. Alistarh. GPTQ: Accurate Post-Training Quantization for Generative
+    Pre-trained Transformers. ICLR 2023. arXiv:2210.17323.
+16. S. Ashkboos et al. QuaRot: Outlier-Free 4-Bit Inference in Rotated LLMs. arXiv:2404.00456, 2024.
+17. A. Saxena. Prompt Lookup Decoding. github.com/apoorvumang/prompt-lookup-decoding, 2023.
+18. Inco AI. Splash: a local inference engine for Apple silicon. github.com/incoai/splash.
+19. ProCreations. Ternary-Bonsai-2-27B-DFlash2. huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2, revision
+    4cfb6ad0.
+20. T. Dao, D. Haziza, F. Massa, G. Sizov. Flash-Decoding for long-context inference. 2023.
+21. W. Dinkelbach. On Nonlinear Fractional Programming. Management Science 13(7), 1967.
+22. Qwen Team. Qwen3.8-27B. huggingface.co/Qwen/Qwen3.8-27B.
 
 ## Appendix A: served configuration (22 Nov 2026)
 
