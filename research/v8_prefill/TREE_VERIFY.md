@@ -349,7 +349,7 @@ cheap on this ANE target.
 20. T. Dao, D. Haziza, F. Massa, G. Sizov. Flash-Decoding for long-context inference. 2023.
 21. W. Dinkelbach. On Nonlinear Fractional Programming. Management Science 13(7), 1967.
 22. Qwen Team. Qwen3.8-27B. huggingface.co/Qwen/Qwen3.8-27B.
-23. A. Hart et al. TensorFold. github.com/ashhart/TensorFold, v1.3.2 (docs/recipes/qwen3.8-27b.md; PR 3326, the
+23. TensorFold. github.com/ashhart/TensorFold, v1.3.2 (docs/recipes/qwen3.8-27b.md; PR 3326, the
     DeepSeek-V4.1 sibling-slot experiment).
 
 ## Appendix A: served configuration (22 Nov 2026)
