@@ -86,3 +86,29 @@ reproduces 21 Nov forkrank: 4.083 / 4.075).
   drafts per cycle (64 rows) against the ANE verify and the unknown acceptance loss from features that stop at the
   anchor. Likely 0 to +4%. Step 2 (an ANE drafter replay with stale features, forge stopped) decides it.
 - **A2, A4:** dead on this target and budget.
+
+## Engine use per decode cycle: where could a draft-ahead run? (22 Nov, from logs, forge untouched)
+
+Live served decode (tree8 + sliced entries), medians of the server's 10 s decode lines over the last 8 server logs
+(41 samples):
+
+| prompt | cycle ms | ANE draft | ANE verify | host (sample + ctx + host) | ANE busy share | ANE idle ms |
+|---|---|---|---|---|---|---|
+| < 16K | 110.0 | 14.4 | 93.7 | 1.5 | 98.3% | 1.9 |
+| 16-32K | 122.0 | 14.5 | 106.3 | 1.5 | 99.0% | 1.2 |
+| > 64K | 151.0 | 14.4 | 135.2 (incl. GPU attention, split) | 1.6 | 99.1% (ANE waits during GPU attention) | 1.4 |
+
+18 Nov decode telemetry (results/18nov, chain build): GPU 0% active in decode up to 32K, 24% at 64K (split attention);
+DRAM 98-104 GB/s on average, the ANE counter in its 128+ GB/s top bin 58% of the time while it streams; both engines
+together reach 164 GB/s. So while the ANE verifies, about 36 GB/s of DRAM and the whole GPU are spare.
+
+- **The ANE has no room:** 98-99% busy; the idle ~1.5 ms per cycle is host work. Only in the split (> 64K) does the
+  ANE wait for GPU attention (18 Nov: 28 ms per step at 64K), a slot for an ANE draft-ahead at long context only.
+- **The GPU has room:** idle below 64K. A drafter pass reads about 0.7 GB, about 19 ms at the 36 GB/s spare, inside a
+  94-135 ms verify. Measured 19 Nov: one GPU drafter pass per cycle beside the ANE verify costs the verify +1.6% (2K,
+  32K) / +5% (64K). A batch of B guesses reads the weights once (1 -> 16 rows +16-21%, 20 Nov E1), so B = 4-8 costs
+  about one pass of DRAM.
+- **Revised A1 estimate (with probe A1's hit rates):** hidden draft = hit x 14.4 ms: B = 4 (hit 0.42-0.47) saves
+  6.0-6.8 ms, B = 8 (0.53-0.57) saves 7.6-8.2 ms of a 110-122 ms cycle (+5.5 to +7%), minus +1.6-2% verify:
+  **about +3 to +5%**, if features that stop at the anchor do not lower acceptance (unknown; that is the step 2
+  replay). Needs a working GPU DFlash2 (the 19 Nov twin is a cost model with the real shapes, not a drafter).
