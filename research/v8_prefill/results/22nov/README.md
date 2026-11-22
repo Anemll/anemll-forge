@@ -123,3 +123,57 @@ logs).
 STATUS 01:14 item 1 step A (sliced decode entries): PAYS. 48K-sliced = 0.50 of the 32K to 64K step (linear 0.50),
 bit-exact against masked 64K. Projects 117.9 ms served verify against a 117.7 ms bar. HWX bonded [0, 1], unchanged
 after. Scratch build deleted. Step B (temporary full build + long-session ABBA) waits for Anemll.
+
+## NEXT.md item 1, step B: temporary build with sliced entries + long-session A/B (from 01:50)
+
+Anemll's go-ahead 01:50, with guardrails:
+- the temporary build on the SSD
+- internal free space checked before compiling and hourly; stop below 15 GiB, and delete no cache I did not create
+- sliced selection only behind a research flag
+- the usual timing and restore rules
+- ABBA plus KL / greedy parity, 24K+48K first
+- the build deleted unless it clears +1.5% on the long session in both orders
+
+- **Code** (commit 361b6fd):
+  - `build_dec8t_chunk.py` with `TREE_SLICED` adds `g<i>_v8s_<w>k` (chain) and `g<i>_t8s_<w>k` (tree) per group at
+    24K / 40K / 48K / 56K. Each binds the next ladder entry's KV segments (40 to 46 tensors) and attends over w keys.
+  - `v8/build_dec8ts_all.sh` is the build driver with the disk guard.
+  - `pipe/rung_slice.py`: research only, installed by `tree_verify.install` when `RUNG_SLICE` is set (a 3-line hook;
+    unset = the served path).
+  - `serve_t/slice_ab.sh` / `slice_compare.py`: the parity gate, then the ABBA.
+  - `tree_bench.py` banner: a `slice` key.
+  - One build carries all four widths; `RUNG_SLICE=24,48` or `24,40,48,56` picks the set at launch. Chain cycles (about a
+    third of the long session's verifies) use the sliced entries too.
+- **Internal disk:** per compiled chunk, about 1.2-1.4 GB of Core AI entry plus about 1.4 GiB of aned HWX. These are the
+  served build's own numbers: 10.4 GB and 11.2 GiB for 8 chunks.
+  - 29.0 GiB free at the start, so a full build would end near 8 GiB.
+  - The driver starts a compile only with ≥ 18 GiB free (guard + one chunk) and stops a running one below 15 GiB.
+  - Expected: a pause after about 5 of 8 chunks unless space is freed. That is Anemll's call. Candidates are the
+    superseded 20 Nov tree builds v8_dec8tc and v8_dec8t, about 21 GiB each with aned.
+- **First export, 02:12: failed.** The palettizer reported `NUM_PALETTES 256` (and 64) for 4-bit indices on 8 weights:
+  FFN chunk (9216 x 5120, 4-bit LUT) and DeltaNet out_proj (5120 x 6144, 2x64 LUT).
+  - This happens when a weight no longer matches its registered LUT and the UNIQUE fallback runs.
+  - That run had TMPDIR on the exFAT SSD; the served builds used the default.
+  - Retried 02:16 with the default TMPDIR (internal, transient).
+- **Retry, 02:24: chunk 0 exported** (81 entries, 1193 MB; the served chunk is 65 entries, 1189 MB). The exFAT TMPDIR
+  was the cause, and TMPDIR stays the default from here.
+- **Chunk 0 compiled** at 02:27 (3 min 4 s). Persistent cost: a 1.1 GB Core AI entry plus a 1.3 GB aned HWX, about
+  2.4 GB, as projected. Chunk 1 exported at 02:36 (713 s).
+- **Stopped at the disk guard, 02:38:50.** The compile of package 1 started at 02:36:02 with 26.6 GiB free, while
+  chunk 2 exported alongside it. Free fell to 14 GiB at 02:38:00 and 11.2 GiB at 02:39.
+  - The driver polled the guard only while waiting for a compile, so the overlapping compile ran unwatched. The build
+    driver, the compile (coreai_compile.py) and the export were killed. Nothing was deleted, and forge kept serving
+    (pid 15402).
+  - Mine in that window: 1.1 GB of compile temp (`$TMPDIR/com.apple.MetalPerformanceShadersGraph/mpsgraph-60774-*`)
+    and a 1.1 GB aned HWX written at 02:37:15 with no Core AI entry (orphaned by the kill). No Core AI entry was
+    written for chunk 1.
+  - The other ~13 GiB of the drop is in no file this user can read. Candidates: root-only compiler temp of the killed
+    compile, or the macOS update staging (`com.apple.os.update-MSUPrepareUpdate` is the newest snapshot). The update
+    services were idle when checked. Free held at 11.2 GiB after the stop.
+- **Driver fixed for a resume.** A watcher now polls free space every 15 s for the whole run and stops this build's
+  compile / export below 15 GiB, and export and compile no longer overlap.
+- **What a resume needs.** 6 chunks to compile at about 2.4 GB each (about 15 GB persistent). Each compile's transient
+  peak is unknown but was several GiB here. With the 15 GiB guard, that means about 25 to 30 GiB freed first.
+
+STATUS 02:41 item 1 step B: STOPPED at the 15 GiB internal-disk guard (11.2 GiB free). 2 of 8 packages exported, 1
+compiled; build killed; nothing deleted; forge still serving. Waiting for Anemll's call on disk space.
