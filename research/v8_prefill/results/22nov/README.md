@@ -258,3 +258,36 @@ Rollback: `SERVED_SLICE=0` (v8_dec8tx + w_dec8tx, kept as they are; = v8_server_
 11:14 after 30 min Pi idle, banners checked (tree build v8_dec8ts, slice [24, 40, 48, 56]K), smoke 29aef2ec9db18a3f
 MATCH (2K 36.99 tok/s), forge pid 50411, swap watchdog armed as before (+1536 MB). Footprint after the smoke 4545 MB vs
 4461 MB for v8_dec8tx (+84 MB); swap unchanged. HWX: w_dec8ts 8 referenced, 0 missing (x2). Files: `deploy/`.
+
+STATUS 13:50 Pi-idle window (13:24:57-13:50:23, `serve_t/window_22nov.sh`, X=_w2; logs `mem/window_w2.log`): all four
+steps done, served default restored (forge pid 3068, smoke 29aef2ec9db18a3f MATCH). A first attempt at 13:22 stopped
+at its first launch (labels reused from the 12:12 run; the bench refuses to overwrite) and restored at once.
+
+1. **Memory across the 32K -> 64K switch, fresh launches, long session greedy** (`mem/mem_{new,old}_g_w2.csv`):
+
+   | build | load | at the 64K switch | peak (55.5K) | IOSurface (KV) at switch | swap |
+   |---|---|---|---|---|---|
+   | v8_dec8ts (served) | 4545 MB | 5531 -> 6595 (+1064) | 6621 | 1809 -> 2841 | 697 flat |
+   | v8_dec8tx (old) | 4466 MB | 5453 -> 6521 (+1068) | 6549 | 1757 -> 2790 | 689 flat |
+
+   The switch costs about 1.06 GB of KV buffers on both builds; the sliced build is about 75 MB larger throughout; no
+   swap on a fresh forge. The 11:59 watchdog kill (93 requests, 45 min of Pi traffic) is accumulation over many turns,
+   not the build or the switch. Greedy long session 41.05 vs 40.38 tok/s, output checksums identical.
+2. **Stream pacing (STREAM_PACE=1, that launch only), 400-token greedy reply** (`mem/pace_{on,off}_w2.json`; off timed
+   on the step-3 clean launch): same 398 chunks, same text (sha 28322200f1c85d00), span 8.06 vs 8.05 s. Gaps < 2 ms
+   (bursts) 6 vs 323, gaps > 50 ms 7 vs 74, gap stdev 11.4 vs 42.3 ms, median 18.1 vs 0.002 ms. TTFT 0.41 vs 0.36 s
+   (one run each). Launcher default unchanged.
+3. **Clean 2K smoke** on a fresh served-default launch: 29aef2ec9db18a3f MATCH (36.95 tok/s).
+4. **GPU draft-ahead probes** (`probes/twin_rows_alone.txt`, `mem/overlap_r{16,32,64}_w2/`):
+   - GPU drafter twin alone: 8 / 16 / 32 / 64 rows (B = 1 / 2 / 4 / 8 guesses) = 8.64 / 8.97 / 9.61 / 11.70 ms per call.
+   - Once per cycle beside the served ANE verify (verify ms, mean of the two twin turns vs the none turns):
+
+     | rows (guesses) | 2K | 32K |
+     |---|---|---|
+     | 16 (2) | 96.4 -> 98.15 (+1.8%) | 112.9 -> 115.85 (+2.6%) |
+     | 32 (4) | 95.8 -> 97.85 (+2.1%) | 112.9 -> 115.1 (+2.0%) |
+     | 64 (8) | 95.5 -> 98.1 (+2.7%) | 112.55 -> 115.55 (+2.7%) |
+
+   - With the A1 hit rates (B = 4: 0.42-0.47, B = 8: 0.53-0.57) and a 13 ms draft phase: B = 8 hides about 7.2 ms for
+     +2.6-3.0 ms of verify, net about +4.2-4.6 ms of a 110-127 ms cycle, **about +3.5-4%** (estimate), if features that
+     stop at the anchor do not cost acceptance. That is the parked `dflash_stale_replay.py` (needs a forge-stop window).
