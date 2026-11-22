@@ -177,3 +177,39 @@ Anemll's go-ahead 01:50, with guardrails:
 
 STATUS 02:41 item 1 step B: STOPPED at the 15 GiB internal-disk guard (11.2 GiB free). 2 of 8 packages exported, 1
 compiled; build killed; nothing deleted; forge still serving. Waiting for Anemll's call on disk space.
+
+STATUS 08:49 item 1 step B (sliced decode entries, temporary build v8_dec8ts, RUNG_SLICE=24,48): CLEARS the keep rule.
+Long session pooled +1.92% (order a +1.85%, order b +1.99%; rule: +1.5% in both orders), 152/152 replies identical to
+served (greedy and seeds 7100 / 7200 / 7300). Build kept; deploy waits for Anemll. Served config restored, forge pid
+14551, smoke 29aef2ec9db18a3f MATCH.
+
+### Step B result (22 Nov, 07:27 to 08:49, macOS 27.3 26C5047e)
+
+Parity gate (kc, RUNG_SLICE=24,40,48,56 RUNG_SLICE_CHECK=1, long greedy): 471 sliced calls over 22 requests, max |logit
+diff| 0, max KL 0, argmax 3762/3762 rows. PASS.
+
+Block 1, ABBA (sv_a, s2_a, s2_b, sv_b), pooled client decode tok/s, long session (19 turns, 8.6K to 55.5K), 4 sets:
+
+| band   | served | 24K+48K | pooled | order a | order b | identical replies |
+|--------|-------:|--------:|-------:|--------:|--------:|------------------:|
+| 8-16K  | 40.06  | 40.17   | +0.29% | +0.19%  | +0.40%  | 32/32   |
+| 16-32K | 36.49  | 37.17   | +1.86% | +1.83%  | +1.89%  | 48/48   |
+| 32-57K | 29.76  | 30.70   | +3.15% | +3.07%  | +3.23%  | 72/72   |
+| all    | 34.92  | 35.59   | +1.92% | +1.85%  | +1.99%  | 152/152 |
+
+Per set (order a / order b): greedy +1.61% / +2.40%, s7100 +2.00% / +2.01%, s7200 +1.97% / +2.07%, s7300 +1.74% /
++1.50%. Verify calls: 1789 of 4212 sliced (t8s_24k 687, t8s_48k 626, v8s_24k 277, v8s_48k 199); tree cycle 111.7 ->
+109.2 ms, chain 107.2 -> 105.1 ms. Block 2 (4-entry set) skipped: it would start after 07:00. HWX: 8 referenced, 0
+missing, for both w_dec8tx and v8_dec8ts_w after the run. Pi requests 0 and errors 0 in every arm.
+
+Build notes (05:43 to 07:26): resumed after the 27.3 update (which freed the 26C5035r caches: 272 GiB free at the end,
+guard never near). Sliced chunks compile in about 3m12s vs 2m20s served (81 vs 65 functions). GPU tables: the 4-part
+parallel prep (prep_engine_par.py, = serial: sliced/prep_par_check.txt) hit its swap watchdog at 07:01 with forge
+serving; a 2-part rerun then pushed system swap until forge's own watchdog killed forge at 07:04:23 (down to about
+07:06:30, restored, smoke MATCH). Fix: prep_engine.py keeps one chunk's HWX weights in memory (80/80 files identical:
+sliced/prep_lean_check.txt), tables rerun as 1 part under a +512 MB watchdog, done 07:23 with no swap growth.
+Sources in sliced/src/.
+
+OS update recovery (04:51 to 05:32): 27.3 recreated aned's cache without the read ACL (Anemll re-granted it); served
+v8_dec8tx recompiled (17 packages, 19m36s); w_dec8tx GPU tables regenerated (1346 files byte-identical, manifests differ
+only in the HWX path build dir; old manifests kept as manifest*.26C5035r.json).

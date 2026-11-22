@@ -8,3 +8,25 @@
 01:11:28 NEXT item 2 (dink) done: fails long-session guardrail (-5.9% vs branched, both orders); restored pid 15402, smoke 29aef2ec ok; commit c0c67a2. Rung probe build started 01:10:50
 01:15:29 NEXT item 1 step A (rung probe) done: pays (48ks 0.50 of step, bit-exact, 117.9 ms projected vs 117.7 bar); HWX bonded [0,1] same after; scratch build cleaned
 02:40:47 step B STOPPED at the 15 GiB disk guard (11.2 GiB free); build killed; nothing deleted; waiting for Anemll
+04:51 OS upgraded to 27.3 26C5047e (reboot, forge down); recompile served v8_dec8tx for the new OS via journal_compile (forge.py compile), internal free 143 GiB
+05:11 arm served_after_os27_3: start v8_server_dec8_qk.sh ()
+05:13 served forge crashed on first prefill: GPU tables w_dec8tx point at 26C5035r HWX (gone after the update); regenerating GPU tables into /Volumes/SSD4TB/anemll-forge-research/w_dec8tx_os273 for the recompiled HWX
+05:14 GPU-table prep blocked: macOS 27.3 update recreated /Library/Caches/com.apple.aned without the anemll read ACL (drwx------ root); forge DOWN until Anemll re-grants it
+05:31 w_dec8tx GPU tables: regenerated for 26C5047e (1346 files byte-identical, manifests differ only in HWX path build dir); manifests swapped, old kept as manifest*.26C5035r.json
+05:31 arm served_after_os27_3: start v8_server_dec8_qk.sh ()
+05:31 arm served_after_os27_3: start v8_server_dec8_qk.sh ()
+05:32 served config restored on 26C5047e: forge pid 9505, smoke 29aef2ec9db18a3f MATCH (2k 36.25 tok/s)
+05:43 step B resumed on 26C5047e (201 GiB free; GPU-table step now prep_engine_par.py, 4 parts)
+07:05:58 forge pid 9505 killed 07:04:23 by its swap watchdog (swap 0 -> 2083 MB) under memory pressure from my 2-part GPU-table rerun; table rerun stopped; restoring forge
+07:05 arm served_after_os27_3: start v8_server_dec8_qk.sh ()
+07:08:04 GPU tables rerun 2: 1 part, prep_engine keeps one chunk's HWX in memory (lean check 80/80 identical), watchdog +512 MB (forge's is +1536)
+07:25:56 tables did not finish; A/B not started
+07:26:22 step B build done (8 HWX present); starting slice_ab.sh
+07:27 arm sl_kc_b: start v8_server_dec8_qk.sh (BUILD=/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts GM=/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_w/manifest_best.json )
+07:33 arm sl_sv_a_b: start v8_server_dec8_qk.sh ()
+07:52 arm sl_s2_a_b: start v8_server_dec8_qk.sh (BUILD=/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts GM=/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_w/manifest_best.json )
+08:10 arm sl_s2_b_b: start v8_server_dec8_qk.sh (BUILD=/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts GM=/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_w/manifest_best.json )
+08:29 arm sl_sv_b_b: start v8_server_dec8_qk.sh ()
+08:48 arm served_after_slice: start v8_server_dec8_qk.sh ()
+08:49:11 slice_ab.sh exit 0
+08:49:47 step B A/B done: +1.92% pooled long session (+1.85 / +1.99 by order), 152/152 identical; build kept pending deploy decision; forge pid 14551 smoke MATCH

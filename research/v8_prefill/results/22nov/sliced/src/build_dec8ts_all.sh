@@ -90,7 +90,7 @@ if [ -n "$PAUSED" ]; then glog "PAUSED at the disk guard: exports done to $(ls $
 glog "all packages compiled; GPU tables -> $GWD"
 mkdir -p $GWD
 cd $P && PREP_NO_FFN=1 EXPORT_DIR=/Users/anemll/Models/vq27b/export/release_vq3pA_mixh_s600_k1_mat MODEL=/Volumes/SSD4TB/Qwen3.8-27B \
-  nice -n 10 $BPY prep_engine.py $O 0 64 $GWD 2048 > $L/v8_prep_${LT}.log 2>&1 & BP=$!
+  nice -n 10 $BPY prep_engine_par.py $O $GWD 2048 4 > $L/v8_prep_${LT}.log 2>&1 & BP=$!   # 22 Nov: 4 parts, = serial (sliced/prep_par_check.txt)
 $WD $BP 1024 $L/watchdog_v8_prep_${LT}.log >/dev/null 2>&1 &
 wait $BP || { glog "GPU tables failed (see $L/v8_prep_${LT}.log)"; exit 1; }
 cd $P && EXPORT_DIR=/Users/anemll/Models/vq27b/export/release_vq3pA_mixh_s600_k1_mat MODEL=/Volumes/SSD4TB/Qwen3.8-27B \

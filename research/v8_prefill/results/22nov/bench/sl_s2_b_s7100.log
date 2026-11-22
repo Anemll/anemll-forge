@@ -1,0 +1,23 @@
+BANNER [sl_s2_b_s7100] prompts long_agent_v1.json sha 3d75cb7684c06fa6 gen 512 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts | lookup off | slice: sliced decode entries [24, 48]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volumes/SSD4 | lookup: off (no prompt-lookup line)
+[sl_s2_b_s7100] warmup ttft 0.53s
+[sl_s2_b_s7100] idle 12.6 W
+[sl_s2_b_s7100] long agent pi-long:0 prompt 8622 ttft 6.3s | gen 495 47.4 tok/s | 5.38 tok/verify, cycle 116 ms (verify 98.4) | 28.4 W | sha 3be23b5cb119958b
+[sl_s2_b_s7100] long agent pi-long:1 prompt 10446 ttft 3.7s | gen 512 38.4 tok/s | 4.41 tok/verify, cycle 116 ms (verify 99.1) | 28.1 W | sha 2fc914e4cf545642
+[sl_s2_b_s7100] long agent pi-long:2 prompt 14850 ttft 8.3s | gen 123 39.7 tok/s | 4.39 tok/verify, cycle 114 ms (verify 99.7) | 35.9 W | sha 0e73b7e6d352169b
+[sl_s2_b_s7100] long agent pi-long:3 prompt 16187 ttft 3.2s | gen 77 33.4 tok/s | 3.67 tok/verify, cycle 114 ms (verify 99.5) | 45.0 W | sha 4582761ad6ab8e95
+[sl_s2_b_s7100] long agent pi-long:4 prompt 18207 ttft 4.6s | gen 318 33.8 tok/s | 3.93 tok/verify, cycle 118 ms (verify 103.1) | 28.1 W | sha b79ee5cc20c1351b
+[sl_s2_b_s7100] long agent pi-long:5 prompt 20134 ttft 4.5s | gen 498 38.8 tok/s | 4.53 tok/verify, cycle 120 ms (verify 102.8) | 27.0 W | sha 058abed01ad91ef3
+[sl_s2_b_s7100] long agent pi-long:6 prompt 24208 ttft 8.8s | gen 477 35.8 tok/s | 4.26 tok/verify, cycle 121 ms (verify 104.0) | 27.1 W | sha 4d125f55f97b82c4
+[sl_s2_b_s7100] long agent pi-long:7 prompt 25649 ttft 3.8s | gen 418 34.2 tok/s | 4.22 tok/verify, cycle 125 ms (verify 107.1) | 28.4 W | sha 252f448c74dc0fb0
+[sl_s2_b_s7100] long agent pi-long:8 prompt 27807 ttft 5.3s | gen 52 30.1 tok/s | 3.47 tok/verify, cycle 122 ms (verify 108.0) | 40.8 W | sha a317a2cc883c3726
+[sl_s2_b_s7100] long agent pi-long:9 prompt 30175 ttft 5.8s | gen 116 36.1 tok/s | 4.30 tok/verify, cycle 123 ms (verify 108.3) | 35.0 W | sha aa44ec223844a75e
+[sl_s2_b_s7100] long agent pi-long:10 prompt 33336 ttft 8.0s | gen 321 26.0 tok/s | 3.45 tok/verify, cycle 134 ms (verify 115.6) | 25.9 W | sha db9214889a5c4b08
+[sl_s2_b_s7100] long agent pi-long:11 prompt 38007 ttft 12.0s | gen 299 28.1 tok/s | 3.74 tok/verify, cycle 134 ms (verify 115.5) | 26.4 W | sha 0b6da57c9a86f40e
+[sl_s2_b_s7100] long agent pi-long:12 prompt 39497 ttft 4.6s | gen 50 41.3 tok/s | 4.55 tok/verify, cycle 135 ms (verify 119.8) | 44.0 W | sha e9f5cab02c1784ad
+[sl_s2_b_s7100] long agent pi-long:13 prompt 43285 ttft 10.8s | gen 16 28.9 tok/s | 2.29 tok/verify, cycle 134 ms (verify 119.9) | nan W | sha f901d7bf31e14ef8
+[sl_s2_b_s7100] long agent pi-long:14 prompt 45212 ttft 6.1s | gen 18 127.9 tok/s | 6.00 tok/verify, cycle 147 ms (verify 131.2) | 43.6 W | sha 4feebbd5bd1c43c4
+[sl_s2_b_s7100] long agent pi-long:15 prompt 47116 ttft 6.2s | gen 17 123.1 tok/s | 5.67 tok/verify, cycle 142 ms (verify 126.8) | nan W | sha 3ee489937c89d37c
+[sl_s2_b_s7100] long agent pi-long:16 prompt 49297 ttft 7.2s | gen 20 46.4 tok/s | 3.33 tok/verify, cycle 144 ms (verify 128.2) | nan W | sha c6e3709375c20a59
+[sl_s2_b_s7100] long agent pi-long:17 prompt 52813 ttft 10.8s | gen 299 24.8 tok/s | 3.48 tok/verify, cycle 141 ms (verify 122.6) | 27.6 W | sha 2e8013a3014f9ef0
+[sl_s2_b_s7100] long agent pi-long:18 prompt 55454 ttft 8.7s | gen 148 24.5 tok/s | 3.22 tok/verify, cycle 137 ms (verify 123.0) | 30.5 W | sha 0c2a1ae16027c19e
+[sl_s2_b_s7100] long SUMMARY tok/s 34.06 (token-weighted), tok/verify 4.126, output checksum 87535894217bde1c
