@@ -118,3 +118,24 @@ together reach 164 GB/s. So while the ANE verifies, about 36 GB/s of DRAM and th
 The commit (tree_verify `compact` + `mb.accept` + the drafter's feature queue) is the server's `ctx` phase, t3 -> t4 in
 `Tree.cycle` / `_chain`: 1.1-1.4 ms of a 110-127 ms cycle (live decode lines, 22 Nov), about 1%. Folding it into the
 next verify saves at most part of that: under the 2% bar, not pursued.
+
+## Five more papers (STAND 2506.04708, Revisiting Lossy Verification 2607.26627, VSD 2602.05774, SpecHub 2411.05289, Khisti et al. 2410.18234)
+
+- SpecHub, Khisti et al.: covered (optimal multi-draft for sampled drafts; 0 for deterministic drafts).
+- STAND: stochastic drafting is covered (RheoSampling, -4%); its session n-gram tables of target distributions as a
+  rescoring signal: 0 to +2% (estimate), untested.
+- VSD (lossless): retrain the drafter's scores for path acceptance (ELBO + KL, tested at T=1, +7.3% over EAGLE-3); the
+  direct route at the +8.6-10.2% ranking ceiling next to DFlow; a selector / score-head fine-tune on our logs is the
+  small version (+3-6%, estimate). Needs training.
+- **Sharper target sampling, LOSSY (Anemll's decision; `serve_t/probe_truncate.py`, `probes/truncate.json`)**: the
+  served trees scored with the target's row distribution sharpened before the served walk (exact on the logged
+  top-20 support; the served sampler is T 1.0, top_p 0.95, top_k 20):
+
+  | sampler | realistic 2K-32K | long session |
+  |---|---|---|
+  | served T 1.0, min_p 0 | 4.083 | 4.075 |
+  | min_p 0.05 / 0.1 | +0.7% / +1.9% | +0.6% / +1.6% |
+  | T 0.8 / 0.7 / 0.6 | +2.0% / +3.1% / +4.2% | +1.7% / +2.6% / +3.6% |
+  | T 0.6 + min_p 0.05 | +5.0% | +4.3% |
+
+  Tok/verify only; it changes Pi's output distribution (quality not measured here). Not a served change.
