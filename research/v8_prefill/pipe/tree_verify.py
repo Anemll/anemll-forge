@@ -44,7 +44,9 @@ LOOKUP_OBSERVE = os.environ.get("LOOKUP_OBSERVE", "0") == "1"
 # 21 Nov 2026 (research, default off): LOOKUP_GATE gates the prompt-lookup cycles (NGRAM_DRAFT > 0): len:L = take a lookup
 # draft only when its match is >= L tokens; yield:M = only when E(lookup tokens | match length) / (cycle - drafter ms) > M x
 # the request's running tree / chain tokens per ms (no tree history yet: match >= 16). E from the observe-mode logs
-# (results/21nov/lookup_gate/e_table.json). Anything else: the served lookup rule unchanged.
+# (results/21nov/lookup_gate/e_table.json). ctx:C:L:M = context-aware: below C positions only a match >= L that also
+# passes yield:M (L = off: no lookup below C), at / above C yield:M (e.g. ctx:32768:48:1.25). Anything else: the
+# served lookup rule unchanged.
 LOOKUP_GATE = os.environ.get("LOOKUP_GATE", "")
 LK_E = {"greedy": {6: 4.0, 8: 5.38, 12: 6.837, 16: 7.194, 24: 7.528, 32: 7.72, 48: 7.967},
         "sampled": {6: 4.842, 8: 5.974, 12: 6.721, 16: 6.965, 24: 6.872, 32: 7.422, 48: 7.889}}
@@ -365,19 +367,27 @@ class Tree:
             rec.update(lk_drafts=lk[0] if lk else np.full(7, -1, np.int32), lk_len=lk[1] if lk else 0)
         self.rec.append(rec)
 
-    def _gate(self, L, temp):
-        """LOOKUP_GATE: take this lookup proposal (match length L)?"""
+    def _yield_ok(self, L, temp, margin):
+        ref = getattr(self, "_yield_ema", None)
+        if ref is None or getattr(self, "_cyc_ema", None) is None:
+            return L >= 16
+        tab = LK_E["sampled" if temp > 0 else "greedy"]
+        e = tab[max(b for b in tab if b <= max(L, 6))]
+        c_l = max(self._cyc_ema - self._draft_ema, 1.0)
+        return e / c_l > margin * ref
+
+    def _gate(self, L, temp, pos=0):
+        """LOOKUP_GATE: take this lookup proposal (match length L, context position pos)?"""
         kind, _, arg = LOOKUP_GATE.partition(":")
         if kind == "len":
             return L >= int(arg or 16)
         if kind == "yield":
-            ref = getattr(self, "_yield_ema", None)
-            if ref is None or getattr(self, "_cyc_ema", None) is None:
-                return L >= 16
-            tab = LK_E["sampled" if temp > 0 else "greedy"]
-            e = tab[max(b for b in tab if b <= max(L, 6))]
-            c_l = max(self._cyc_ema - self._draft_ema, 1.0)
-            return e / c_l > float(arg or 1.25) * ref
+            return self._yield_ok(L, temp, float(arg or 1.25))
+        if kind == "ctx":   # ctx:C:L:M
+            c_, l_, m_ = (arg.split(":") + ["32768", "48", "1.25"][len(arg.split(":")):])[:3]
+            if pos < int(c_):
+                return l_ != "off" and L >= int(l_) and self._yield_ok(L, temp, float(m_))
+            return self._yield_ok(L, temp, float(m_))
         return True
 
     def _note(self, t0, t1, t4, ntok):
@@ -414,7 +424,7 @@ class Tree:
             else:
                 import ngram_draft as NG
                 hit = NG.lookup(eng.tokens.with_anchor(anchor), eng.ngram.k, eng.ngram.need, eng.ngram.max_match)
-                take = hit is not None and self._gate(hit[1], temp)
+                take = hit is not None and self._gate(hit[1], temp, mb.pos)
                 self.req["gated"] += int(hit is not None and not take)
             if take:
                 self.req["lookup"] += 1

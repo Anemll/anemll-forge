@@ -1,0 +1,23 @@
+BANNER [lcg_ctx_a_long] prompts long_agent_v1.json sha 3d75cb7684c06fa6 gen 512 | lookup: on (suffix match of 6+ tokens, adaptive; --ngram-draft 0 or NGRAM_DRAFT=0 turns them off) | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q.dylib sha256 ea591258bceafe6d | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree.dylib sha256 dfe059c68dce376a362ec502230dd0c2f597f72ce3a0f78b7800d54621629598 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on lookup_gate=ctx:32768:48:1.25 t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8tx | lookup on (NGRAM_DRAFT=6: lookup cycles keep the chain)
+[lcg_ctx_a_long] warmup ttft 0.52s
+[lcg_ctx_a_long] idle 5.8 W
+[lcg_ctx_a_long] long agent pi-long:0 prompt 8622 ttft 14.2s | gen 512 45.4 tok/s | 5.33 tok/verify, cycle 119 ms (verify 100.7) | 29.1 W | sha 277f63ff5db1b311
+[lcg_ctx_a_long] long agent pi-long:1 prompt 10446 ttft 3.6s | gen 512 33.9 tok/s | 3.97 tok/verify, cycle 118 ms (verify 101.1) | 27.2 W | sha 7ec837ef5a40a1c0
+[lcg_ctx_a_long] long agent pi-long:2 prompt 14850 ttft 8.2s | gen 163 33.2 tok/s | 3.79 tok/verify, cycle 117 ms (verify 101.6) | 35.9 W | sha 960503ac1e422f3f
+[lcg_ctx_a_long] long agent pi-long:3 prompt 16187 ttft 3.2s | gen 134 38.0 tok/s | 4.32 tok/verify, cycle 117 ms (verify 101.9) | 40.3 W | sha c2a73d8e020a76d5
+[lcg_ctx_a_long] long agent pi-long:4 prompt 18207 ttft 4.7s | gen 264 34.6 tok/s | 4.26 tok/verify, cycle 125 ms (verify 109.9) | 27.6 W | sha 0bf6dc5e0d1cbd77
+[lcg_ctx_a_long] long agent pi-long:5 prompt 20134 ttft 4.6s | gen 73 31.9 tok/s | 3.65 tok/verify, cycle 127 ms (verify 111.8) | 37.1 W | sha 3df9f6339a458fa2
+[lcg_ctx_a_long] long agent pi-long:6 prompt 24208 ttft 9.0s | gen 297 35.8 tok/s | 4.50 tok/verify, cycle 129 ms (verify 109.8) | 30.7 W | sha f907dceddb057acc
+[lcg_ctx_a_long] long agent pi-long:7 prompt 25649 ttft 3.9s | gen 88 41.1 tok/s | 4.89 tok/verify, cycle 126 ms (verify 110.8) | 40.5 W | sha e7b02d3718253e65
+[lcg_ctx_a_long] long agent pi-long:8 prompt 27807 ttft 5.5s | gen 168 35.2 tok/s | 4.31 tok/verify, cycle 125 ms (verify 110.1) | 33.8 W | sha 1123aef9747a0fec
+[lcg_ctx_a_long] long agent pi-long:9 prompt 30175 ttft 6.0s | gen 47 30.7 tok/s | 3.62 tok/verify, cycle 127 ms (verify 111.9) | 47.0 W | sha a2dc0202c9f82f91
+[lcg_ctx_a_long] long agent pi-long:10 prompt 33336 ttft 8.6s | gen 303 29.3 tok/s | 4.21 tok/verify, cycle 146 ms (verify 126.0) | 26.3 W | sha efe03f93f17321dd
+[lcg_ctx_a_long] long agent pi-long:11 prompt 38007 ttft 12.7s | gen 299 27.1 tok/s | 3.83 tok/verify, cycle 145 ms (verify 125.7) | 28.5 W | sha 563c2004ffd2caf6
+[lcg_ctx_a_long] long agent pi-long:12 prompt 39497 ttft 4.8s | gen 50 44.7 tok/s | 5.00 tok/verify, cycle 141 ms (verify 130.0) | 44.8 W | sha e9f5cab02c1784ad
+[lcg_ctx_a_long] long agent pi-long:13 prompt 43285 ttft 10.8s | gen 16 35.6 tok/s | 4.00 tok/verify, cycle 148 ms (verify 138.1) | nan W | sha f901d7bf31e14ef8
+[lcg_ctx_a_long] long agent pi-long:14 prompt 45212 ttft 6.1s | gen 18 62.1 tok/s | 6.00 tok/verify, cycle 151 ms (verify 141.4) | nan W | sha 4feebbd5bd1c43c4
+[lcg_ctx_a_long] long agent pi-long:15 prompt 47116 ttft 6.2s | gen 17 37.7 tok/s | 4.25 tok/verify, cycle 150 ms (verify 138.8) | 44.1 W | sha 3ee489937c89d37c
+[lcg_ctx_a_long] long agent pi-long:16 prompt 49297 ttft 7.1s | gen 20 35.2 tok/s | 4.00 tok/verify, cycle 143 ms (verify 130.8) | 44.0 W | sha c6e3709375c20a59
+[lcg_ctx_a_long] long agent pi-long:17 prompt 52813 ttft 11.2s | gen 418 34.8 tok/s | 4.92 tok/verify, cycle 143 ms (verify 124.3) | 26.6 W | sha 1a8b2b8455c49d85
+[lcg_ctx_a_long] long agent pi-long:18 prompt 55454 ttft 9.0s | gen 248 34.5 tok/s | 4.51 tok/verify, cycle 139 ms (verify 125.1) | 26.7 W | sha 23002f6d3edb2396
+[lcg_ctx_a_long] long SUMMARY tok/s 34.74 (token-weighted), tok/verify 4.378, output checksum a16480a53965a888

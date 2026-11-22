@@ -432,3 +432,98 @@ deterministic per config, so only the timing could move:
   and the copies are longer.
 - **Not yet a default.** A context-aware margin (stricter below 32K) or a calibration of E on long agent traces is the
   next lookup step if wanted. Defaults unchanged.
+
+## 16:51 to 18:11: context-aware lookup gate (`lookup_gate/ctx_gate.log`, `lookup_gate/ctx_vs_yield.log`)
+
+**Gate.** `LOOKUP_GATE=ctx:C:L:M` in `pipe/tree_verify.py`, default off, served defaults unchanged.
+- Below C context positions, a lookup proposal is taken only when its match is at least L tokens and it passes
+  `yield:M`. With `L = off`, there is no lookup below C.
+- At or above C, the gate is `yield:M`.
+- Tested: `ctx:32768:48:1.25`. 48 keeps the long full-file copies, where most of the code gain is.
+
+**Run.** `serve_t/ctx_gate_ab.sh`: four fresh launches in ABBA order (off_a, ctx_a, ctx_b, off_b), banner first.
+- **Sets per arm:**
+  - u1 code + agent.
+  - Realistic math + chat (tasks 3-8, 2k / 8k / 32k).
+  - Both greedy and sampled. Sampled uses Pi settings: thinking on, temperature 1.0, seeds 4100 / 5100.
+  - The long Pi-like agent session: sampled, seed 7100, 512 tokens.
+- **Conditions:** no Pi traffic and 0 errors in all 4 arms. The gate turned down 811 proposals per ctx arm.
+- **Restore:** served config back at 18:10 (forge pid 74081). Banner: tree8 sampled=on, lookup off, ring fix. Smoke
+  29aef2ec9db18a3f.
+
+**Determinism.** off_a = off_b and ctx_a = ctx_b on every request (91/91 texts each). All 24 off arms of the three
+gate runs (lga, lgr, lgl, lcg) give the same texts. So each gate is compared with one off text set, and the yield:1.25
+column below comes from the earlier runs with the same prompts and seeds.
+
+**Columns.** "Same text" is the change over only the requests whose text equals off's. It shows what the gate itself
+gains or costs, free of text noise.
+
+| stratum | off tok/s | ctx:32768:48:1.25 (order a / b) | ctx, same text | yield:1.25 | yield, same text |
+|---|---|---|---|---|---|
+| greedy code | 40.77 | **+60.6%** (+60.6 / +60.5) | +68.2% (8/9) | +92.2% | +98.7% (8/9) |
+| greedy agent | 54.07 | +0.1% (+0.0 / +0.2) | +0.1% (9/9) | +11.0% | +10.9% (5/9) |
+| greedy math | 57.98 | +0.5% (+0.5 / +0.5) | −0.0% (7/9) | −0.1% | −0.2% (6/9) |
+| greedy chat | 25.41 | −3.3% (−3.4 / −3.3) | −0.1% (7/9) | −2.8% | −0.0% (7/9) |
+| sampled code | 37.59 | **+18.0%** (+17.9 / +18.1) | +16.3% (7/9) | +27.4% | n/a (0/9) |
+| sampled agent | 46.02 | +1.1% (+1.2 / +1.1) | −0.1% (8/9) | +4.7% | −0.3% (2/9) |
+| sampled math | 46.01 | −0.1% (−0.0 / −0.2) | −0.1% (9/9) | +0.5% | +0.0% (3/9) |
+| sampled chat | 24.84 | +0.8% (+0.9 / +0.6) | −0.1% (8/9) | −1.0% | +0.0% (1/9) |
+| long 8-16K | 37.94 | −0.3% (−0.0 / −0.5) | −0.3% (4/4) | −2.7% | −2.9% (1/4) |
+| long 16-32K | 35.16 | −0.0% (+0.1 / −0.2) | −0.0% (6/6) | −4.2% | −1.8% (3/6) |
+| long 32-57K | 29.47 | **+8.3%** (+8.3 / +8.3) | −1.5% (6/9) | +8.0% | −1.8% (6/9) |
+| long all | 33.77 | **+2.8%** (+2.9 / +2.6) | −0.4% (16/19) | +0.6% | −1.9% (10/19) |
+
+Each yield:1.25 change is measured against the off arms of its own run (lga + lgr, lgl).
+
+**Text noise.** A request whose text differs from off moves on the text alone.
+- **Per-request spread:** taken from the requests that took no lookup cycle but still diverged (the process history
+  differs: stale KV rows, see `leftover/`). It is 4.9% greedy (n=9) and 10.2% sampled (n=4, few).
+- **Per-stratum standard error:** each request is weighted by its decode time.
+  - greedy chat: 1.7%
+  - long 8-16K / 16-32K under yield:1.25: 5.7% / 4.4%
+  - long 32-57K: 4.6% for either gate
+  - long all: 1.9% ctx / 2.9% yield
+
+**Findings.**
+- **Both orders agree** within 0.5 points in every stratum.
+- **The ctx gate costs nothing measurable.**
+  - On same-text requests, every stratum is within ±0.3%. The one exception is long 32-57K (−1.5%), where both gates
+    take lookup.
+  - The greedy chat −3.3% is text divergence on the 2K chat requests 1 and 2, which took no lookup cycle. Same-text
+    change there is −0.1%, and yield:1.25 shows the same −2.8%.
+- **Below 32K it gives up gains that are real.** The 48-token rule blocks the 16-47-token copies, which carry a third of
+  the code gain and all of the short agent gain:
+  - greedy code +60.6% vs +92.2% under yield:1.25 (same text: +68.2% vs +98.7%)
+  - sampled code +18.0% vs +27.4%
+  - greedy agent +0.1% vs +10.9% same text (5/9 requests)
+- **The 8-32K dip under yield:1.25 on the long session is small and mostly noise.**
+  - The band standard errors (5.7%, 4.4%) exceed the dips (−2.7%, −4.2%).
+  - The same-text turns lose 1.8-2.9%. They come from 1-2 lookup cycles per turn that accepted 1-3 tokens, in
+    sampled thinking text.
+  - The ctx gate removes the dip because it takes no lookup cycle below 32K, giving +2.8% overall vs +0.6%.
+- **Above 32K both gates take the same lookup cycles on every turn** (+8.3% vs +8.0%). That band's gain has a 4.6%
+  standard error; 3 diverged turns carry most of the weight.
+- **The text, not the context length, separates the dip from the gain.** The dip is sampled thinking on the long
+  session. The gain is tool-result copies on the short agent set, whose prompts (3-5K) sit below the long session's
+  8-32K.
+
+**Verdict.**
+- **ctx:32768:48:1.25 is the conservative gate:** no measured loss anywhere; +60.6% / +18.0% on code, +2.8% on the
+  long session.
+- **yield:1.25 has the larger total:** +92% / +27% on code, +11% / +5% on agent. It costs about 2-3% on long sampled
+  thinking turns at 8-32K, which is within noise here.
+- **If lookup is served, yield:1.25.**
+- **Next lookup step, if wanted:**
+  - A text-aware rule: stricter inside the reasoning text than in tool output or code.
+  - More seeds on the long session, to settle the 8-32K dip.
+- **Served defaults are unchanged.**
+
+**Files.**
+- Driver and analysis: `serve_t/ctx_gate_ab.sh`, `serve_t/ctx_gate_compare.py` (this A/B), and
+  `serve_t/ctx_gate_vs_yield.py` (next to yield:1.25, with the same-text and noise columns).
+- Results in `lookup_gate/`:
+  - `ctx_gate.log` and `ctx_gate_compare.json`
+  - `ctx_vs_yield.log` and `.json`
+  - `lcg_*.driver.log` and `lcg_*.server.log`
+  - `restore_ctx.driver.log`
+- Raw bench rows: `bench/lcg_*`, `bench/served_after_lcg.*`.
