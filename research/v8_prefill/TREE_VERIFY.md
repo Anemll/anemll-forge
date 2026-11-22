@@ -282,6 +282,13 @@ cheap on this ANE target.
   cost on the ANE.
 - **Linear attention in a tree.** Gated DeltaNet [13] and the chunkwise delta-rule algorithm [14] are the layers our
   verify must handle per path; the pending tape is our adaptation of that algorithm to ancestor masks.
+- **DFlash2 trees on the same target (Metal).** TensorFold [23] (v1.3.2) runs DFlash2 trees for Qwen3.8-27B on Apple
+  GPUs. It measures a row-cost table, keeps ancestor-closed node sets, and allocates rows by expected accepted tokens
+  per measured millisecond; its default window is 16 rows. That allocator is the same idea as our cost-model policy
+  (`dink`, section 5.2), which lost on our target. It also reports that verifying siblings in separate slots, each
+  duplicating the pending row, gave no gain on DeepSeek-V4.1 Metal; our shared-prefix tree avoids that duplication.
+  We learned of this comparison from the outside review (21 Nov) after tree8 was built and served, and used no
+  TensorFold code.
 - **Apple silicon engines.** Splash [18] (Inco AI) is the GPU + ANE reference we compared against throughout; its
   16-row tree motivated the width study, and its DeltaNet tree handling matches ours.
 - **Quantization of the drafter.** GPTQ [15] with a Hadamard rotation [16].
@@ -297,6 +304,8 @@ cheap on this ANE target.
 - Inco AI's Splash [18] served as the measured GPU + ANE reference (versions 1.3.x to 1.7.0).
 - An outside review of the 21 Nov code found the empty-ring restore crash, the non-atomic 'sysk' restore and the
   split tree mask ordering (section 6), and corrected the lookup replay's row budget.
+- TensorFold [23]: its Qwen3.8 Gated DeltaNet Metal recipe was part of a 15 Nov survey of public DeltaNet kernels
+  (prefill, not decoding; nothing adopted), and the outside review used its tree path as a comparison.
 - The M6 ANE bot proposed several of the experiments in section 5 (fork-aware ranking, the cost-model policy, the
   lookup gates).
 
@@ -340,6 +349,8 @@ cheap on this ANE target.
 20. T. Dao, D. Haziza, F. Massa, G. Sizov. Flash-Decoding for long-context inference. 2023.
 21. W. Dinkelbach. On Nonlinear Fractional Programming. Management Science 13(7), 1967.
 22. Qwen Team. Qwen3.8-27B. huggingface.co/Qwen/Qwen3.8-27B.
+23. A. Hart et al. TensorFold. github.com/ashhart/TensorFold, v1.3.2 (docs/recipes/qwen3.8-27b.md; PR 3326, the
+    DeepSeek-V4.1 sibling-slot experiment).
 
 ## Appendix A: served configuration (22 Nov 2026)
 
