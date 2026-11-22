@@ -664,3 +664,147 @@ noise columns in `compare.json` are rough. The seed spread gives a similar size.
   - `ab.log` and `compare.json`
   - `driver.log`, `tgl_*.driver.log`, `tgl_*.server.log`, `restore.driver.log`
 - Raw bench rows: `bench/tgl_*`, `bench/served_after_tgl.*`.
+
+## 21:20 onward: evening batch (M6 ANE bot): GDN FP8, WL3A8, drafter split, JetSpec++ vs tree8
+
+All four items come from existing records plus tonight's server logs. No new build or timed run was needed, so forge
+stayed on the served config (pid 56175) throughout.
+
+### 1. FP8 on the Gated DeltaNet layers, prefill estimate
+
+STATUS 21:22: closed, no build. Best case about 1.6% (8K), under the 3% gate. This is 19 Nov item 12 (`../19nov/README.md`
+section 12), here scaled to Pi's shorter spans.
+
+**The 19 Nov estimate.** It came from the section 3 profile at 95K / 32K, the most each candidate can save of the wall:
+- FP8 activations and FP8-decoded weights in the LUT GEMMs: 0. INT8 MMA (39.5 TOPS) is already at least as fast as
+  FP8 (36.9), and the activations are already 1 byte.
+- FP8 in today's recurrence: 0. It is an fp32 FMA loop, and there is no FP8 ALU path.
+- FP8 operands in a chunked recurrence, the extra over an fp16 chunked form: 0.6% / 0.8%.
+- FP8 conv and gates: 0.4% / 0.5%.
+- FP8 low-rank correction: about 0.
+- Sum of the FP8 candidates: 1.0% / 1.3%.
+
+**Scaled to shorter contexts.** The saving scales with DeltaNet's share of the wall, and only counts while the GPU is
+the critical path:
+
+| prefill | DeltaNet s / wall s (share) | GPU / ANE busy | FP8 ceiling (share x 1.3% / 52%) | what bounds the wall |
+|---|---|---|---|---|
+| 2K | 1.9 / 3.1 (61%) | 83% / 96% | 1.5% on paper, about 0 | the ANE (the GPU waits on it) |
+| 8K | 7.6 / 11.8 (64%) | 95% / 97% | 1.6% | both, so at most this |
+| 32K | 30.0 / 57.8 (52%) | 99% / 85% | 1.3% | the GPU |
+| 95K | 88.1 / 243 (36%) | 99% / 58% | 1.0% | the GPU |
+
+- The FP8 total stays at or below 1.6% everywhere.
+- **The bigger candidate is not FP8.** The chunked recurrence in fp16 on the matrix units was worth 2.4% / 3.5% at
+  95K / 32K. Scaled the same way it is about 4% at 8K, which is above the 3% gate. It is a non-FP8 code change, and
+  the FP8 extra above only exists once it is built. It is left for Anemll to decide; nothing was started.
+
+### 2. WL3A8 temporary build A/B
+
+STATUS 21:22: skipped, closed. This is 19 Nov item 4 (`../19nov/README.md` section 4), and the batch's own skip list
+names it.
+- **19 Nov result:** WL3A8 was 0.3-3.1% slower in prefill at all six contexts, 2K to 95K. Its teacher-forced KL was
+  0.0012, as much again as the whole FP8 x change. The build was deleted.
+- **Decode** (the greedy + sampled suite) reads the FFN from the same 3-bit index constants. 19 Nov found the FFN
+  bound by that weight stream, so INT8 activations cannot shorten it in decode either.
+- **Cost of a rerun:** 6.3 GB of packages plus about 6.8 GB of Core AI cache and the compile, for an expected gain of
+  0 or less. Not low risk, so it was not rebuilt. A decode-only confirmation would be Anemll's call.
+
+### 3. Hybrid drafter split: ANE vs GPU placement (offline, proposal only)
+
+STATUS 21:30: analysis done, no served change proposed. A single placement change reaches at most 2.0% per cycle even
+with free handoffs. All of them together reach at most 4.8% on paper, and that needs handoff costs nobody has
+measured.
+
+**The drafter's share of a tree8 cycle, measured tonight.** From the `ms/cycle` split of the 106 requests in the
+off_a arm of the think-gate A/B (`think_gate/tgl_off_a.server.log`, served config, 8.6K to 55.5K):
+
+| part | median ms | range |
+|---|---|---|
+| cycle | 129 | 109-168 |
+| draft | 13.2 | 13.0-15.6 |
+| verify | 110.7 | 94.6-148.6 |
+| sample | 0.8 | 0.1-1.6 |
+| ctx | 1.0 | 0.5-3.1 |
+| host | 0.2 | 0.1-7.1 |
+
+- **Draft share:** 11% of a cycle at 8-16K (116-120 ms) and 9% at 33-55K (141-148 ms).
+- **The cycle is fully attributed:** the parts sum to the cycle within 0.6 ms.
+- **The host outliers (up to 7.1 ms) are not the drafter.** They come only on requests where the thinking budget forced
+  the close (`THINK closed at N (budget)`).
+
+**Inside the draft phase** (19 Nov section 5, `DRAFT_PROF=1`). That was the chain era, but the total is unchanged
+under tree8 (13.1-13.2 ms):
+- **Body:** 6.5 ms, the ANE `draft` entry. 674 MB, about 104 GB/s.
+- **Target head on the 7 draft rows:** 4.3 ms on the ANE. 636 MB, about 148 GB/s.
+- **Host:** 1.8-2.0 ms (top-k, selector, rope / mask fill, ctx64 calls).
+- **Gap:** 1 ms.
+
+**Placement options, ceilings at a 118 / 145 ms cycle (8K / 55K).** The DRAM ceilings use the measured 17 Nov peaks:
+GPU 156, ANE 121, both together 164 GB/s.
+
+| option | most it can save | of the cycle | what stands in the way |
+|---|---|---|---|
+| A. Whole drafter on the GPU | 1.0 ms (best kernel 5.5 vs 6.5 ms body); today's kernel loses 2.4 ms | ≤0.8% / 0.7% | Closed 19 Nov section 5. Below 64K the GPU sits at its low clock between calls, and the gapped twin ran 2x slower. |
+| B. Drafter overlapping the verify | 0 | 0 | Closed 19 Nov section 5. The draft needs the verify's accepted rows and the bonus token. |
+| C. Body split across both units (gate on one unit, up on the other, and the like) | 2.4 ms (674 MB at 164 GB/s = 4.1 ms) | ≤2.0% / 1.7% | One ANE call becomes about 20 ANE↔GPU joins (2 split groups per layer, 5 layers). It only breaks even if a join costs under 0.12 ms, and join cost was never measured. The GPU streams the narrow k / v / conv matrices at only 36-41 GB/s. |
+| D. Head split by vocab across both units | 0.4 ms (already 148 of the 164 GB/s peak) | ≤0.3% | Near the DRAM peak already. |
+| E. Host draft work moved onto a device (top-k from the zero-copy logits, or inside the head program) | up to 2.9 ms (1.8-2.0 host + 1 gap), not all removable | ≤2.5% / 2.0% | This is not an ANE-vs-GPU choice. A small GPU kernel once per cycle runs at the low clock below 64K. How the 1.8-2.0 ms splits under tree8 is not measured. |
+| C + D + E, all ideal | 5.7 ms | ≤4.8% / 3.9% | Free handoffs and fully removable host work. |
+
+**Proposal (nothing changed, nothing run).**
+- Keep the drafter as served, all on the ANE.
+- If item 3 is to go further, two cheap measurements first, in this order:
+  1. **The tree8 draft-phase split.** One fresh launch with the existing timing-only flag `DRAFT_PROF=1`, otherwise the
+     served config, then restore and smoke. It shows how much of the host 1.8-2.0 ms is top-k and so how much of
+     option E is real. About 25 minutes with Pi idle.
+  2. **An ANE↔GPU join probe.** A tiny ANE program ping-ponging with a tiny Metal kernel through a shared event. It
+     prices option C, and it needs a tiny compiled package (built via forge.py) and Pi idle.
+- Write code only if those two show at least 3% per cycle together.
+
+### 4. JetSpec++ port feasibility vs tree8 (note, no code)
+
+STATUS 21:38: note done. JetSpec++ gets more tokens per verify than tree8: about 1.6-1.75x on code and math at the
+reference schedule. But it would run about 13-48% slower than tree8 on this M6. A port is roughly 6-8 working days, so
+it stays parked as Anemll decided on 20 Nov. This builds on closed 19 Nov item 7 and the 20 Nov replay work
+(`../20nov/README.md` B, A7, B7, B8, C5, D, E). Nothing was rerun.
+
+**Tokens per verify vs tree8.** JetSpec++ was replayed losslessly on our served model's own greedy streams, and
+compared there with the DFlash2 chain:
+
+| set | DFlash2 chain | JetSpec++ J3-R3 (reference) | J0-R0 (cheapest schedule) |
+|---|---|---|---|
+| gsm8k 0-31 | 5.75 | 9.50 (x1.65) | 6.12 (x1.06) |
+| humaneval | 7.30 | 13.20 (x1.81) | 8.59 (x1.18) |
+| mbpp | 5.89 | 10.55 (x1.79) | 6.64 (x1.13) |
+| mt-bench | 3.48 | 4.94 (x1.42) | |
+
+- **What tree8 adds over the chain:** about +3% tokens per verify (5.12 vs 4.95 on the realistic set, 20 Nov A7).
+  Like for like in tok/s that is +0.3 / +0.6% on code / math and +8% on chat.
+- **So against tree8:** about x1.6-1.75 on code and math and about x1.3-1.4 on chat at J3-R3. At J0-R0 it is about
+  x1.03-1.15. These come from dividing by tree8's gain, because tree8 was not replayed on the JetSpec sets.
+
+**Throughput vs tree8 (projected from measured pieces, 8K entry, serial ANE).**
+- **Measured against the chain** (20 Nov D2, LUT4 GPTQ adapter): Jet Flash runs −12 to −24% at J0-R0 and −33 to −46%
+  at J3-R3.
+- **Converted to tree8:** dividing by tree8's like-for-like +0.5 to +3% gives about −13 to −26% (J0-R0) and −34 to
+  −48% (J3-R3).
+- **Why it loses:** drafting takes 37-43 ms per round even at J0-R0, against DFlash2's 13 ms. A 16-row verify costs
+  x1.085 (8K) to x1.27 (64K) of the 8-row verify. The verify is already 72-80% of the cheap schedules' round.
+- **What would make it pay** (20 Nov): an adapter 2-3x cheaper per pass (it is already bound by reading its weights,
+  and INT4 does not help), or drafting overlapped with the verify. Overlap needs a second execution unit; on this M6
+  the GPU overlap loses to DRAM contention (C2).
+
+**Effort if it is ever unparked.** These are estimates, not measurements. The starting points are `jsp_replay.py`,
+the LUT4 / LUT6 adapter tensors and the captures on the SSD.
+
+| step | work | estimate |
+|---|---|---|
+| 1 | ANE packages for the adapter (LUT4 GPTQ; fix the per-matrix Hadamard seed bug first, 20 Nov E), the B16 head (LUT6) and the anchor decoder, all via forge.py; HWX checks | 1.5-2 days plus compiles |
+| 2 | A 16-row chain verify entry for the served target (tree8 has 8 rows): a target rebuild via forge.py, with a second build set on disk during the A/B | 1 day plus compile |
+| 3 | Server integration: the multi-pass round schedule, acceptance up to 16, DeltaNet state and KV rollback at 16 rows, the sampled path, the drafter ring | 2-3 days |
+| 4 | Identity, ABBA on the standard suites, the long Pi session, memory under Pi load (the LUT4 adapter alone is 2.55 GB wired, next to forge's about 19 GB) | 1 day |
+| | total | about 6-8 working days |
+
+**Verdict:** not worth porting as a serial ANE drafter. Keep it parked until there is a second execution unit, or an
+adapter that is 2-3x cheaper per pass.
