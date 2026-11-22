@@ -240,8 +240,6 @@ cheap on this ANE target.
 - Tree verify adds 2-4% per cycle. The cost is the conv correction and the mask inputs, not the FFN.
 - Gains are measured on one machine and one model pair. They are noisy at the 2-4% level, so every change was judged
   ABBA across both orders, with seeds pooled.
-- Open: streaming smoothness. A tree cycle commits several tokens at once, so the stream arrives in bursts; a paced
-  writer (`STREAM_PACE=1`, same text, send times only) is in trial.
 
 ## Appendix A: served configuration (22 Nov 2026)
 
