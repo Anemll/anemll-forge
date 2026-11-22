@@ -112,3 +112,9 @@ together reach 164 GB/s. So while the ANE verifies, about 36 GB/s of DRAM and th
   6.0-6.8 ms, B = 8 (0.53-0.57) saves 7.6-8.2 ms of a 110-122 ms cycle (+5.5 to +7%), minus +1.6-2% verify:
   **about +3 to +5%**, if features that stop at the anchor do not lower acceptance (unknown; that is the step 2
   replay). Needs a working GPU DFlash2 (the 19 Nov twin is a cost model with the real shapes, not a drafter).
+
+## A6 commit fold (SpecLA §5.2): closed
+
+The commit (tree_verify `compact` + `mb.accept` + the drafter's feature queue) is the server's `ctx` phase, t3 -> t4 in
+`Tree.cycle` / `_chain`: 1.1-1.4 ms of a 110-127 ms cycle (live decode lines, 22 Nov), about 1%. Folding it into the
+next verify saves at most part of that: under the 2% bar, not pursued.

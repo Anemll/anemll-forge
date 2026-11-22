@@ -11,10 +11,12 @@ exact from the text. At every cycle, along the served (fresh) trajectory:
 Both drafts are scored as the served chain (the drafter's path) and as tree8 (tree_verify.build_tree, the served tree;
 greedy: the deepest node whose path is the text). The trajectory advances by the fresh tree's acceptance.
 
-NEEDS THE ANE: loads the DFlash2 Core AI package (the served all3 drafter) and the served build's head function (the
-drafter drafts through the target's head). Refuses while port 8765 serves (one model at a time; stop forge first).
-Every load is journaled (deployment journal, as v8_server.py).
-    PY dflash_stale_replay.py OUT.json CAPTURE_DIR [CAPTURE_DIR ...] [--max-traces N]"""
+--compute ane (default): loads the DFlash2 Core AI package (the served all3 drafter) and the served build's head
+function (the drafter drafts through the target's head) on the ANE; refuses while port 8765 serves (one model at a
+time; stop forge first). --compute cpu (22 Nov, Anemll): the same packages through Core AI on the CPU (no ANE, forge
+keeps serving); stale and fresh drafts share those numerics, so their comparison holds; absolute acceptance can differ
+a little from the ANE's. Every load is journaled (deployment journal, as v8_server.py).
+    PY dflash_stale_replay.py OUT.json CAPTURE_DIR [CAPTURE_DIR ...] [--max-traces N] [--compute ane|cpu]"""
 import argparse, glob, hashlib, json, os, socket, sys, time
 from pathlib import Path
 
@@ -72,8 +74,11 @@ def tree_inputs(info):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out"); ap.add_argument("caps", nargs="+"); ap.add_argument("--max-traces", type=int, default=0)
+    ap.add_argument("--compute", choices=("ane", "cpu"), default="ane")
     a = ap.parse_args()
-    if port_busy():
+    if a.compute == "cpu":
+        os.environ["COREAI_DRAFTER_COMPUTE"] = "cpu"
+    if a.compute == "ane" and port_busy():
         sys.exit("forge is serving on 8765: stop it first (one model at a time); nothing loaded")
     import rot1_runtime
     assert rot1_runtime.unrotate_for(BUILD) is None, "build basis is rotated: the captures are unrotated"
@@ -90,10 +95,10 @@ def main():
                     "out": a.out, "mode": "dflash_stale_replay"}, "stale-%d-%d" % (os.getpid(), int(time.time())))
     dev = DJ.m6_device()
     pkg = {"path": str(DDIR), "label": "stale-feature drafter replay: DFlash2 all3 + target head", "files": [str(DPKG), head_pkg]}
-    aid = J.attempt(dev, pkg, functions=["draft", "ctx64", "h8"], request={"compute": "ane"})
+    aid = J.attempt(dev, pkg, functions=["draft", "ctx64", "h8"], request={"compute": a.compute})
     t0 = time.time()
     try:
-        hm = Bm.Model(Path(head_pkg), compute="ane")
+        hm = Bm.Model(Path(head_pkg), compute=a.compute)
         head = hm.function("h8")
         dcfg = json.loads((DDIR / "config.json").read_text())
         emb = np.load(B192 / "model/embed_tokens_fp16.npy", mmap_mode="r")
@@ -105,7 +110,7 @@ def main():
     assert drafter.shared, "drafter did not bind the target head"
     pc = lambda t: drafter.pc[int(t)].float().numpy()  # noqa: E731
     sc = lambda c: drafter.sc[np.asarray(c, np.int64)].float().numpy()  # noqa: E731
-    res = {}
+    res = {"compute": a.compute}
     for cap in a.caps:
         traces = sorted(glob.glob(f"{cap}/traces/*"))
         if a.max_traces:
