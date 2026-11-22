@@ -913,7 +913,7 @@ The only remaining lever is less drafter work per cycle, which is not a placemen
 
 ### 4. Chunked fp16 GDN recurrence on the matrix units, standalone prototype (`gdn_chunk/`)
 
-STATUS 23:05: done. The ~4% at 8K does not hold. The chunked form matches the reference, but even its best version
+STATUS 22:32: done. The ~4% at 8K does not hold. The chunked form matches the reference, but even its best version
 (chunk 32) is 1.6x slower than the served `gdn_rec` alone (0.471 vs 0.288 ms per 128-token call) and 1.9x slower
 under DRAM load (0.631 vs 0.337). Nothing was integrated. Forge was not touched, and every timed run waited for my
 timing lock and for Pi to be idle.
