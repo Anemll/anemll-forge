@@ -672,4 +672,7 @@ def install(eng, log=print):
             t.request_end()
     eng.generate = generate
     eng.tree = t
+    if os.environ.get("RUNG_SLICE"):   # 22 Nov 2026 research only (rung_slice.py): sliced decode entries; unset = served path
+        import rung_slice
+        rung_slice.install(eng, t, log)
     return t
