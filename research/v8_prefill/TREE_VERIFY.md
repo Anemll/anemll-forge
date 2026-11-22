@@ -45,6 +45,10 @@ not small for this hybrid model. The questions were:
 - **Memory bandwidth** (the shared resource): GPU streaming 156 GB/s, ANE split calls 121, both at once 164 of a
   170 GB/s peak.
 
+![Neural Engine and GPU sharing the INT8 KV cache](results/22nov_review/tree_verify_figures/01-hardware.png)
+
+**Figure 1. Hardware placement.** DFlash2 and the target feed-forward layers run on the ANE. The GPU handles token mixing during prefill and the attention operations of the split 96K decode verifier.
+
 ### 2.2 Drafter (DFlash2)
 
 - 5 layers, 32 heads, conditioned on 5 target tap features (layers 5, 19, 33, 47, 61), drafting a block of 7 tokens
@@ -123,6 +127,10 @@ After acceptance the accepted rows are moved to rows 0..k in place:
 Snapshots, the next call's commit and the V8 continuation prefill therefore see a chain of k + 1 rows, and nothing else
 in the runtime changes.
 
+![An eight-row tree, its ancestor mask, and compaction of rows 0, 2, 4 and 5](results/22nov_review/tree_verify_figures/02-tree8-method.svg)
+
+**Figure 2. One tree verification cycle.** Row 0 holds the anchor. In this example the accepted path is 0 → 2 → 4 → 5. Compaction places those four rows in slots 0 through 3. The mask also governs the in-block DeltaNet recurrence, and the short convolution uses the same ancestry to select its taps.
+
 ### 3.6 Sliced verify entries (22 Nov)
 
 A verify at position `p0` in the 64K entry still reads 64K keys. Sliced entries (`v8s_<w>k`, `t8s_<w>k`) bind the
@@ -168,6 +176,10 @@ Before `TREE_SAMPLED`, every temperature > 0 cycle went to the chain, so Pi (tem
 Sampled gains exceed greedy ones. Our reading, not separately measured: sampled chains reject earlier, so a second
 candidate at an early depth is worth more.
 
+![Sampled throughput gains by cohort alongside measured verifier-group latency at widths 8 through 16](results/22nov_review/tree_verify_figures/03-tree8-speed-and-width.svg)
+
+**Figure 3. Throughput and width cost.** Left, the first 36-request sampled block compares tree8 with chain8 and includes the tool-agent regression. Right, each point times a four-layer hardware probe. At 32K the step from 14 to 15 rows costs 0.34 ms per group. The wider full-model throughput estimates come from replay using these measured costs.
+
 ### 4.4 Sliced entries on the long session (22 Nov)
 
 Served tree8 vs tree8 + sliced 24/40/48/56K, ABBA, 4 sets (greedy + seeds 7100/7200/7300), 152 replies:
@@ -182,6 +194,10 @@ Served tree8 vs tree8 + sliced 24/40/48/56K, ABBA, 4 sets (greedy + seeds 7100/7
 One served set ran about 11% slow on its first 7 turns, below any sliced entry. Without that seed the overall gain is
 **+2.49%** (order a +2.11%, order b +2.86%). All 152 replies are identical. Tree cycle 111.4 -> 108.2 ms, chain cycle
 107.0 -> 104.4 ms. Served since 22 Nov 11:15.
+
+![Comparison of 64K and 40K KV reads and sliced-verifier gains by context band](results/22nov_review/tree_verify_figures/04-sliced-kv.svg)
+
+**Figure 4. Slicing the KV prefix.** At a 33K prefix, the 40K entry covers all eight new rows. The right panel compares the four-entry sliced build with the full-width tree8 build. The pooled speedup is 3.40%, or 2.49% after excluding seed 7100, whose baseline had seven unusually slow early turns. All 152 paired replies matched.
 
 ## 5. What did not work
 
