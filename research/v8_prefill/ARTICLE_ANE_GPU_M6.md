@@ -4,6 +4,8 @@
 Version 1 (November 17) covered V8 against Splash 1.3.2. A research build, separate from the release: it needs SIP
 turned off ([why](#research-environment-restrictions-why-it-needs-sip-off-and-root-permission-for-weights)).*
 
+**22 November follow-up.** The served eight-row tree now has direct comparisons with the eight-row chain. The illustrated paper includes both launch orders, the tool-agent regression, and the fixed-spine replay. [Read the tree-verification paper](TREE_VERIFY.html)
+
 ![One model, two accelerators: how the Neural Engine and GPU share the work on M6](img/01-one-model-two-accelerators.png)
 
 A Mac with an M6 has two large accelerators on one memory: the GPU and the Apple Neural Engine (ANE). Our release
@@ -544,7 +546,7 @@ V8.1 keep-alive. With the keep-alive the cycle is 133 ms at 66K and 142 to 146 m
    - **256-row DeltaNet calls:** 8% slower end to end at 4K. Weight traffic is not what limits the DeltaNet matrix
      products, and the coupled schedule costs overlap.
    - **Tree verification wider than 8 rows on the Neural Engine:** 16 and 32 rows cost 26–39% and 87–116% more than chain8 in a four-layer probe. Choosing among 8/16/32 rows projected only 0.3–1.6% over fixed tree8 on the sampled set of greedy requests.
-   - **Eight-row tree, 19 Nov projection.** On 12 low-acceptance greedy requests (964 cycles), seven dynamic nodes gave 3.348 vs 3.064 tokens per verify. Scaling the four-layer graph cost projected +4.5–4.9% decode throughput. The later served comparisons and their workload-specific regressions appear in the [tree-verification paper](TREE_VERIFY.md).
+   - **Eight-row tree, 19 Nov projection.** On 12 low-acceptance greedy requests (964 cycles), seven dynamic nodes gave 3.348 vs 3.064 tokens per verify. Scaling the four-layer graph cost projected +4.5–4.9% decode throughput. In two later 36-request sampled benchmark blocks, the served tree gained 8.5% and 10.2% in pooled client throughput over chain8. The tool-agent subset lost 1.6% and 3.9%. [Served results and width measurements](TREE_VERIFY.html#fig-3)
 9. **A thinking budget for effort "medium" (V8).** Our server closes the model's thinking at 6,144 tokens with Qwen's
    own budget phrase; Splash 1.3.2 has no cap by default. On the graded coding task the cap cost nothing (1,373 of 1,373
    either way) and saved a 14-minute first turn.
@@ -630,9 +632,7 @@ rebuild), and a Pi configuration entry.
 - **Runtime-INT8 FFNs on the Neural Engine at 6K to 16K** (+6 to 10% in V8), once memory allows. The compiled INT8 FFN
   of V8.2 was slower.
 - **DeltaNet projections on the Neural Engine at long context** (a V8 estimate of about 520 tokens per second at 64K).
-- **Decode acceptance,** where Splash 1.7.0's trees lead by 0.1 to 1.1 tokens per cycle: the dynamic 7-token tree
-  within today's 8 verification rows (+4.5 to 5% in simulation), and the JetSpec++ drafter, which we are evaluating
-  now.
+- **Decode acceptance.** On 423 greedy code cycles, replay gave 7.057 tokens per verify for the chain, 7.111 for the dynamic tree and 6.314 for a fixed six-token spine with one alternate first token. The remaining correctness test compares both branches with independent chains through the output head and then checks the next token after committing a branch. [Fixed-spine replay](TREE_VERIFY.html#5-4-a-six-token-spine-with-one-root-sibling) · [Correctness tests](TREE_VERIFY.html#6-correctness-and-reproducibility)
 - **Serving 128K:** the split already runs there without a recompile; the server needs its key/value cache and prefill
   extended past 96K.
 
