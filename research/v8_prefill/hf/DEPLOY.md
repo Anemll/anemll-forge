@@ -5,6 +5,8 @@ prefill (FFN on the Neural Engine, token mixers on the GPU), tree verification (
 requests, sliced decode entries at 24K / 40K / 48K / 56K, the decode attention split onto the GPU at the 96K entry,
 and the KV-wrap memory fix of 22 Nov. Everything below runs on the Mac that serves; nothing is uploaded anywhere.
 
+Coding agents: [AGENTS.md](AGENTS.md) and `hf/agent_deploy.sh` run these steps as stages with exit codes.
+
 Paths: `REPO` is the downloaded Hugging Face repository, `CODE=$REPO/code/anemll-forge` the source snapshot inside
 it, `V=$CODE/research/v8_prefill`.
 

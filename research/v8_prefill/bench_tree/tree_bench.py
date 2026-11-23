@@ -13,6 +13,16 @@ from pathlib import Path
 sys.path.insert(0, "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))   # 22 Nov: the same scripts/ inside a checkout or the HF code snapshot
 from m6_compare_bench import Power, chat  # noqa: E402
+import m6_compare_bench as _mcb  # noqa: E402
+
+
+class NoPower:
+    """22 Nov 2026: stands in for Power without mactop (the deploy smoke needs only the output checksum)."""
+    def window(self, *_a, **_k):
+        return {"mean_w": {"total_power": float("nan")}}
+
+    def stop(self):
+        pass
 
 LOG = Path("/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs/v8_server.log")
 GEN_RE = re.compile(r"gen (\d+) in ([\d.]+)s \(([\d.]+) tok/s, ([\d.]+) tok/verify, accept (\d+)% \(accepted/7 per cycle: "
@@ -96,8 +106,12 @@ def main():
     ap.add_argument("--tasks", default="", help="comma list of task indices per rung (default all)")
     ap.add_argument("--temp", type=float, default=0.0, help="21 Nov: > 0 = sampled requests (Pi-like with --think 1)")
     ap.add_argument("--think", type=int, default=0)
+    ap.add_argument("--no-power", action="store_true", help="22 Nov: no mactop sampling (power fields NaN; auto when mactop is missing)")
     ap.add_argument("--seed", type=int, default=-1, help="per request seed = SEED + 100 * rung + task (-1: none)")
     a = ap.parse_args()
+    import shutil as _sh
+    if not a.no_power and not (Path(str(_mcb.MACTOP)).exists() or _sh.which(str(_mcb.MACTOP))):
+        print("mactop not found: power sampling off (--no-power)", flush=True); a.no_power = True
     if a.out.exists():
         raise SystemExit(f"refusing to overwrite {a.out}")
     P = json.loads(a.prompts.read_text())
@@ -111,7 +125,7 @@ def main():
         k, v = e.split("=", 1)
         if v not in b.get(k, ""):
             raise SystemExit(f"ABORT banner {k} lacks {v!r}: {b.get(k)!r}")
-    power = Power(1000)
+    power = Power(1000) if not a.no_power else NoPower()
     rec = {"label": a.label, "banner": line, "banner_parts": b, "prompts_sha": psha, "gen": gen,
            "temp": a.temp, "think": a.think, "seed": a.seed,
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "rungs": {}}
