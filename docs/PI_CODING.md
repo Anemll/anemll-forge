@@ -97,6 +97,12 @@ Use **one Pi session at a time** against this single-request server. Do not run 
 
 [`examples/pi/extensions/live-throughput-status.ts`](../examples/pi/extensions/live-throughput-status.ts) adds a status-line footer showing live decode tok/s, TTFT, final token counts and (with a Prometheus-exposing backend) server-side prefill throughput. This server has no Prometheus `/metrics` endpoint, so leave `metricsUrls` empty for `ane-qwen38`; the footer still shows client-observed decode TPS, TTFT and prompt size. For the isolated profile, copy the extension into `$PI_CODING_AGENT_DIR/extensions/` and keep `PI_LIVE_THROUGHPUT_DIR` set to that profile so its calibration metadata stays there. Run `/reload` after installation. See [`TPS_PI_EXTENSION.md`](../examples/pi/extensions/TPS_PI_EXTENSION.md) for configuration and tests.
 
+**V8-96K hybrid server (22 Nov 2026).** `python3 examples/pi/install_pi_v8_96k.py [--set-default] [--dry-run]` merges
+the profile for the hybrid build (`ane-qwen38/qwen38-27b-ane-v8-96k`: 98,304-token window, 32,768 max output, its
+compaction override), the TPS extension and its server-exact `healthUrls` entry into `$PI_CODING_AGENT_DIR` (default
+`~/.pi/agent`), backing up every file it changes; other providers and settings are left alone. The plain example
+files are in [`examples/pi/v8_96k/`](../examples/pi/v8_96k).
+
 ## Checks performed and remaining limits
 
 The installed Pi parser accepted the example schema. An isolated offline `--list-models` run resolved the expected provider, context, output cap and capabilities. A mocked transport exercised off/low/medium/high request payloads, bounded thinking, explicit sampling, streamed reasoning/tool-call parsing, replayed reasoning/tool results and the context clamp. It made no model-server calls. See [the portable mock validator](../examples/pi/validate_pi.mjs); set `PI_MODULES` to your installed Pi `node_modules` directory and run it with Node.

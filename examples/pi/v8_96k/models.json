@@ -1,0 +1,55 @@
+{
+  "providers": {
+    "ane-qwen38": {
+      "name": "Qwen3.8 27B VQ · M6 Neural Engine (local)",
+      "baseUrl": "http://127.0.0.1:8765/v1",
+      "api": "openai-completions",
+      "apiKey": "local-no-auth",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "qwen38-27b-ane-v8-96k",
+          "name": "Qwen3.8 27B VQ hybrid (M6 Neural Engine + GPU, 96K, DFlash2 tree8)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 98304,
+          "maxTokens": 32768,
+          "thinkingLevelMap": {
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh",
+            "xhigh": "xhigh",
+            "max": "xhigh"
+          },
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort",
+                "omitWhenOff": true
+              },
+              "preserve_thinking": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

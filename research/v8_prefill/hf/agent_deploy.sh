@@ -4,7 +4,8 @@
 # "STAGE <name>: PASS | FAIL | HUMAN ..." line at the end and exits with:
 #   0 pass   1 fail   2 GPU tables do not match this Mac (run tables-rebuild)   3 disk below the guard
 #   4 port busy   5 smoke checksum differs   10 a human must act (SIP, the aned ACL: needs Recovery or sudo)
-#   zsh agent_deploy.sh check|download|venv|bridge|compile|engines|tables|tables-rebuild|serve|smoke|status|stop|all
+#   zsh agent_deploy.sh check|download|venv|bridge|compile|engines|tables|tables-rebuild|serve|smoke|pi|status|stop|all
+# pi: the Pi profile + TPS footer (examples/pi/install_pi_v8_96k.py; PI_ARGS, e.g. "--set-default"; backs up what it changes)
 # Variables: REPO (~/Models/anemll-forge-qwen3.8-27B-V8-96K), PY ($REPO/.venv/bin/python: its file name must be
 # "python", the compile cache is keyed by it), PORT (8765), LOGDIR (~/Library/Logs/anemll-forge), GUARD_GB (25),
 # tables-rebuild: EXPORT_DIR, MODEL, BPY (DEPLOY.md 5b).
@@ -131,6 +132,11 @@ smoke() {
   done_ smoke "DIFFERS: expected checksum $SMOKE. On macOS $KIT_OS this points at a setup problem; on another build the compiler can change numerics (compare the replies in $LOGDIR/agent_smoke.json)" 5
 }
 
+pi() {
+  python3 $CODE/examples/pi/install_pi_v8_96k.py --port $PORT ${=PI_ARGS:-} || done_ pi FAIL 1
+  done_ pi "PASS (in Pi: /reload, /model -> ane-qwen38/qwen38-27b-ane-v8-96k)"
+}
+
 status() {
   port_busy || done_ status "not serving on $PORT" 1
   curl -s -m 5 http://127.0.0.1:$PORT/health | head -c 400; echo
@@ -141,11 +147,11 @@ stop() { PORT=$PORT zsh $V/pipe/srv_stop.sh; done_ stop PASS; }
 
 case ${1:-} in
   check) check ;; download) download ;; venv) venv ;; bridge) bridge ;; compile) compile ;; engines) engines ;;
-  tables) tables ;; tables-rebuild) tables_rebuild ;; serve) serve ;; smoke) smoke ;; status) status ;; stop) stop ;;
+  tables) tables ;; tables-rebuild) tables_rebuild ;; serve) serve ;; smoke) smoke ;; pi) pi ;; status) status ;; stop) stop ;;
   all)
     for s in check download venv bridge compile engines tables serve smoke; do
       say "== $s"; zsh ${0:a} $s; rc=$?
       (( rc )) && { say "stopped at stage $s (exit $rc)"; exit $rc; }
     done ;;
-  *) say "usage: zsh agent_deploy.sh check|download|venv|bridge|compile|engines|tables|tables-rebuild|serve|smoke|status|stop|all"; exit 1 ;;
+  *) say "usage: zsh agent_deploy.sh check|download|venv|bridge|compile|engines|tables|tables-rebuild|serve|smoke|pi|status|stop|all"; exit 1 ;;
 esac

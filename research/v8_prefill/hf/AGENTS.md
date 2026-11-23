@@ -22,6 +22,7 @@ together (`coreai/m6-96k-dec8ts`, tree verification, 96K context) and serves an 
 7. **Stop at the first non-zero exit** and report the stage, the exit code and the last lines it printed. Do not
    work around a failed check.
 8. Do not upload logs or replies anywhere; they stay on this Mac.
+9. **Ask before changing the person's Pi setup** (stage `pi`): run it with `PI_ARGS=--dry-run` first and show the result.
 
 ## Bootstrap
 
@@ -48,6 +49,7 @@ Run them in this order (`zsh $A all` runs them in sequence and stops at the firs
 | `tables` | installs the GPU tables: every package's compiled program must match the kit (`MATCH`) | seconds | 8 x MATCH |
 | `serve` | starts the server in the background, waits for it, checks the configuration banners | seconds to 2 min | `STAGE serve: PASS (pid ...)` |
 | `smoke` | 2 greedy requests; the output checksum must be `29aef2ec9db18a3f` | 1 min | `STAGE smoke: PASS` |
+| `pi` (optional, ask first) | merges the Pi profile and the TPS / TTFT footer into Pi's directory, backing up what it changes (`PI_ARGS=--dry-run` to preview, `--set-default` to make it the default) | seconds | `pi --list-models` lists `qwen38-27b-ane-v8-96k` |
 | `status` / `stop` | health check / stop the server on `$PORT` | seconds | |
 
 ## Exit codes

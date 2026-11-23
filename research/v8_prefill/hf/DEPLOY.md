@@ -139,6 +139,23 @@ d. **Longer benches.** `bench_tree/tree_bench.py` with `long_agent_v1.json` (a 1
    55.5K), `u1_code_agent.json` (agent set, tools) and the realistic set (`make_prompts.py`) are the sets behind the
    numbers in `TREE_VERIFY.md`; `--temp 1.0 --think 1 --seed N` gives Pi-like sampled requests.
 
+## 7b. Pi (coding agent) with live TPS / TTFT
+
+```
+python3 $CODE/examples/pi/install_pi_v8_96k.py --dry-run      # shows what it would change
+python3 $CODE/examples/pi/install_pi_v8_96k.py [--set-default] [--port 8765] [--pi-dir DIR]
+```
+
+It merges into Pi's agent directory (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`), backing up every file it changes
+(`*.bak-v8-96k-<time>`) and leaving other providers and settings alone: the provider `ane-qwen38` (created when
+missing) with the model `qwen38-27b-ane-v8-96k` (98,304-token window, 32,768 max output, thinking through the chat
+template), its compaction override (reserve 32,768, keep 8,192), the footer extension `live-throughput-status.ts`
+and its `healthUrls` entry, so the footer shows the server's exact decode tok/s, TTFT, tokens per verify and prefill
+tok/s (`examples/pi/extensions/TPS_PI_EXTENSION.md`). Then `/reload` in Pi, `/model` to pick it, and restart Pi
+once for the compaction settings. The plain files are in `examples/pi/v8_96k/`; `pi --list-models` should list
+`ane-qwen38  qwen38-27b-ane-v8-96k  98.3K  32.8K`. Extension tests: `cd $CODE/examples/pi/extensions/tests && node
+live-throughput-status.test.ts` (30 passed).
+
 ## 8. Rebuilding the build itself
 
 `coreai/m6-96k-dec8ts` was made from the release 0.2 export by `v8/build_dec8ts_all.sh` (export of each 8-layer

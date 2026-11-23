@@ -82,14 +82,14 @@ the same status-footer job.
 
 ## Tests
 
-[`live-throughput-status.test.ts`](./live-throughput-status.test.ts) covers the
-calibration, fencepost, lifecycle, prefill-parsing, and generation-metric paths
-(27 assertions). Run it with Bun:
+[`tests/live-throughput-status.test.ts`](./tests/live-throughput-status.test.ts) covers the
+calibration, fencepost, lifecycle, prefill-parsing, generation-metric, sliding-window and server-exact
+(`/health`) paths (30 assertions). Run it with Node 22.18+ (built-in TypeScript stripping) or Bun:
 
 ```bash
-cd examples/pi/extensions
-bun run live-throughput-status.test.ts
-# 27 passed
+cd examples/pi/extensions/tests
+node live-throughput-status.test.ts      # or: bun run live-throughput-status.test.ts
+# 30 passed
 ```
 
 ## Configuration
@@ -122,11 +122,36 @@ Optional `~/.pi/agent/live-throughput-config.json`:
 
 Calibration is persisted to `~/.pi/agent/live-throughput-state.json`.
 
-For the ANEMLL Forge Core AI server (`ane-qwen38`/`qwen38-27b-ane`, see
-[PI_CODING.md](../../../docs/PI_CODING.md)), there is no Prometheus `/metrics`
-endpoint, so `metricsUrls` should stay empty for that provider — the footer
-still shows client-observed decode TPS, TTFT and prompt size, just no
-server-side prefill segment.
+### ANEMLL Forge servers: server-exact readout (22 Nov 2026)
+
+ANEMLL Forge servers (`ane-qwen38`, see [PI_CODING.md](../../../docs/PI_CODING.md), and the V8-96K hybrid server)
+have no Prometheus `/metrics`, but their `GET /health` reports the running decode (`decode_live`: tokens and
+seconds on the server clock) and, after each request, its decode and prefill stats. Map the provider in
+`healthUrls` and the footer uses them:
+
+```json
+{
+  "healthUrls": { "ane-qwen38": "http://127.0.0.1:8765/health" },
+  "healthPollMs": 1000
+}
+```
+
+The live rate is then the server's own (no `~`), and the final line shows the server's decode tok/s, tokens per
+verify call and prefill tok/s (prompt tokens actually computed over prefill seconds). The final stats are used only
+when the server's decode token count equals `usage.output`; otherwise the client-side numbers are shown.
+Speculative and tree decoding deliver tokens in bursts per verify cycle, so this is the only exact readout for these
+servers. `examples/pi/install_pi_v8_96k.py` writes this entry.
+
+| Field | Default | Description |
+|---|---|---|
+| `healthUrls` | `{}` | Provider id -> ANEMLL Forge `GET /health` URL (server-exact mode) |
+| `healthPollMs` | `1000` | `/health` poll interval while streaming |
+
+### Live rate display
+
+`/tps` switches the live rate between a sliding window (default, `20.1 tok/s (5s)`), the running average since the
+first chunk (`16.4 tok/s avg`) and both; `/tps window 10`, `/tps both`, `/tps status`. The choice is kept in
+`live-throughput-state.json`; `PI_TPS_MODE=window|avg|both` and `PI_TPS_WINDOW_S=5` override it at launch.
 
 ## Provider matrix
 

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import mod, { formatDuration, parsePrefillMetrics } from "./live-throughput-status.ts";
+import mod, { formatDuration, parsePrefillMetrics } from "../live-throughput-status.ts";
 
 type Status = string | undefined;
 
@@ -26,7 +26,7 @@ function harness(mode: "tui" | "rpc" | "print" = "tui", dirOverride?: string) {
 
 	const handlers: Record<string, Function[]> = {};
 	const statuses: Status[] = [];
-	const pi = { on: (n: string, f: Function) => (handlers[n] ??= []).push(f) } as any;
+	const pi = { on: (n: string, f: Function) => (handlers[n] ??= []).push(f), registerCommand: () => {} } as any;
 	const ctx = {
 		mode,
 		model: { provider: "test", id: "m1" },
@@ -522,6 +522,57 @@ async function testX() {
 	});
 }
 
+async function testY() {
+	// Server-exact mode: /health decode_live drives the live rate, decode/prefill the final line.
+	const dir = mkdtempSync(join(tmpdir(), "ltps-"));
+	writeFileSync(join(dir, "live-throughput-config.json"), JSON.stringify({ healthUrls: { test: "http://h/health" }, healthPollMs: 100 }));
+	const origFetch = globalThis.fetch;
+	let live: any = null;
+	let final: any = null;
+	(globalThis as any).fetch = async () => ({ ok: true, json: async () => ({ decode_live: live, prefill: { tokens: 4000, seconds: 0.33 }, ...(final ?? {}) }) });
+	try {
+		const { fire, statuses } = harness("tui", dir);
+		await startTurn(fire);
+		await fire("message_update", textDelta(4)); // first chunk
+		// server: 30 tok/s exactly, while the client sees a chars stream that would estimate ~2x more
+		for (let i = 1; i <= 12; i++) {
+			live = { active: true, tokens: 30 * i * 0.1, seconds: 0.1 * i };
+			await sleep(110);
+			await fire("message_update", textDelta(40));
+		}
+		ok("Y live rate is the server's (30.0 tok/s, no ~)", () => {
+			const st = lastTokStatus(statuses);
+			assert.match(st, /^\S* ?30\.0 tok\/s/, st);
+			assert.ok(!st.includes("~"), st);
+			assert.match(st, /TTFT: [\d.]+s \(4\.0k @ 12\.1k t\/s\)/, st);
+		});
+		live = null;
+		final = { decode: { tokens: 200, seconds: 8, tokens_per_call: 4.25 }, prefill: { tokens: 3000, seconds: 6 } };
+		await fire("message_end", end({ input: 1000, output: 200, cacheRead: 0, cacheWrite: 0 }));
+		ok("Y final line uses server decode + prefill", () => {
+			const st = statuses[statuses.length - 1]!;
+			assert.match(st, /^\S* ?25\.0 tok\/s/, st);
+			assert.match(st, /200 tok \(4\.25\/verify\)/, st);
+			assert.match(st, /prefill 3\.0k @ 500 t\/s/, st);
+		});
+		// mismatch (server stats from another request): client-side numbers stay
+		await startTurn(fire);
+		await fire("message_update", textDelta(4));
+		await sleep(300);
+		await fire("message_update", textDelta(400));
+		final = { decode: { tokens: 999, seconds: 8 } };
+		await fire("message_end", end({ input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 }));
+		ok("Y mismatched server count falls back to the client rate", () => {
+			const st = statuses[statuses.length - 1]!;
+			assert.ok(!st.includes("/verify"), st);
+			assert.match(st, /tok\/s/, st);
+		});
+	} finally {
+		globalThis.fetch = origFetch;
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 async function main() {
 	console.log("live-throughput-status tests\n");
 	await testA();
@@ -548,6 +599,7 @@ async function main() {
 	await testV();
 	await testW();
 	await testX();
+	await testY();
 	console.log(`\n${passed} passed${process.exitCode ? ", some failed" : ""}`);
 }
 

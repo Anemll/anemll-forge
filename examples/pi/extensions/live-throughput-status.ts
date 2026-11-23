@@ -20,6 +20,31 @@ import { dirname, join } from "node:path";
  * The final decode rate uses the provider's reported output-token count and the
  * client-observed interval from the first streamed chunk to the last, excluding
  * the tokens delivered in the first chunk (which define the window start).
+ *
+ * Live rate display modes (switch with /tps, persisted in
+ * live-throughput-state.json under "display"):
+ *   - window (default): tokens over a short sliding window (default 5 s), i.e.
+ *     the near-instantaneous decode rate. Shown as `20.1 tok/s (5s)`. Until
+ *     the window fills it uses the time since the first chunk.
+ *   - avg: the running average since the message's first chunk (the original
+ *     behaviour). Shown as `16.4 tok/s avg`.
+ *   - both: `20.1 tok/s (5s) | 16.4 avg`.
+ * Env overrides at launch (take precedence over the persisted choice):
+ *   PI_TPS_MODE=window|avg|both   PI_TPS_WINDOW_S=5   (window clamped to 1..60 s)
+ * Commands: /tps (toggle window<->avg), /tps window [secs], /tps avg,
+ *   /tps both [secs], /tps status.
+ *
+ * Server-exact mode (22 Nov 2026, anemll-forge servers): when
+ * live-throughput-config.json maps the provider in "healthUrls" (provider id ->
+ * the server's GET /health URL), the live rate comes from the server's own
+ * decode counter (`decode_live`: tokens and seconds on the server clock, polled
+ * every healthPollMs, default 1000), and the final line from the request's
+ * server stats (`decode`: tokens / decode seconds, tokens per verify call;
+ * `prefill`: prompt tokens actually computed / prefill seconds). The final stats
+ * are used only when the server's decode token count equals usage.output (same
+ * request); otherwise the client-side numbers below are shown. Speculative /
+ * tree decoding delivers tokens in bursts per verify cycle and chars/token varies
+ * with content, so this is the only exact readout for those servers.
  */
 
 const STATUS_KEY = "live-throughput";
@@ -34,9 +59,95 @@ interface ModelState {
 	other: RatioState;
 }
 
+type TpsMode = "window" | "avg" | "both";
+
+interface DisplayPrefs {
+	mode: TpsMode;
+	windowSeconds: number;
+}
+
 interface PersistedState {
 	version: number;
 	models: Record<string, ModelState>;
+	display?: DisplayPrefs;
+}
+
+const DEFAULT_DISPLAY: DisplayPrefs = { mode: "window", windowSeconds: 5 };
+const WINDOW_MIN_S = 1;
+const WINDOW_MAX_S = 60;
+// Minimum sample span before a sliding-window rate is trusted; below this the
+// rate falls back to the since-first-chunk average (avoids burst spikes).
+const MIN_WINDOW_SPAN_MS = 1000;
+
+function parseMode(value: unknown): TpsMode | undefined {
+	if (typeof value !== "string") return undefined;
+	const v = value.trim().toLowerCase();
+	if (v === "window" || v === "win" || v === "inst" || v === "instant") return "window";
+	if (v === "avg" || v === "average") return "avg";
+	if (v === "both") return "both";
+	return undefined;
+}
+
+function parseWindowSeconds(value: unknown): number | undefined {
+	const n = typeof value === "string" ? Number(value.trim().replace(/s$/i, "")) : value;
+	if (!isFiniteNumber(n) || n <= 0) return undefined;
+	return clampNumber(n, WINDOW_MIN_S, WINDOW_MAX_S);
+}
+
+function parseDisplay(raw: unknown): DisplayPrefs | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	const candidate = raw as { mode?: unknown; windowSeconds?: unknown };
+	const mode = parseMode(candidate.mode);
+	if (!mode) return undefined;
+	return {
+		mode,
+		windowSeconds: parseWindowSeconds(candidate.windowSeconds) ?? DEFAULT_DISPLAY.windowSeconds,
+	};
+}
+
+/** Read only the persisted display prefs (so another Pi instance's /tps choice is kept). */
+function readDiskDisplay(path: string): DisplayPrefs | undefined {
+	if (!existsSync(path)) return undefined;
+	try {
+		return parseDisplay((JSON.parse(readFileSync(path, "utf8")) as { display?: unknown }).display);
+	} catch {
+		return undefined;
+	}
+}
+
+export interface RateSample {
+	t: number; // ms
+	tokens: number; // cumulative (gross) tokens at t
+}
+
+/**
+ * Append a sample and prune so that exactly one sample at or before
+ * (t - windowMs) is retained as the window anchor.
+ */
+export function pushRateSample(samples: RateSample[], sample: RateSample, windowMs: number): void {
+	samples.push(sample);
+	const cutoff = sample.t - windowMs;
+	let drop = 0;
+	while (drop + 1 < samples.length && samples[drop + 1].t <= cutoff) drop++;
+	if (drop > 0) samples.splice(0, drop);
+}
+
+/**
+ * Sliding-window rate (tokens/s): (tokens_now - tokens_anchor) / (t_now - t_anchor).
+ * The anchor is the newest sample at or before now - window, or the first sample
+ * (the first chunk) while the window is still filling. Returns undefined when
+ * the span is below MIN_WINDOW_SPAN_MS.
+ */
+export function windowRate(
+	samples: RateSample[],
+	now: number,
+	tokensNow: number,
+): { rate: number; spanSeconds: number } | undefined {
+	if (samples.length === 0) return undefined;
+	const anchor = samples[0];
+	const spanMs = now - anchor.t;
+	if (spanMs < MIN_WINDOW_SPAN_MS) return undefined;
+	return { rate: Math.max(0, tokensNow - anchor.tokens) / (spanMs / 1000), spanSeconds: spanMs / 1000 };
 }
 
 interface Config {
@@ -53,6 +164,8 @@ interface Config {
 	metricsUrls: Record<string, string>;
 	metricsTimeoutMs: number;
 	statusModes: string[];
+	healthUrls: Record<string, string>;
+	healthPollMs: number;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -71,6 +184,9 @@ const DEFAULT_CONFIG: Config = {
 	metricsUrls: {},
 	metricsTimeoutMs: 500,
 	statusModes: ["tui", "rpc"],
+	// provider id -> anemll-forge GET /health URL (server-exact tokens and timing).
+	healthUrls: {},
+	healthPollMs: 1000,
 };
 
 function isFiniteNumber(value: unknown): value is number {
@@ -128,6 +244,16 @@ function loadConfig(path: string): Config {
 		if (isFiniteNumber(raw.metricsTimeoutMs) && raw.metricsTimeoutMs > 0) {
 			config.metricsTimeoutMs = raw.metricsTimeoutMs;
 		}
+		if (raw.healthUrls && typeof raw.healthUrls === "object") {
+			const urls: Record<string, string> = {};
+			for (const [key, value] of Object.entries(raw.healthUrls as Record<string, unknown>)) {
+				if (typeof value === "string" && value.length > 0) urls[key] = value;
+			}
+			config.healthUrls = urls;
+		}
+		if (isFiniteNumber(raw.healthPollMs) && raw.healthPollMs >= 100) {
+			config.healthPollMs = raw.healthPollMs;
+		}
 		if (Array.isArray(raw.statusModes)) {
 			const modes = raw.statusModes.filter((m): m is string => typeof m === "string");
 			if (modes.length > 0) config.statusModes = modes;
@@ -162,7 +288,7 @@ function loadState(path: string): PersistedState {
 				}
 			}
 		}
-		return { version: 1, models };
+		return { version: 1, models, display: parseDisplay((raw as { display?: unknown }).display) };
 	} catch {
 		return empty;
 	}
@@ -171,7 +297,9 @@ function loadState(path: string): PersistedState {
 function saveState(path: string, state: PersistedState): void {
 	try {
 		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, JSON.stringify(state, null, 2), "utf8");
+		const out: PersistedState = { version: state.version, models: state.models };
+		if (state.display) out.display = state.display;
+		writeFileSync(path, JSON.stringify(out, null, 2), "utf8");
 	} catch {
 		// Persistence is best-effort; never break the session over it.
 	}
@@ -288,12 +416,79 @@ async function fetchPrefillMetrics(
 	}
 }
 
+export interface ForgeHealth {
+	decode_live?: { active?: boolean; tokens?: number; seconds?: number } | null;
+	decode?: { tokens?: number; seconds?: number; tokens_per_call?: number | null } | null;
+	prefill?: { tokens?: number; seconds?: number; cached_tokens?: number } | null;
+}
+
+async function fetchHealth(url: string, timeoutMs: number): Promise<ForgeHealth | undefined> {
+	if (typeof fetch !== "function") return undefined;
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const response = await fetch(url, { signal: controller.signal });
+		if (!response.ok) return undefined;
+		const body = (await response.json()) as unknown;
+		return body && typeof body === "object" ? (body as ForgeHealth) : undefined;
+	} catch {
+		return undefined;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/** Server-exact final stats when the server's decode count matches usage.output. */
+export function serverFinal(
+	h: ForgeHealth | undefined,
+	outputTokens: number | undefined,
+): { rate: number; perCall?: number; prefillTokens?: number; prefillRate?: number } | undefined {
+	const d = h?.decode;
+	if (!d || outputTokens === undefined) return undefined;
+	if (!isFiniteNumber(d.tokens) || d.tokens !== outputTokens) return undefined;
+	if (!isFiniteNumber(d.seconds) || d.seconds <= 0) return undefined;
+	const out: { rate: number; perCall?: number; prefillTokens?: number; prefillRate?: number } = {
+		rate: d.tokens / d.seconds,
+	};
+	if (isFiniteNumber(d.tokens_per_call) && d.tokens_per_call > 0) out.perCall = d.tokens_per_call;
+	const p = h?.prefill;
+	if (p && isFiniteNumber(p.tokens) && p.tokens > 0 && isFiniteNumber(p.seconds) && p.seconds > 0) {
+		out.prefillTokens = p.tokens;
+		out.prefillRate = p.tokens / p.seconds;
+	}
+	return out;
+}
+
 export default function (pi: ExtensionAPI) {
 	const agentDir =
 		process.env.PI_LIVE_THROUGHPUT_DIR || join(homedir(), ".pi", "agent");
 	const config = loadConfig(join(agentDir, "live-throughput-config.json"));
 	const state = loadState(join(agentDir, "live-throughput-state.json"));
 	const statePath = join(agentDir, "live-throughput-state.json");
+
+	// ---- live-rate display prefs -----------------------------------------
+	// Precedence: env (PI_TPS_MODE / PI_TPS_WINDOW_S) > persisted /tps choice > default.
+	const display: DisplayPrefs = {
+		mode: parseMode(process.env.PI_TPS_MODE) ?? state.display?.mode ?? DEFAULT_DISPLAY.mode,
+		windowSeconds:
+			parseWindowSeconds(process.env.PI_TPS_WINDOW_S) ??
+			state.display?.windowSeconds ??
+			DEFAULT_DISPLAY.windowSeconds,
+	};
+
+	/** Save calibration, preserving whatever display prefs are on disk unless overridden. */
+	function persistState(displayOverride?: DisplayPrefs): void {
+		const onDisk = displayOverride ?? readDiskDisplay(statePath) ?? state.display;
+		state.display = onDisk;
+		saveState(statePath, state);
+	}
+
+	function displayLabel(): string {
+		const w = `${display.windowSeconds}s window`;
+		if (display.mode === "window") return `window (${w})`;
+		if (display.mode === "avg") return "avg (running average since first chunk)";
+		return `both (${w} + avg)`;
+	}
 
 	// ---- calibration ------------------------------------------------------
 	function getModelState(key: string): ModelState {
@@ -407,6 +602,84 @@ export default function (pi: ExtensionAPI) {
 	let lastExactOutput = 0;
 	let sawExactStream = false;
 	let lastDisplayAt = 0;
+	let rateSamples: RateSample[] = [];
+	// server-exact live state (healthUrls)
+	let healthUrl: string | undefined;
+	let healthTimer: ReturnType<typeof setInterval> | undefined;
+	let healthBusy = false;
+	let serverTokens = 0;
+	let serverSeconds = 0;
+	let serverSamples: RateSample[] = [];
+	let livePrefill: string | undefined; // "4.0k @ 300 t/s" for this request, from /health prefill
+	let estAtPoll = 0; // client estimate at the last poll: the count between polls = server count + streamed since
+	let liveCtx: ExtensionContext | undefined;
+
+	function stopHealth(): void {
+		if (healthTimer !== undefined) {
+			clearInterval(healthTimer);
+			healthTimer = undefined;
+		}
+	}
+
+	function renderServerLive(ctx: ExtensionContext): void {
+		if (serverTokens <= 0 || serverSeconds <= 0) return;
+		const avgText = (serverTokens / serverSeconds).toFixed(1);
+		const win = windowRate(serverSamples, serverSeconds * 1000, serverTokens);
+		const winText = win ? win.rate.toFixed(1) : avgText;
+		const winLabel = `(${display.windowSeconds}s)`;
+		let rateText: string;
+		if (display.mode === "avg") rateText = `${avgText} tok/s avg`;
+		else if (display.mode === "both") rateText = `${winText} tok/s ${winLabel} | ${avgText} avg`;
+		else rateText = `${winText} tok/s ${winLabel}`;
+		const ttft0 = ttftPart();
+		const ttft = ttft0 && livePrefill ? `${ttft0} (${livePrefill})` : ttft0;
+		// exact at each poll; between polls, plus the (estimated) tokens streamed since, so the count moves smoothly
+		const between = Math.max(0, estimateTokens(modelKey) - estAtPoll);
+		const tokenText = `${formatTokens(Math.round(serverTokens + between))} tok`;
+		setStatus(ctx, ttft ? `${rateText} ${ttft}   ${tokenText}` : `${rateText}   ${tokenText}`);
+	}
+
+	async function pollHealth(): Promise<void> {
+		if (healthBusy || !healthUrl) return;
+		healthBusy = true;
+		try {
+			const h = await fetchHealth(healthUrl, config.metricsTimeoutMs);
+			const live = h?.decode_live;
+			if (!healthTimer || !live || live.active !== true) return;
+			const tokens = live.tokens;
+			const secs = live.seconds;
+			if (!isFiniteNumber(tokens) || !isFiniteNumber(secs) || tokens <= 0 || secs <= 0) return;
+			if (tokens < serverTokens || secs < serverSeconds) serverSamples = []; // a new decode began
+			serverTokens = tokens;
+			serverSeconds = secs;
+			estAtPoll = estimateTokens(modelKey);
+			if (!livePrefill) {
+				// decode_live is active, so the prefill stats are this request's
+				const p = h?.prefill;
+				if (p && isFiniteNumber(p.tokens) && p.tokens > 0 && isFiniteNumber(p.seconds) && p.seconds > 0) {
+					livePrefill = `${formatTokens(p.tokens)} @ ${formatTokens(Math.round(p.tokens / p.seconds))} t/s`;
+				}
+			}
+			if (serverSamples.length === 0) serverSamples = [{ t: 0, tokens: 0 }];
+			pushRateSample(serverSamples, { t: secs * 1000, tokens }, display.windowSeconds * 1000);
+			if (liveCtx) renderServerLive(liveCtx);
+		} finally {
+			healthBusy = false;
+		}
+	}
+
+	function startHealth(ctx: ExtensionContext, provider: string): void {
+		stopHealth();
+		healthUrl = config.healthUrls[provider];
+		serverTokens = 0;
+		serverSeconds = 0;
+		serverSamples = [];
+		estAtPoll = 0;
+		livePrefill = undefined;
+		liveCtx = ctx;
+		if (!healthUrl) return;
+		healthTimer = setInterval(() => void pollHealth(), config.healthPollMs);
+	}
 
 	function resetCounters(): void {
 		ttftEstimated = false;
@@ -419,10 +692,12 @@ export default function (pi: ExtensionAPI) {
 		lastExactOutput = 0;
 		sawExactStream = false;
 		lastDisplayAt = 0;
+		rateSamples = [];
 	}
 
 	function resetTurn(): void {
 		clearIdleTimer();
+		stopHealth();
 		resetCounters();
 		prefillBefore = undefined;
 		requestStartedAt = undefined;
@@ -439,6 +714,51 @@ export default function (pi: ExtensionAPI) {
 		return ttft ? `${ttft}   warming up…` : "TTFT: waiting";
 	}
 
+	// ---- /tps command -----------------------------------------------------
+	pi.registerCommand("tps", {
+		description:
+			"Live TPS display: /tps (toggle window/avg), /tps window [secs], /tps avg, /tps both [secs], /tps status",
+		getArgumentCompletions: (prefix: string) => {
+			const items = ["window", "avg", "both", "status", "window 5", "window 10"];
+			return items
+				.filter((v) => v.startsWith(prefix.trim().toLowerCase()))
+				.map((v) => ({ value: v, label: v }));
+		},
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/).filter((p) => p.length > 0);
+			const first = parts[0]?.toLowerCase();
+			if (first === "status" || first === "show") {
+				const envNote =
+					process.env.PI_TPS_MODE || process.env.PI_TPS_WINDOW_S ? " (env override set)" : "";
+				ctx.ui.notify(`TPS live display: ${displayLabel()}${envNote}`, "info");
+				return;
+			}
+			let mode: TpsMode | undefined;
+			let secs: number | undefined;
+			if (!first) {
+				mode = display.mode === "avg" ? "window" : "avg";
+			} else if (first === "toggle") {
+				mode = display.mode === "avg" ? "window" : "avg";
+			} else {
+				mode = parseMode(first);
+				secs = parseWindowSeconds(first);
+				if (mode) secs = parts[1] !== undefined ? parseWindowSeconds(parts[1]) : undefined;
+				else if (secs !== undefined) mode = display.mode === "avg" ? "window" : display.mode;
+				if (!mode || (parts[1] !== undefined && secs === undefined)) {
+					ctx.ui.notify(
+						"Usage: /tps | /tps window [1-60] | /tps avg | /tps both [1-60] | /tps status",
+						"warning",
+					);
+					return;
+				}
+			}
+			display.mode = mode;
+			if (secs !== undefined) display.windowSeconds = secs;
+			persistState({ ...display });
+			ctx.ui.notify(`TPS live display: ${displayLabel()} (saved)`, "info");
+		},
+	});
+
 	// ---- events -----------------------------------------------------------
 	pi.on("session_start", async (_event, ctx) => {
 		resetTurn();
@@ -452,7 +772,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		clearIdleTimer();
-		saveState(statePath, state);
+		stopHealth();
+		persistState();
 		// Drop the status so it does not linger after the session ends.
 		setStatus(ctx, undefined);
 	});
@@ -523,6 +844,7 @@ export default function (pi: ExtensionAPI) {
 			requestStartedAt = performance.now();
 			requestHookSeen = false;
 		}
+		startHealth(ctx, currentProvider);
 		setStatus(ctx, "TTFT: waiting");
 	});
 
@@ -540,6 +862,7 @@ export default function (pi: ExtensionAPI) {
 			ttftEstimated = !requestHookSeen || requestStartedAt === undefined;
 			firstChunkTokens =
 				exact > 0 ? exact : Math.max(1, info.chars / ratioFor(modelKey, info.kind));
+			rateSamples = [{ t: now, tokens: firstChunkTokens }];
 			lastDisplayAt = now;
 			setStatus(ctx, warmingStatus());
 		}
@@ -557,8 +880,19 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
+		// Record a (time, cumulative tokens) sample on every chunk (not just on
+		// display ticks) so the sliding window anchor is precise.
+		const sampleTokens = lastExactOutput > 0 ? lastExactOutput : estimateTokens(modelKey);
+		if (rateSamples.length > 0 && now > rateSamples[0].t) {
+			pushRateSample(rateSamples, { t: now, tokens: sampleTokens }, display.windowSeconds * 1000);
+		}
+
 		if (now - lastDisplayAt < config.updateIntervalMs) return;
 		lastDisplayAt = now;
+		if (serverTokens > 0) {
+			renderServerLive(ctx); // server-exact (refreshes TTFT); the poller updates the rate
+			return;
+		}
 
 		const decodeSeconds = seconds(now - firstOutputAt);
 		if (decodeSeconds * 1000 < config.minLiveWindowMs) {
@@ -579,7 +913,14 @@ export default function (pi: ExtensionAPI) {
 		}
 		const approx = exactLive ? "" : "~";
 		const ttft = ttftPart();
-		const rateText = `${rate(liveTokens, decodeSeconds)} tok/s`;
+		const avgText = rate(liveTokens, decodeSeconds);
+		const win = windowRate(rateSamples, now, grossTokens);
+		const winText = win ? win.rate.toFixed(1) : avgText; // <1 s of data: same as avg
+		const winLabel = `(${display.windowSeconds}s)`;
+		let rateText: string;
+		if (display.mode === "avg") rateText = `${avgText} tok/s avg`;
+		else if (display.mode === "both") rateText = `${winText} tok/s ${winLabel} | ${avgText} avg`;
+		else rateText = `${winText} tok/s ${winLabel}`;
 		const tokenText = `${approx}${formatTokens(Math.round(liveTokens))} tok`;
 		setStatus(ctx, ttft ? `${rateText} ${ttft}   ${tokenText}` : `${rateText}   ${tokenText}`);
 	});
@@ -594,6 +935,8 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
+		const finalHealthUrl = healthTimer !== undefined ? healthUrl : undefined;
+		stopHealth();
 		const usage = event.message.usage;
 		const rawOutput = isFiniteNumber(usage?.output) ? usage.output : undefined;
 		const outputTokens = positiveNumber(rawOutput);
@@ -609,7 +952,7 @@ export default function (pi: ExtensionAPI) {
 		if (outputTokens !== undefined) {
 			firstChunkTokens = Math.min(firstChunkTokens, outputTokens);
 		}
-		saveState(statePath, state);
+		persistState();
 
 		// Server-side prefill TPS (vLLM): diff local_compute tokens and TTFT
 		// counters sampled before and after this request. Prefix caching makes
@@ -696,6 +1039,21 @@ export default function (pi: ExtensionAPI) {
 			}
 		} else {
 			tokenText = "no output tokens";
+		}
+
+		// Server-exact final stats (healthUrls): replace the client-side rate when the
+		// server's decode count is this message's usage.output.
+		if (finalHealthUrl && outputTokens !== undefined) {
+			const sf = serverFinal(await fetchHealth(finalHealthUrl, config.metricsTimeoutMs), outputTokens);
+			if (sf) {
+				rateText = `${sf.rate.toFixed(1)} tok/s`;
+				tokenText = `${formatTokens(outputTokens)} tok`;
+				rateUnavailable = false;
+				if (sf.perCall !== undefined) tokenText += ` (${sf.perCall.toFixed(2)}/verify)`;
+				if (sf.prefillRate !== undefined && !prefillPart) {
+					tokenText += `   prefill ${formatTokens(sf.prefillTokens!)} @ ${formatTokens(Math.round(sf.prefillRate))} t/s`;
+				}
+			}
 		}
 
 		let statusText: string;
