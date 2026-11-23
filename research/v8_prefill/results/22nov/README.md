@@ -302,3 +302,16 @@ uw`; `pipe/V8_SERVER.md`, "Engine build and the KV-wrap leak fix"). A/B: 2K / 56
 (4412); 2K / 70K x2 old 4546 -> 10240 MB, new 7474 MB; smoke 29aef2ec9db18a3f in all launches, replies identical.
 Restarted at 18:20 (Anemll: "run fixed") with `V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib DEC_DYLIB=libdec_gpu_tree_uw.dylib`
 for that launch only: smoke MATCH, 4.5 GB; the launcher defaults still name the 19 Nov dylibs.
+
+## HF V8-96K update kit staged locally (18:30 to 19:20; no upload)
+
+Staging folder `/Volumes/SSD4TB/anemll-forge-research/hf_stage_v8_96k` (`v8/hf_stage_dec8ts.py 8074de0 --no-kit`
+after `pipe/gpu_tables_kit.py pack`): `coreai/m6-96k-dec8ts/` (37 file links into v8_dec8ts + head, manifests without
+machine paths, 11.28 GB), `gpu/w_dec8ts/` (1344 table files + kit.json, 903 MB), `code/anemll-forge/` (git archive of
+8074de0, 44.8 MB; the previous 912925f snapshot moved to `hf_stage_v8_96k_old_code/`), `README.md` (card),
+`DEPLOY.md`, `MODIFICATIONS.md` (+ tree8 / sliced section). Checks: no broken links; kit install from the staged build
+path: 8/8 compiled weight sections MATCH, 1344 files byte-identical to the served `pipe/w_dec8ts`, manifests equal
+apart from `dir`; a tampered section hash exits 2 and writes nothing; `build_engines.sh uw` builds from the snapshot;
+`hf/serve_v8_96k.sh` preflight stops at the first missing file (tables, then dylibs) without starting a server; every
+served module and kernel in the snapshot equals the work dir's. The smoke and memory tests of DEPLOY.md section 7 were
+not run against the staged copy (forge kept serving; not touched).
