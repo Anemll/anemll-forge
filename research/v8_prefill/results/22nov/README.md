@@ -134,7 +134,7 @@ Anemll's go-ahead 01:50, with guardrails:
 - ABBA plus KL / greedy parity, 24K+48K first
 - the build deleted unless it clears +1.5% on the long session in both orders
 
-- **Code** (commit 361b6fd):
+- **Code** (commit 91fafa2):
   - `build_dec8t_chunk.py` with `TREE_SLICED` adds `g<i>_v8s_<w>k` (chain) and `g<i>_t8s_<w>k` (tree) per group at
     24K / 40K / 48K / 56K. Each binds the next ladder entry's KV segments (40 to 46 tensors) and attends over w keys.
   - `v8/build_dec8ts_all.sh` is the build driver with the disk guard.
@@ -305,10 +305,10 @@ for that launch only: smoke MATCH, 4.5 GB; the launcher defaults still name the 
 
 ## HF V8-96K update kit staged locally (18:30 to 19:20; no upload)
 
-Staging folder `/Volumes/SSD4TB/anemll-forge-research/hf_stage_v8_96k` (`v8/hf_stage_dec8ts.py 8074de0 --no-kit`
+Staging folder `/Volumes/SSD4TB/anemll-forge-research/hf_stage_v8_96k` (`v8/hf_stage_dec8ts.py 3a63f51 --no-kit`
 after `pipe/gpu_tables_kit.py pack`): `coreai/m6-96k-dec8ts/` (37 file links into v8_dec8ts + head, manifests without
 machine paths, 11.28 GB), `gpu/w_dec8ts/` (1344 table files + kit.json, 903 MB), `code/anemll-forge/` (git archive of
-8074de0, 44.8 MB; the previous 912925f snapshot moved to `hf_stage_v8_96k_old_code/`), `README.md` (card),
+3a63f51, 44.8 MB; the previous 912925f snapshot moved to `hf_stage_v8_96k_old_code/`), `README.md` (card),
 `DEPLOY.md`, `MODIFICATIONS.md` (+ tree8 / sliced section). Checks: no broken links; kit install from the staged build
 path: 8/8 compiled weight sections MATCH, 1344 files byte-identical to the served `pipe/w_dec8ts`, manifests equal
 apart from `dir`; a tampered section hash exits 2 and writes nothing; `build_engines.sh uw` builds from the snapshot;

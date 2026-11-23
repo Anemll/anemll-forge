@@ -642,7 +642,7 @@ noise columns in `compare.json` are rough. The seed spread gives a similar size.
   - One seed moves this session by about ±4%, which covers the earlier +2.8%.
 - **The offline sim's long-session answer held** (no gain within about ±2%), and so did its caveat: its sizes do not
   predict per-band results.
-- **It agrees with the reviewer's fresh holdout** (`../22nov_review/lookup_adaptation/RESULTS.md`, commit 5c6393a).
+- **It agrees with the reviewer's fresh holdout** (`../22nov_review/lookup_adaptation/RESULTS.md`, commit 38a964f).
   On 19 new coding turns: yield +1.5%, ctx +0.6%, with ctx going from −4.5% on one seed to +6.1% on the other above
   32K.
 

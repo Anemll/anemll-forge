@@ -584,7 +584,7 @@ supported. Commands and details: [Requirements: root and SIP](README.md#requirem
 
 Everything is on the ANEMLL Forge research branch
 [`v8-gpu-ane-prefill`](https://github.com/Anemll/anemll-forge/tree/v8-gpu-ane-prefill/research/v8_prefill) (code, build scripts, notes and every raw result; the state this article
-describes is commit `fa224c9`). The build itself is on Hugging Face. The steps, in order:
+describes is commit `40f09d7`). The build itself is on Hugging Face. The steps, in order:
 
 | step | where |
 |---|---|
