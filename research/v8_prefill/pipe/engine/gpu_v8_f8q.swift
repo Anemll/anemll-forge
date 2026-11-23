@@ -511,6 +511,16 @@ public func v8_wrap(_ p: UnsafeMutableRawPointer, _ n: Int) -> Int32 {
                                                                  options: .storageModeShared, deallocator: nil) else { return -1 }
     wrapped.append(b); return Int32(wrapped.count - 1)
 }
+/// 22 Nov 2026: drop a wrapped handle (the runtime freed or replaced its buffer). A no-copy Metal buffer keeps the
+/// region's pages resident after the owner frees it (the KV segments of every context switch stayed in the footprint:
+/// 4.0 -> 14.3 GB over 8 switches); the slot gets a 16-byte placeholder, handles are not reused. In-flight command
+/// buffers retain what they encoded.
+let unwrapped: MTLBuffer = dev.makeBuffer(length: 16, options: .storageModeShared)!
+@_cdecl("v8_unwrap")
+public func v8_unwrap(_ h: Int32) -> Int32 {
+    guard h >= 0, Int(h) < wrapped.count else { return -1 }
+    wrapped[Int(h)] = unwrapped; return 0
+}
 func encodeMix(_ layer: Int32, _ src: Int32, _ dst: Int32, _ p0: Int32) -> MTLCommandBuffer? {
     guard let k = layerIndex[Int(layer)] else { return nil }
     let l = layers[k]
@@ -712,6 +722,13 @@ public func v8_kv8_seg(_ layer: Int32, _ start: Int32, _ rows: Int32, _ k: Int32
                       kh: UInt32(kh), kd: UInt32(kd), vh: UInt32(vh), vr: UInt32(vr), sh: UInt32(sh)))
     l.segs.sort { $0.start < $1.start }
     return Int32(l.segs.count)
+}
+/// KV8: forget attention layer `layer`'s segments (22 Nov 2026: before registering the runtime's current ones again, so
+/// a shrink leaves no stale segment past the new context).
+@_cdecl("v8_kv8_clear")
+public func v8_kv8_clear(_ layer: Int32) -> Int32 {
+    guard KV8, let i = layerIndex[Int(layer)], layers[i].m.kind != "gdn" else { return -1 }
+    layers[i].segs.removeAll(); return 0
 }
 
 // ---- A8 FFN (patch_a8.py) ----

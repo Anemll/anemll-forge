@@ -171,6 +171,10 @@ class DecSplit:
             return
         mode = mb.kv_cache_dtype
         assert mode == "kv8" and mb.keys_t, "the GPU kernels read INT8 K (dim-major) / INT8 V"
+        # 22 Nov 2026: with dec_unwrap (libdec_gpu_tree_uw.dylib) the previous segments' wraps are dropped after the new
+        # ones are registered (a no-copy Metal buffer kept every replaced KV segment resident). Older dylibs: as before.
+        unwrap = getattr(g, "dec_unwrap", None)
+        old_h, self._seg_h = getattr(self, "_seg_h", []), []
         for i, ch in enumerate(mb.chunks):
             j = ch["att_j"][0]
             kv, start, s = mb.kv[i], 0, 0
@@ -182,7 +186,12 @@ class DecSplit:
                 assert list(ksb.strides) == [rows, 1] and list(vsb.strides) == [rows, 1], "KV scale layout"
                 h4 = [g.dec_wrap(b_.address, b_.nbytes) for b_ in (kb, ksb, vb, vsb)]
                 assert min(h4) >= 0 and g.dec_seg(i, start, rows, *h4) > 0, f"dec_seg chunk {i} segment {s}"
+                self._seg_h += h4
                 start += rows; s += 1
+        if unwrap is not None:
+            unwrap.restype, unwrap.argtypes = C_.c_int32, [C_.c_int32]
+            for h_ in old_h:
+                assert unwrap(h_) == 0
         self._kvobjs = objs
 
     def _plan(self, par):

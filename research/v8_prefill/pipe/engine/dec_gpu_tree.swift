@@ -88,6 +88,14 @@ public func dec_wrap(_ p: UnsafeMutableRawPointer, _ n: Int) -> Int32 {
                                                                  options: .storageModeShared, deallocator: nil) else { return -1 }
     wrapped.append(b); return Int32(wrapped.count - 1)
 }
+/// 22 Nov 2026: drop a wrapped handle (the runtime freed or replaced its buffer; a no-copy Metal buffer keeps the pages
+/// resident). The slot gets a 16-byte placeholder; handles are not reused.
+let unwrapped: MTLBuffer = dev.makeBuffer(length: 16, options: .storageModeShared)!
+@_cdecl("dec_unwrap")
+public func dec_unwrap(_ h: Int32) -> Int32 {
+    guard h >= 0, Int(h) < wrapped.count else { return -1 }
+    wrapped[Int(h)] = unwrapped; return 0
+}
 
 /// One INT8 KV segment of attention layer `layer`: positions [start, start + rows), K [4][256][rows], KS [4][rows],
 /// V [4][rows][256], VS [4][rows] (dense; the caller checks the strides).

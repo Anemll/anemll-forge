@@ -152,6 +152,16 @@ class V8Prefill:
         if self.seg_ctx == sig:
             return
         n = 0
+        # 22 Nov 2026: a dylib with v8_unwrap / v8_kv8_clear (libgpu_v8_f8q_uw.dylib) forgets the previous segments and
+        # drops their wraps (a no-copy Metal buffer kept every replaced KV segment resident: 4.0 -> 14.3 GB over 8 context
+        # switches). Without them (older dylibs): as before.
+        unwrap, clear = getattr(self.g, "v8_unwrap", None), getattr(self.g, "v8_kv8_clear", None)
+        old_h, self.seg_h = getattr(self, "seg_h", []), []
+        if unwrap is not None and clear is not None:
+            unwrap.restype, unwrap.argtypes = C_.c_int32, [C_.c_int32]
+            clear.restype, clear.argtypes = C_.c_int32, [C_.c_int32]
+            for Lk in self.att:
+                assert clear(Lk) == 0
         for Lk in self.att:
             ci, j = self._where(Lk)
             for gi in range(len(starts) - 1):
@@ -161,11 +171,15 @@ class V8Prefill:
                 assert kn.shape == (4, 256, rows) and vn.shape == (4, rows, 256) and ksn.shape == (4, rows)
                 hs = [self.g.v8_wrap(b_.address, b_.nbytes) for b_ in (bk, bv, bks, bvs)]
                 assert min(hs) >= 0
+                self.seg_h += hs
                 assert self.g.v8_kv8_seg(Lk, starts[gi], rows, *hs, kn.strides[0], kn.strides[1], vn.strides[0], vn.strides[1],
                                          ksn.strides[0] // 2) > 0
                 n += 1
+        if unwrap is not None and clear is not None:
+            for h_ in old_h:
+                assert unwrap(h_) == 0
         self.seg_ctx = sig
-        self.log(f"v8: {n} ANE KV segments registered (ctx {mb.ctx})")
+        self.log(f"v8: {n} ANE KV segments registered (ctx {mb.ctx})" + (f", {len(old_h)} old wraps dropped" if old_h and unwrap is not None and clear is not None else ""))
 
     def can_start(self, p0, n):
         """A run [p0, p0 + n) can start at p0: a 64-aligned p0 (KV8; a start at 64 mod 128 shifts every 128-row call by
