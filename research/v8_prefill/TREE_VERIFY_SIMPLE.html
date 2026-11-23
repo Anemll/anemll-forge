@@ -58,9 +58,10 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; border-top: 1
 <main>
 <span class="tag">ANEMLL Forge research · 22 Nov 2026 · the short version</span>
 <h1>Tree verification for hybrid ANE + GPU on Apple M6, simply</h1>
+<img src="tree-verify-cover.png" width="1200" alt="A token tree above the Apple Neural Engine and GPU" style="display:block;max-width:100%;height:auto;margin:1em auto">
 <p class="lede" style="margin-top:-.2em"><b>Checking more guesses in the same 8 rows.</b> By Anemll (<a href="mailto:realanemll@gmail.com">realanemll@gmail.com</a>).</p>
 <p class="lede">A plain-language companion to the paper
-<a href="https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K/blob/main/code/anemll-forge/research/v8_prefill/TREE_VERIFY.md">Tree Speculative Decoding on a Split ANE + GPU Target</a> (on Hugging Face; also
+<a href="https://huggingface.co/blog/anemll/tree-speculative-decoding-apple-m6">Tree Speculative Decoding on a Split ANE + GPU Target</a> (on Hugging Face; also
 <a href="TREE_VERIFY.html">illustrated HTML</a> and on <a href="https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/TREE_VERIFY.md">GitHub</a>). It explains the idea, how we
 made it work on the Apple Neural Engine, and what it bought for Qwen3.8-27B on an M6 Mac. Every number here comes
 from the paper, which has the methods, the controls and the prior art.</p>
@@ -86,10 +87,7 @@ drafter actually knows more than one line: for every position it ranks <b>16 can
 is the right one, but a chain has no room for it.</p>
 
 <h2>3. The idea: spend the 8 rows on a tree</h2>
-<p>Keep the same 8 rows, but fill them with the drafter's <b>most likely branches</b>. Starting from the anchor, we
-repeatedly add the most probable next node (the product of the drafter's probabilities along its path), with up to 4
-children per node, until 7 nodes are placed. When the drafter is confident, the tree is just the chain again; when it
-hesitates, both options get a row.</p>
+<p>The drafter suggests 16 token IDs for each of seven possible positions ahead. Starting at the anchor, the selector scores those suggestions for the current parent and puts its four best children on a waiting list. It takes the most probable path on the list, gives its last token a row, and expands from there. A path’s score is the product of its token probabilities. Selection stops after seven proposal nodes. If all seven fall on one line, the ordinary chain verifier handles the cycle.</p>
 <figure>
 <svg viewBox="0 0 720 250" role="img" aria-label="Chain versus tree in 8 rows: the chain bets 7 rows on one path, the tree splits rows between likely branches">
   <text x="10" y="24" font-size="15" font-weight="600">Chain: 7 guesses on one path</text>
@@ -127,8 +125,7 @@ hesitates, both options get a row.</p>
 <h2>4. Making the big model check a tree</h2>
 <p>Three changes let one call check a tree instead of a line:</p>
 <ul>
-<li><b>Each row sees only its own branch.</b> A row may look at the earlier text and at its own ancestors, not at its
-"cousins" on other branches. That is a mask: one 8 x 8 grid per call.</li>
+<li><b>Each row sees only its own branch.</b> A row attends to the cached text, its ancestors and itself. Siblings on other branches are masked out. That is a mask: one 8 x 8 grid per call.</li>
 <li><b>Positions follow depth.</b> Two siblings are both "the next word", so they get the same position number.</li>
 <li><b>The recurrent layers get a path-aware fix.</b> 48 of the model's 64 layers are Gated DeltaNet layers: instead of
 looking back over all tokens, they carry a running memory and a short look-back over the last few tokens. In a tree,
@@ -232,7 +229,7 @@ line, the server skips the tree entirely and runs the ordinary chain check, so c
 <source src="tree8-inside-ane.mp4" type="video/mp4">
 <a href="tree8-inside-ane.mp4">Watch the eight-row verification pass</a>
 </video>
-<figcaption id="ane-verify-caption">Inside the ANE verifier. Follow “down” in row 5 through the ancestor mask and DeltaNet convolution. It sees the shared prompt plus rows 0, 2, 4 and 5. The final scene shows the target’s next-token choices and where the accepted rows go.</figcaption>
+<figcaption id="ane-verify-caption">Watch the selector fill seven slots, then follow “down” in row 5 through the ancestor mask and DeltaNet convolution. It sees the shared prompt plus rows 0, 2, 4 and 5. The words and scores are illustrative. The final scene shows the target’s next-token choices and where the accepted rows go.</figcaption>
 </figure>
 
 <h2>5. Keeping the winner</h2>
@@ -318,7 +315,7 @@ against its closest prior work, and its references give the sources.</p>
 
 <h2>Read more</h2>
 <div class="links">
-  <a href="https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K/blob/main/code/anemll-forge/research/v8_prefill/TREE_VERIFY.md"><b>The paper: Tree Speculative Decoding on a Split ANE + GPU Target</b><span>On Hugging Face, with the build it describes. Method, what is new, every measurement, what did not work, prior art, correctness tests.</span></a>
+  <a href="https://huggingface.co/blog/anemll/tree-speculative-decoding-apple-m6"><b>The paper: Tree Speculative Decoding on a Split ANE + GPU Target</b><span>On Hugging Face, with the build it describes. Method, what is new, every measurement, what did not work, prior art, correctness tests.</span></a>
   <a href="TREE_VERIFY.html"><b>The paper, illustrated (HTML)</b><span>The same paper with its figures and the claim audit; also on <span style="text-decoration:underline">GitHub</span> as Markdown.</span></a>
   <a href="ARTICLE_ANE_GPU_M6.html"><b>The article: One model, two accelerators</b><span>How the Neural Engine and the GPU share one model: prefill, decode, results against Splash.</span></a>
   <a href="https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K"><b>The build on Hugging Face</b><span>Packages, drafter, GPU-table kit, code, and the build / deploy / test guide.</span></a>
