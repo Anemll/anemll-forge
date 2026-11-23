@@ -536,7 +536,7 @@ calls):
 **Trees** (`tree/tree_sim_report2.json`): dynamic top-N trees (EAGLE-2 / qwen-spec style: the N nodes of highest path
 probability, p(child | parent) = softmax of the served selector score), 964 cycles of low-acceptance text.
 
-| tree | nodes | rows | tok/verify |
+| tree | nodes | rows | tok/verify before graph cost |
 |---|---|---|---|
 | flat (served) | 7 | 8 | 3.064 |
 | dynamic top-7 | 7 | 8 | 3.348 (+9.3%) |
@@ -556,8 +556,7 @@ Fixed shapes are weaker: [2,1,...] 3.279; [2,2,1,...] (26 nodes) 3.517.
 
 16 rows pay while the 16-row verify costs under about +25% over 8 rows. With these linear estimates, a tree in the
 current 8 rows (ancestor-mask inputs in place of the `tri` constants, the same row count) is as good as 16 rows.
-qwen-spec reports trees at +40% per pass on open chat (about +10% on code / math), so higher-acceptance text should
-favour bigger trees.
+This log does not establish gains on high-acceptance code. A branch can recover an early miss or displace a correct token at the end of the chain. The later fixed-budget comparison is in TREE_VERIFY.md §5.4.
 
 **First step if approved:** one chunk's 8-row and 16-row tree entries (a small test build) to measure the real cost
 instead of the linear estimate.
@@ -740,8 +739,7 @@ Projection with the measured costs and the tree_sim acceptance (964 cycles, low-
 | 64K | 23.2 | 24.4 (+5.2%) | about 21.2 (-9%) |
 
 **Verdict:** a 16-row tree verify on the ANE does not pay. A dynamic tree inside the current 8 rows (top-7 nodes by path
-probability, ancestor-mask inputs) is worth about +4-5% decode at these acceptance rates, and more on
-higher-acceptance text. It would need a full build of tree8 verify entries (16 chunks, same weights).
+probability, ancestor-mask inputs) projects to about +4–5% decode on these 12 low-acceptance greedy requests. Higher-acceptance workloads require their own comparison. It would need a full build of tree8 verify entries (16 chunks, same weights).
 
 The scratch build was deleted afterwards (its Core AI entries via `scripts/coreai_cache_delete.py --delete`, 1.2 GB
 plus aned's programs, then the files). Free disk after: SSD 1.1 TB, internal 110 GB.
@@ -878,7 +876,7 @@ measured ratio at the entry size):
 | 64K, all cycles | 23.4 | 24.5 (+4.9%) | 21.2 (-9.4%) | 15.2 (-35%) |
 | 64K, its own 645 cycles | 23.1 | 24.4 | 21.0 | 15.1 |
 
-**Verdict:** on the ANE only a tree inside the current 8 rows pays (+4.5-5%). 16 rows break even at 2K and lose 9-10%
+**19 Nov projection:** on these 964 fixed anchors, the eight-row dynamic tree projects +4.5–4.9% tok/s after applying the four-layer probe ratio to verify time. The 32K and 64K rows share the 64K cost curve; the split GPU contribution is assumed to scale at the same rate. 16 rows break even at 2K and lose 9-10%
 at 32K and longer; 32 rows lose 25-35%. The scratch build was deleted (Core AI entries 1.8 GB plus aned's programs,
 then the 1.7 GB of files). Free disk after: SSD 1.1 TB, internal 98 GB.
 
@@ -921,7 +919,7 @@ dynamic tree. Even perfect foresight adds only +5-9%. 32 rows are never worth it
   is built. It needs calibrated probabilities (tau = 1.5 here).
 - **What decides it:** the verify cost curve (16 rows +26-39%, 32 rows +87-116%). Splash's GPU step pays +0.9% for
   16 rows, which is why its auto verify-rows pays there and not on the ANE.
-- **Recommendation:** a fixed dynamic top-7 tree in 8 rows (+4.5-5%, needs a full build of tree8 verify entries, 16
+- **Recommendation:** a fixed dynamic top-7 tree in 8 rows (then projected +4.5–4.9% on this log, requiring a full build of tree8 verify entries, 16
   chunks on the same weights), with the size rule left out.
 
 ## 16b. Why FP8 x FP8 P.V decode (`dec_attn_r4f8`) is slower than baseline `dec_attn_r4` (A1/B1 complete; A2/B2 & KL pending)

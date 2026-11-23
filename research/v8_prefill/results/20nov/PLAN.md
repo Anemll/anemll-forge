@@ -10,7 +10,7 @@ Rules (unchanged standing rules):
 - Commit locally in small commits; do NOT push. Training-style long jobs must checkpoint/resume.
 
 ## Phase A: served tree verify, dynamic 8/16/32
-Context: yesterday 13b/15 measured ANE 4-layer group verify +26-39% for 16 rows and +87-116% for 32 rows vs 8-row chain, so only top-7 in 8 rows won (+4.5-5%). The goal now is to make 16/32 cheap enough that wide trees win, and push mean accepted tokens/cycle to ~4 on realistic (non-repetitive) prompts.
+Context: yesterday 13b/15 measured ANE 4-layer group verify +26-39% for 16 rows and +87-116% for 32 rows vs 8-row chain, and projected +4.5–4.9% for top-7 in eight rows on 12 low-acceptance greedy requests (964 cycles). The goal now is to make 16/32 cheap enough that wide trees win, and push mean accepted tokens/cycle to ~4 on realistic (non-repetitive) prompts.
 Ideas to try (your call, measure each): 
 1. Real tree drafting from DFlash-2 (best-first by path prob), ancestor masks in verify attention, per-branch DeltaNet/conv state handled correctly (commit only accepted path).
 2. Make wide verify cheap: GPU-side verify rows (Splash 1.7.0 runs 16-row verify on GPU at ~+0.9%), or split (ANE FFN batched rows + GPU attention with ancestor mask), or ANE entries built for 16/32 with better tiling; reuse shared prefix work across siblings.

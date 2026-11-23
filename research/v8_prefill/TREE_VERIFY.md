@@ -101,10 +101,11 @@ tree can help.
 
 ### 3.1 Tree construction in 8 rows
 
-Per cycle, from the anchor token (the last committed token):
+One DFlash2 forward produces 16 candidates at each of seven depths, their unary scores and one selector vector per depth. For a child token `c` and parent token `p`, the score is the unary score plus the dot product of the successor code for `c` with the elementwise product of the predecessor code for `p` and the depth’s selector vector. Changing the parent reranks that same shortlist. There is no additional drafter forward on a branch.
 
-1. Expand best-first by **path probability** (as in dynamic draft trees [5, 10]) under the selector score, `softmax(s_i(c | parent) / tau)` over the
-   top `TOPC` children of each node (`TOPC = 4`; `tau = 1.5`, calibrated offline in results/20nov).
+Per cycle, from the anchor token:
+
+1. Expand best-first by **path probability** (as in dynamic draft trees [5, 10]) using the product of conditional probabilities along each path. At each parent, normalize all 16 selector scores with `softmax(score / tau)` and enqueue the four highest-scoring children (`tau = 1.5` in the served build).
 2. Stop at the anchor + 7 nodes. Rows are filled in pop order, which is topological.
 3. If the 7 nodes form the chain, the cycle runs the served chain entry (policy `branched`); otherwise the tree entry.
 
@@ -153,6 +154,8 @@ The 48 DeltaNet layers are recurrent, so a tree needs two things a chain gets fo
   coupling sampled drafts to their proposal, such as traversal verification, block verification, SpecTr and optimal
   multi-draft acceptance [34, 35], reduce to it for point-mass drafts. Section 5.3.
 
+**Stopping.** A matched stop-token ID ends the walk before that child enters the committed path. User-supplied stop strings are checked against detokenized text in the outer generation loop. A string crossing a token boundary can trim the returned text after the cycle has already committed model state. The paper's parity tests do not establish rollback to that text boundary or retraction of previously streamed characters.
+
 ### 3.5 Commit: back to a chain
 
 Let the accepted path, including the anchor, have k + 1 rows. If its row IDs already equal 0..k, buffer compaction is skipped. Otherwise the runtime packs each DeltaNet layer's pending k/u/wk rows, cumulative-decay columns and convolution rows into those positions. For non-split verify it packs the entry's new K/V outputs. For split verify it moves accepted rows and their quantization scales within the shared KV cache. In either case it gathers the drafter features in path order, appends them at consecutive positions, and calls `mb.accept(k + 1)`. The recurrent matrix is advanced through the ordinary chain mechanism. The object being rearranged here is the **pending tape**, and the feature gather has its own destination.
@@ -178,6 +181,8 @@ with the keys at or above `w` masked: 471 calls, max |logit diff| 0, KL 0.
   temperature 1.0 with thinking on.
 - **Metric:** client-side decode tok/s, token-weighted. The 18-request same-output restart control moved from 43.20 to 45.09 tok/s (+4.4%). Section 4.3 reports two blocks with opposite run orders and different seeds. Section 4.4 reports a fresh-launch ABBA experiment. Fixed-anchor replay estimates the cost and yield on the chain's recorded texts.
 
+**Origin of the +4.5–5% projection.** On 19 Nov, `tree_sim_report2.json` covered 12 greedy requests and 964 fixed anchors. The simulated chain reproduced the logged acceptance on all 964. Dynamic top-7 raised tokens per verify from 3.064 to 3.348 (+9.3% before verifier cost). Its mean maximum depth was 4.98. Zero-accept cycles fell from 248 to 153, but seven-accept cycles also fell from 51 to 41. Applying a measured 4.6–5.3% tree-graph overhead from layers 0–3 to the served verification time projected +4.5% to +4.9% decode throughput. The 32K and 64K projections reused the same 64K cost curve and assumed the split attention scaled with the ANE. They provide no independent split-kernel timing. The later +4.5% in §3.3 is a *latency cost* for the corrected convolution. The served measurements below use separate runs.
+
 ### 4.2 Tree8 vs chain, greedy
 
 | measurement | result |
@@ -187,7 +192,7 @@ with the keys at or above `w` masked: 471 calls, max |logit diff| 0, KL 0.
 | Served 21 Nov: 2K / code / agent | 45.80 / 40.66 / 54.04 vs chain 42.74 / 39.46 / 54.48 tok/s |
 | 2K, fresh-launch like for like | +5.1% (44.91 vs 42.74) |
 
-Code and math gain little because their chains already accept close to 7 of 7.
+The realistic set includes high-acceptance code and math. On the D4 fixed-anchor code replay, chain8 projects to 57.43 tok/s, always taking the tree entry to 56.24, and dispatching it only on forks to 57.68. That last change is about +0.4%, compared with the much larger gain on low-acceptance chat. Section 5.4 tests the reviewer’s alternative shape.
 
 ### 4.3 Tree8 vs chain, sampled with Pi settings
 
@@ -251,9 +256,7 @@ Where a wider verify's cost goes:
 - **Tree convolution taps:** the original one-hot form added 0.66 / 1.58 ms per group at 16 / 32 rows. At 64K the attention increment was larger.
 - **Attention at long context:** the score passes.
 
-In the later sweep the measured 32K group cost rose 5.0% from row 14 to 15, then 0.1% from 15 to 16. Fixed-anchor greedy replay using those costs projected at most +1.6% over tree8 at 8K; all wider entries lost at 32K. Full-model serving at widths 9–16 was not timed in this sweep. Splash 1.7.0
-[18] (GPU-only) gets +17-22% tok/cycle from its 16-row tree at 0-2% cycle cost. That width is cheap on a GPU and is not
-cheap on this ANE target.
+In the later sweep the measured 32K group cost rose 5.0% from row 14 to 15, then 0.1% from 15 to 16. Fixed-anchor greedy replay using those costs projected at most +1.6% over tree8 at 8K; all wider entries lost at 32K. Full-model serving at widths 9–16 was not timed in this sweep. Splash 1.7.0 [18] measured its one-lane step at 111.8 ms for eight rows and 112.8 ms for sixteen (+0.9%) on this M6. That within-engine timing shows how cheaply its verifier could widen. End-to-end differences also include the quantizer, lookup policy and generated tokens, so its acceptance advantage cannot be attributed solely to tree width.
 
 ### 5.2 Other policies and drafters
 
@@ -296,11 +299,29 @@ probabilities, exact for the served tree (4.08).
   predictor, as JetSpec++'s adapter provides.
 - **Committing inside the next verify** (SpecLA [25]) would save part of a 1.1-1.4 ms commit, about 1% of a cycle.
 
+### 5.4 A six-token spine with one root sibling
+
+The review proposed keeping six consecutive top-1 draft tokens and spending the seventh slot on the runner-up at depth one. Relative to chain8 this recovers one draft token if the target takes that runner-up and gives up one if the target follows the entire seven-token chain. The root and total row budget stay fixed.
+
+| Greedy fixed-anchor replay | Cycles | Chain8 | Dynamic top-7 | Six-token spine + sibling |
+|---|---:|---:|---:|---:|
+| Original low-acceptance set | 964 | 3.064 | 3.348 | 3.113 |
+| Later realistic set, all | 1,948 | 4.953 | 5.123 | 4.614 |
+| Code subset | 423 | 7.057 | 7.111 | 6.314 |
+| Math subset | 740 | 6.459 | 6.530 | 5.888 |
+| Chat subset | 785 | 2.399 | 2.726 | 2.497 |
+
+Entries are tokens per verify, including the next target token. Each greedy comparison uses the same logged anchors and output tokens for every policy. We used the original selector temperature of 1 on the 19 Nov trace and the served value of 1.5 on the later trace. The simulated chain reproduced all logged accepted lengths in both sets. The fixed shape helps on the original log and chat, while its lost seventh token costs more on code and math.
+
+On **2,642 sampled cycles from the long Pi-like benchmark**, the logged policy gave 4.075 expected tokens per verify. The same fixed spine gave **3.683–3.727**. To bound unobserved paths, we allowed their unknown next-token probabilities to range from zero to one and allowed unlisted tokens at an observed parent to use its remaining probability mass. Even the upper bound falls below the logged policy. These are fixed-anchor expectations from the benchmark, separate from production Pi traffic and wall-clock throughput.
+
+We also tried the proposed **early-confidence fallback** at one threshold chosen before replay. A gap of at least 0.5 between the two highest root probabilities sent the cycle to the chain; otherwise it used the existing topology-based dispatch. The realistic greedy set gave 5.051 tokens per verify overall and 7.054 on code, with tree dispatch on 26.3% and 6.9% of cycles respectively. This is an untuned yield comparison. A throughput claim for the gate would need whole-cycle timing on held-out requests. Replay inputs, implementation and aggregates are archived in `results/22nov/reviewer_spine/`.
+
 ## 6. Correctness and reproducibility
 
 - **Identity criterion.** A tree can change the cycle split and subsequently the floating-point decisions. A
   chain-only control with a different cycle split keeps only 20 of 45 replies identical; branched tree8 keeps 23 of
-  45. The forced-chain greedy control matched 45/45 replies. The sampling rule targets the verifier's conditional distribution. Host tests covered 5,040 topological parent arrays and 128 increasing paths in each compaction mode. These checks leave arbitrary branched logits and the next committed state to be verified on device.
+  45. The forced-chain greedy control matched 45/45 replies. The sampling rule targets the verifier's conditional distribution. Host tests covered 5,040 topological parent arrays and 128 increasing paths in each compaction mode. The unresolved device test starts a branched verify and two ordinary chain verifies from the same snapshot and positions. Give siblings the same depth and RoPE position. Compare each path’s full-vocabulary logits, argmax and top-two margin, then commit an off-prefix leaf and compare the next fixed anchor’s logits, pending tape, convolution, KV/scales and drafter features. Vary the unused sibling, repeat a chain control, and test the ANE-only and 96K split entries separately. The existing controls establish forced-chain parity only.
 - **Used vs fresh server.** Replies on a used server differed from a fresh one. The cause was the drafter's context
   ring, which snapshots restored by position only: a cold request rewrote those slots, and the next restore drafted
   from the wrong rows. Fix (`DRAFT_RING_SNAP=fix`, served): copy the visible ring slots into the snapshot.

@@ -543,10 +543,8 @@ V8.1 keep-alive. With the keep-alive the cycle is 133 ms at 66K and 142 to 146 m
      takes 6.5 ms on the Neural Engine.
    - **256-row DeltaNet calls:** 8% slower end to end at 4K. Weight traffic is not what limits the DeltaNet matrix
      products, and the coupled schedule costs overlap.
-   - **Tree verification wider than 8 rows on the Neural Engine:** 16 rows cost 26 to 39% more per verification and 32
-     rows 87 to 116%, more than the extra acceptance buys. Choosing the size per cycle adds only 0.3 to 1.6%.
-   - **Kept for later:** a dynamic tree of 7 draft tokens inside today's 8 rows, +4.5 to 5% in simulation, not built
-     yet.
+   - **Tree verification wider than 8 rows on the Neural Engine:** 16 and 32 rows cost 26–39% and 87–116% more than chain8 in a four-layer probe. Choosing among 8/16/32 rows projected only 0.3–1.6% over fixed tree8 on the sampled set of greedy requests.
+   - **Eight-row tree, 19 Nov projection.** On 12 low-acceptance greedy requests (964 cycles), seven dynamic nodes gave 3.348 vs 3.064 tokens per verify. Scaling the four-layer graph cost projected +4.5–4.9% decode throughput. The later served comparisons and their workload-specific regressions appear in the [tree-verification paper](TREE_VERIFY.md).
 9. **A thinking budget for effort "medium" (V8).** Our server closes the model's thinking at 6,144 tokens with Qwen's
    own budget phrase; Splash 1.3.2 has no cap by default. On the graded coding task the cap cost nothing (1,373 of 1,373
    either way) and saved a 14-minute first turn.
