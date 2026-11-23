@@ -227,6 +227,14 @@ layer group (we call it <code>corrx0</code>). On plain chains it reproduces the 
 on the GPU between Neural Engine calls; the GPU kernel applies the same mask. When the 7 nodes happen to form a single
 line, the server skips the tree entirely and runs the ordinary chain check, so confident stretches pay nothing extra.</p>
 
+<figure>
+<video controls playsinline preload="metadata" width="1120" height="652" style="display:block;width:100%;height:auto" aria-label="Inside Forge’s eight-row ANE verifier" aria-describedby="ane-verify-caption">
+<source src="tree8-inside-ane.mp4" type="video/mp4">
+<a href="tree8-inside-ane.mp4">Watch the eight-row verification pass</a>
+</video>
+<figcaption id="ane-verify-caption">Inside the ANE verifier. Follow “down” in row 5 through the ancestor mask and DeltaNet convolution. It sees the shared prompt plus rows 0, 2, 4 and 5. The final scene shows the target’s next-token choices and where the accepted rows go.</figcaption>
+</figure>
+
 <h2>5. Keeping the winner</h2>
 <p>After the check, we walk down from the anchor and follow the child the big model agrees with, as far as it goes.
 Then the winning branch is <b>packed into place</b> as if it had been a chain all along: its rows move to the front
