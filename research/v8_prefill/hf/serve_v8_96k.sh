@@ -5,6 +5,8 @@
 #   sliced decode entries), tree8 branched verify for greedy and sampled requests, sliced decode entries 24/40/48/56K,
 #   FP8 x P.V prefill, staged Q.K epilogue (QKE=tg), INT8 KV, GPU clock keep-alive, drafter ring snapshot, prompt
 #   lookup off, ctx 98304, the KV-wrap leak fix (the *_uw dylibs), forge's own memory watchdog.
+#   TREE=0: the same build with the 8-row chain verifier (tree vs chain comparisons); TREE_SAMPLED=0: chain for
+#   sampled requests only; RUNG_SLICE= (empty): no sliced entries.
 #   REPO=<HF repo download> [TABLES=<GPU table dir>] [PORT=8765] [LOGDIR=~/Library/Logs/anemll-forge] [PY=python3]
 #   zsh code/anemll-forge/research/v8_prefill/hf/serve_v8_96k.sh [extra v8_server.py options]
 # Before the first run (DEPLOY.md): forge.py compile of the build and the drafter, the GPU tables
@@ -25,7 +27,7 @@ lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $PORT in use";
 env PYTHONPATH=$V/tools${PYTHONPATH:+:$PYTHONPATH} V8_V02=$CODE \
     MODEL=$REPO/model SILU=tanh MLP_SILU=tanh GDN_SQ=16 GDN_SV=64 MLP_DS=1 MLP_DS_DYN=0 V3_KV_IN=1 V3_PREFILL=0 \
     EMBED_NPY=$REPO/model/embed_tokens_fp16.npy RUNTIME=coreai DRAFTER=$REPO/drafter/all3 COREAI_DRAFTER_COMPUTE=ane \
-    MPSGRAPH_ANE_BONDED_COMPILE_MODE=2 F8=x QKE=tg TREE=1 TREE_SAMPLED=1 NGRAM_DRAFT=0 DRAFT_RING_SNAP=fix \
+    MPSGRAPH_ANE_BONDED_COMPILE_MODE=2 F8=x QKE=tg TREE=${TREE-1} TREE_SAMPLED=${TREE_SAMPLED:-1} NGRAM_DRAFT=0 DRAFT_RING_SNAP=fix \
     RUNG_SLICE=${RUNG_SLICE-24,40,48,56} DEC_DYLIB=libdec_gpu_tree_uw.dylib DEC_METAL=dec_kernels_tree.metal \
     DEC_KA_CTL=${DEC_KA_CTL:-$LOGDIR/ka} \
     FUSE=all I8=1 I8T=1 I8TV=_k256 LUTC=1 I8A=1 I8KV=1 LRM=1 QK8=1 TKV=2048 \

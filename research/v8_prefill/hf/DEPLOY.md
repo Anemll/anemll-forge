@@ -107,7 +107,8 @@ Core AI load (`tools/deploy_journal.py`, under `DEPLOY_JOURNAL_ROOT`, default `~
 OpenAI-compatible API on `127.0.0.1:$PORT` (`/v1/chat/completions`, streaming, tools; `/health`). Once compiled,
 loading takes seconds (5 s on the development M6 with the files in memory).
 
-Switches (environment, one launch): `RUNG_SLICE=` (empty) serves the build without the sliced entries; extra options
+Switches (environment, one launch): `TREE=0` serves the same build with the 8-row chain verifier instead of tree8
+(`TREE_SAMPLED=0`: chain for sampled requests only); `RUNG_SLICE=` (empty) serves it without the sliced entries; extra options
 go to `v8_server.py` (`python $V/pipe/v8_server.py --help`). Stop: `PORT=8765 zsh $V/pipe/srv_stop.sh`.
 
 ## 7. Test
@@ -138,6 +139,14 @@ c. **Memory over context switches** (about 10 min; the 22 Nov leak test):
 d. **Longer benches.** `bench_tree/tree_bench.py` with `long_agent_v1.json` (a 19-turn Pi-like session, 8.6K to
    55.5K), `u1_code_agent.json` (agent set, tools) and the realistic set (`make_prompts.py`) are the sets behind the
    numbers in `TREE_VERIFY.md`; `--temp 1.0 --think 1 --seed N` gives Pi-like sampled requests.
+
+e. **Tree vs chain on your Mac.** Run the same bench twice, restarting the server between runs: once as deployed
+   (tree8) and once with `TREE=0` (chain), then compare tok/s per request. The banner line `tree: mode=` shows which
+   verifier ran. On the development M6 the tree gained +1.9% to +6.5% on greedy requests and +8.5% / +10.2% on
+   sampled (Pi-like) requests, with the tool-agent subset at -1.6% / -3.9% (paper, section 4). Small differences
+   need repeated runs in both orders: two identical restarts differed by 4.4% there. The greedy smoke checksum is a
+   tree8 value; with `TREE=0` the replies can differ slightly (a different cycle split changes floating-point
+   decisions), so do not use it as a pass mark for the chain.
 
 ## 7b. Pi (coding agent) with live TPS / TTFT
 
