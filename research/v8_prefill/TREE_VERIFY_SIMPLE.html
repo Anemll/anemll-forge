@@ -52,13 +52,13 @@ th { color: var(--muted); font-weight: 600; }
 .links a { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; text-decoration: none; }
 .links a b { display: block; color: var(--ink); } .links a span { color: var(--muted); font-size: .9rem; }
 footer { margin-top: 40px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 14px; }
-</style>
+.motion-index{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px auto;text-align:left}.motion-index a{display:grid;align-content:start;gap:4px;font:600 clamp(12px,2vw,16px)/1.3 system-ui,sans-serif}.motion-index img{width:100%;height:auto;border:1px solid #bfcecb;border-radius:6px}.motion-index a:focus-visible{outline:3px solid #276d95;outline-offset:2px}</style>
 </head>
 <body>
 <main>
 <span class="tag">ANEMLL Forge research · 22 Nov 2026 · the short version</span>
 <h1>Tree verification for hybrid ANE + GPU on Apple M6, simply</h1>
-<img src="tree-verify-cover.png" width="1200" alt="A token tree above the Apple Neural Engine and GPU" style="display:block;max-width:100%;height:auto;margin:1em auto">
+<img src="tree-verify-cover.png" width="1200" alt="A token tree above the Apple Neural Engine and GPU" style="display:block;max-width:100%;height:auto;margin:1em auto"><nav aria-label="Animations" class="motion-index"><a href="#token-walk"><img src="tree8-token-walk-thumb.png" width="420" height="234" alt=""><span>Token walkthrough</span></a><a href="#ane-verify"><img src="tree8-inside-ane-thumb.png" width="420" height="234" alt=""><span>Inside the ANE verifier</span></a><a href="#row-mask"><img src="tree8-row-mask-thumb.png" width="420" height="234" alt=""><span>Mask each row</span></a></nav>
 <p class="lede" style="margin-top:-.2em"><b>Checking more guesses in the same 8 rows.</b> By Anemll (<a href="mailto:realanemll@gmail.com">realanemll@gmail.com</a>).</p>
 <p class="lede">A plain-language companion to the paper
 <a href="https://huggingface.co/blog/anemll/tree-speculative-decoding-apple-m6">Tree Speculative Decoding on a Split ANE + GPU Target</a> (on Hugging Face; also
@@ -161,7 +161,7 @@ layer group (we call it <code>corrx0</code>). On plain chains it reproduces the 
 <label class="rm-timeline"><span>Query row</span><input class="rm-slider" type="range" min="0" max="7" step="1" value="5"><output class="rm-position" aria-hidden="true">5 / 7</output></label>
 <button class="rm-play" type="button">▶ Play</button><button class="rm-prev" type="button" aria-label="Previous query row">← Previous</button><button class="rm-next" type="button" aria-label="Next query row">Next →</button></div>
 <figcaption>The grid covers the eight rows in this verify call. Every row can also read the cached prefix. The target checks all eight together. The animation highlights them one at a time so you can read the mask. <a id="mask-gif-link" href="tree8-row-mask.gif">View as a looping GIF</a>.</figcaption>
-</figure>
+<details><summary>Watch the mask walkthrough as a video</summary><video controls playsinline preload="none" poster="tree8-row-mask-thumb.png" style="width:100%;height:auto" aria-label="Attention mask for rows zero through seven"><source src="tree8-row-mask.mp4" type="video/mp4"><a href="tree8-row-mask.mp4">Open the mask video</a></video></details></figure>
 <script>(() => {
   const figure = document.currentScript.previousElementSibling;
   const rows = [...figure.querySelectorAll('tbody tr')];
@@ -260,7 +260,7 @@ layer group (we call it <code>corrx0</code>). On plain chains it reproduces the 
 on the GPU between Neural Engine calls; the GPU kernel applies the same mask. When the 7 nodes happen to form a single
 line, the server skips the tree entirely and runs the ordinary chain check, so confident stretches pay nothing extra.</p>
 
-<figure>
+<figure id="ane-verify">
 <video controls playsinline preload="metadata" width="1120" height="652" style="display:block;width:100%;height:auto" aria-label="Inside Forge’s eight-row ANE verifier" aria-describedby="ane-verify-caption">
 <source src="tree8-inside-ane.mp4" type="video/mp4">
 <a href="tree8-inside-ane.mp4">Watch the eight-row verification pass</a>
@@ -286,8 +286,8 @@ code takes over, so nothing downstream had to change.</p>
 <figcaption>The accepted branch 0 → 2 → 4 → 5 becomes slots 0 to 3; the other rows are dropped.</figcaption>
 </figure>
 
-<figure>
-<details>
+<figure id="token-walk">
+<details open>
 <summary>Play the token walkthrough</summary>
 <img src="tree8-token-walk.gif" width="960" height="548" style="max-width:100%;height:auto" alt="Seven draft tokens move into a tree. The target follows rows 0, 2, 4 and 5, and their state moves into four consecutive slots.">
 </details>
