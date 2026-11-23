@@ -31,6 +31,8 @@ tags:
   `code/anemll-forge/research/v8_prefill/hf/DEPLOY.md`).
 - **For coding agents:** [AGENTS.md](AGENTS.md): rules and the staged script `hf/agent_deploy.sh` (check, download,
   venv, bridge, compile, engines, tables, serve, smoke) with exit codes, including when a person must act.
+- **Short illustrated explainer:** [EXPLAINER_ANE_GPU_M6.html](code/anemll-forge/research/v8_prefill/EXPLAINER_ANE_GPU_M6.html)
+  (plain language; open it in a browser), with links to the full article and the paper.
 - **Tree verification write-up:** [TREE_VERIFY.md](code/anemll-forge/research/v8_prefill/TREE_VERIFY.md): the tree8
   drafter / verifier on the Neural Engine and GPU, what is new, measurements, what did not work.
 - **Article:** [One model, two accelerators](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/ARTICLE_ANE_GPU_M6.md): why, results against splash 1.3.2, how

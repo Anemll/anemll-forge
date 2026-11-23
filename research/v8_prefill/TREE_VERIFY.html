@@ -594,7 +594,13 @@ Trees (<a href="https://arxiv.org/abs/2611.11371">arXiv:2611.11371</a>); TreeSpa
 <li>Build <code>v8_dec8ts</code> (the served entries + tree entries + sliced entries, one set of weights), GPU tables <code>pipe/w_dec8ts</code>.</li>
 <li>Environment: <code>TREE=1</code>, <code>TREE_POLICY=branched</code>, <code>TREE_TOPC=4</code>, <code>TREE_TAU=1.5</code>, <code>TREE_SAMPLED=1</code>,
 <code>RUNG_SLICE=24,40,48,56</code>, <code>DRAFT_RING_SNAP=fix</code>, <code>QKE=tg</code>, <code>NGRAM_DRAFT=0</code>.</li>
+<li>GPU engines: <code>libgpu_v8_f8q.dylib</code> (prefill mixers and attention) and <code>libdec_gpu_tree.dylib</code> (split-verify
+attention with ancestor masks). Their KV-wrap memory fix (<code>libgpu_v8_f8q_uw.dylib</code>, <code>libdec_gpu_tree_uw.dylib</code>,
+built by <code>pipe/engine/build_engines.sh uw</code>) has served since 22 Nov 18:20 through <code>V8_SRV_DYLIB</code> / <code>DEC_DYLIB</code>
+(replies identical; <code>results/22nov/memleak</code>). Forge&#x27;s own memory watchdog (<code>tools/forge_watchdog.sh</code>, 12,288 MB).</li>
 <li>Rollbacks: <code>SERVED_SLICE=0</code> (tree8 on <code>v8_dec8tx</code> without sliced entries), <code>SERVED_TREE=0</code> (the 19-20 Nov chain).</li>
+<li>On another Mac: <a href="hf/DEPLOY.md">hf/DEPLOY.md</a> (build, deploy, test; the portable launcher <code>hf/serve_v8_96k.sh</code> and
+the GPU-table kit) and <a href="hf/AGENTS.md">hf/AGENTS.md</a> (the same as staged steps for coding agents).</li>
 </ul>
 <h2 id="appendix-b-code">Appendix B: code</h2>
 <ul>
@@ -602,7 +608,8 @@ Trees (<a href="https://arxiv.org/abs/2611.11371">arXiv:2611.11371</a>); TreeSpa
 <li><code>pipe/rung_slice.py</code>: sliced entries.</li>
 <li><code>pipe/dec_split.py</code>: the ANE + GPU split verify.</li>
 <li><code>v8/build_dec8t_chunk.py</code>: tree and sliced entry builder (<code>TREE_FORM=corrx0</code>, <code>TREE_SLICED</code>).</li>
-<li><code>bench/tree/</code>: prompt sets, <code>tree_bench.py</code>, <code>run_arm.sh</code>, compare scripts.</li>
+<li><code>bench_tree/</code>: prompt sets (including <code>smoke_2k_v1.json</code>), <code>tree_bench.py</code>, <code>run_arm.sh</code>, compare scripts.</li>
+<li><code>pipe/gpu_tables_kit.py</code>, <code>pipe/build_gpu_tables.sh</code>, <code>pipe/engine/build_engines.sh</code>, <code>hf/</code>: deployment.</li>
 <li><code>pipe/unit/power/tree_dyn2.py</code>, <code>t4_replay_sim.py</code>: offline tree and lookup replay.</li>
 </ul>
 <section id="claim-audit" aria-label="Claim audit"><h2>Evidence for the tree-verification claims</h2>

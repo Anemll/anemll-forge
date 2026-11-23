@@ -4,7 +4,7 @@
 Version 1 (November 17) covered V8 against Splash 1.3.2. A research build, separate from the release: it needs SIP
 turned off ([why](#research-environment-restrictions-why-it-needs-sip-off-and-root-permission-for-weights)).*
 
-**22 November follow-up.** The served eight-row tree now has direct comparisons with the eight-row chain. The illustrated paper includes both launch orders, the tool-agent regression, and the fixed-spine replay. [Read the tree-verification paper](TREE_VERIFY.html)
+**22 November follow-up.** The served eight-row tree now has direct comparisons with the eight-row chain. The illustrated paper includes both launch orders, the tool-agent regression, and the fixed-spine replay. [Read the tree-verification paper](TREE_VERIFY.html) Since 22 Nov the server also uses sliced verify entries at 24K / 40K / 48K / 56K (+3.4% pooled over a 19-turn Pi-like session, identical replies), and a fix for a GPU-engine memory leak at context switches (`results/22nov/memleak`). The build, a portable GPU-table kit and the build, deploy and test steps for another Mac: [hf/DEPLOY.md](hf/DEPLOY.md). [A shorter illustrated explainer](EXPLAINER_ANE_GPU_M6.html)
 
 ![One model, two accelerators: how the Neural Engine and GPU share the work on M6](img/01-one-model-two-accelerators.png)
 
@@ -588,22 +588,24 @@ Everything is on the ANEMLL Forge research branch `v8-gpu-ane-prefill`, in
 | step | where |
 |---|---|
 | Set up the Python and Core AI environment | [main README, section 1](../../README.md#1-set-up-the-inference-environment) |
-| Download the packages, drafter and model files | Hugging Face [anemll/anemll-forge-qwen3.8-27B-V8-96K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K) (research preview; being updated to the SPLIT+GPU build) |
+| Download the packages, drafter and model files | Hugging Face [anemll/anemll-forge-qwen3.8-27B-V8-96K](https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K) (research preview): `coreai/m6-96k-dec8ts` (tree8 + sliced), `gpu/w_dec8ts` (the GPU-table kit), drafter, model files and a code snapshot |
 | Turn SIP off and grant read access to the compiled weights | [Requirements: root and SIP](README.md#requirements-root-and-sip) |
-| Compile the packages, build the GPU tables and the GPU engine libraries | [Build chain](README.md#build-chain) (steps 3 to 6) |
-| Start the server (OpenAI API on port 8765) | V8.2: [`pipe/v8_server_dec8_qk.sh`](pipe/v8_server_dec8_qk.sh) (`F8=x`, `QKE=tg`, decode keep-alive). Options, request flow and results: [Run](README.md#run) and [the server notes](pipe/V8_SERVER.md) |
-| Point Pi at it | [main README, section 5](../../README.md#5-apply-the-pi-configuration-patches) (provider `ane-qwen38`, port 8765) |
+| Compile the packages, install the GPU tables, build the GPU engine libraries | [hf/DEPLOY.md](hf/DEPLOY.md), sections 4 and 5 (for coding agents: [hf/AGENTS.md](hf/AGENTS.md) and `hf/agent_deploy.sh`). How the builds were made: [Build chain](README.md#build-chain) |
+| Start the server (OpenAI API on port 8765) | On another Mac: `hf/serve_v8_96k.sh` (DEPLOY.md, section 6). On the development M6: [`pipe/v8_server_dec8_qk.sh`](pipe/v8_server_dec8_qk.sh) (tree8, sliced entries, `F8=x`, `QKE=tg`, decode keep-alive). Options, request flow and results: [Run](README.md#run) and [the server notes](pipe/V8_SERVER.md) |
+| Point Pi at it, with live tok/s and TTFT | `examples/pi/install_pi_v8_96k.py` (DEPLOY.md, section 7b; provider `ane-qwen38`, port 8765) |
 | Measure | V8.2 against Splash 1.7.0: [`scripts/m6_compare_bench.py`](../../scripts/m6_compare_bench.py) and [`compare_cool.sh`](results/19nov/splash170_cool/compare_cool.sh) (speed, power, temperatures). The V8 baseline: `pipe/unit/cmp_bench.py` and `splash132/cmp_96k.sh`, and `bench/cron/` (the coding prompt and its hidden grader) |
 
-**Today's limits.** Every input is public, but the path is not yet push-button. The GPU tables are built on your Mac
-from your own compiled Neural Engine programs (which is why SIP must be off), the HWX parser of
-[freedomtan/coreml_to_ane_hwx](https://github.com/freedomtan/coreml_to_ane_hwx) and the public release 0.2 export in
-[anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI): the matrices in `export/release_vq3pA_mixh_s600_k1_mat/` (byte-identical to the files this build was made from)
-and the small tensors in `model/`. What is missing: the research scripts use the development machine's absolute paths
-(listed in the [research README](README.md)), the table step needs the builder environment (torch and the Core AI
-Python tools), and the path has not been tested on another machine. A portable kit is the next step: a launcher that
-takes the download folder, our tables shipped with a check against the local compile (so a matching compile skips the
-rebuild), and a Pi configuration entry.
+**Today's limits.** Every input is public, and since 22 Nov the deployment path is scripted
+([hf/DEPLOY.md](hf/DEPLOY.md)): a launcher that takes the download folder, our GPU tables shipped with a sha256 of
+each compiled Neural Engine program (when your compile matches, they install in seconds; on the development M6 the
+installed tables are byte-identical to the served ones), and a Pi installer. The tables point into your own compiled
+programs, which is why SIP must be off. When your compile differs (another macOS build), they are rebuilt from the
+public release 0.2 export in
+[anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI)
+(`export/release_vq3pA_mixh_s600_k1_mat/`, byte-identical to the files this build was made from, and the small tensors
+in `model/`), which needs the builder environment (torch and the Core AI Python tools). Still missing: the path has
+not been tested on a second Mac, and the research scripts outside it use the development machine's absolute paths
+(listed in the [research README](README.md)).
 
 ## Lessons that carry over
 

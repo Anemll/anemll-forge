@@ -452,7 +452,13 @@ We also tried the proposed **early-confidence fallback** at one threshold chosen
 - Build `v8_dec8ts` (the served entries + tree entries + sliced entries, one set of weights), GPU tables `pipe/w_dec8ts`.
 - Environment: `TREE=1`, `TREE_POLICY=branched`, `TREE_TOPC=4`, `TREE_TAU=1.5`, `TREE_SAMPLED=1`,
   `RUNG_SLICE=24,40,48,56`, `DRAFT_RING_SNAP=fix`, `QKE=tg`, `NGRAM_DRAFT=0`.
+- GPU engines: `libgpu_v8_f8q.dylib` (prefill mixers and attention) and `libdec_gpu_tree.dylib` (split-verify
+  attention with ancestor masks). Their KV-wrap memory fix (`libgpu_v8_f8q_uw.dylib`, `libdec_gpu_tree_uw.dylib`,
+  built by `pipe/engine/build_engines.sh uw`) has served since 22 Nov 18:20 through `V8_SRV_DYLIB` / `DEC_DYLIB`
+  (replies identical; `results/22nov/memleak`). Forge's own memory watchdog (`tools/forge_watchdog.sh`, 12,288 MB).
 - Rollbacks: `SERVED_SLICE=0` (tree8 on `v8_dec8tx` without sliced entries), `SERVED_TREE=0` (the 19-20 Nov chain).
+- On another Mac: [hf/DEPLOY.md](hf/DEPLOY.md) (build, deploy, test; the portable launcher `hf/serve_v8_96k.sh` and
+  the GPU-table kit) and [hf/AGENTS.md](hf/AGENTS.md) (the same as staged steps for coding agents).
 
 ## Appendix B: code
 
@@ -460,5 +466,6 @@ We also tried the proposed **early-confidence fallback** at one threshold chosen
 - `pipe/rung_slice.py`: sliced entries.
 - `pipe/dec_split.py`: the ANE + GPU split verify.
 - `v8/build_dec8t_chunk.py`: tree and sliced entry builder (`TREE_FORM=corrx0`, `TREE_SLICED`).
-- `bench/tree/`: prompt sets, `tree_bench.py`, `run_arm.sh`, compare scripts.
+- `bench_tree/`: prompt sets (including `smoke_2k_v1.json`), `tree_bench.py`, `run_arm.sh`, compare scripts.
+- `pipe/gpu_tables_kit.py`, `pipe/build_gpu_tables.sh`, `pipe/engine/build_engines.sh`, `hf/`: deployment.
 - `pipe/unit/power/tree_dyn2.py`, `t4_replay_sim.py`: offline tree and lookup replay.
