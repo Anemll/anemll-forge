@@ -323,11 +323,6 @@ GPU runs the token mixers (DeltaNet and attention) from the same weights in memo
   between two Neural Engine calls whose programs are the same for every context length: the decode cycle drops from
   153 to 141 ms at 64K (8% faster) and from 155 to 149 ms at 95K (4%). Up to 32K, where the Neural Engine's attention
   is already short, decode is unchanged.
-- **Tree verification (21 to 22 Nov).** The verifier checks a tree of the drafter's best 7 continuations in one 8-row
-  Neural Engine call (tree8) instead of a single chain, for greedy and sampled requests: 2K 45.80 against 42.74 tok/s
-  for the chain, sampled (Pi-like) requests +8.5%. Sliced verify entries at 24K / 40K / 48K / 56K attend only over the
-  KV prefix in use: +3.4% over a 19-turn Pi-like session (+5.7% at 32K to 57K), identical replies. Write-up:
-  [TREE_VERIFY.md](research/v8_prefill/TREE_VERIFY.md).
 - **Deploy.** The served build (`coreai/m6-96k-dec8ts`) with a portable GPU-table kit and the build, deploy and test
   steps: [research/v8_prefill/hf/DEPLOY.md](research/v8_prefill/hf/DEPLOY.md).
 
@@ -347,6 +342,36 @@ ships the development M6's tables with a hash of each compiled program and insta
 matches (same macOS build); otherwise, and after every recompile (a macOS update or a cache purge), they are rebuilt
 from the public export. Other chips are not supported. Commands and
 details: [Requirements: root and SIP](research/v8_prefill/README.md#requirements-root-and-sip).
+
+### Tree verification (tree8, M6)
+
+Decoding is speculative: the DFlash2 drafter proposes a block of 7 tokens per cycle on the Neural Engine (16
+candidates per position), and one 8-row target call verifies them. Tree verification (tree8, served since 21 Nov)
+keeps those 8 rows but fills them with a tree instead of one chain:
+
+- **The tree.** Row 0 is the anchor; the other 7 rows are the drafter's most probable continuations, chosen best first
+  on path probability (up to 4 children per node). Each row attends to the KV history and to its own ancestors only.
+  A draft with a single path runs on the served chain entry; only a fork pays for the tree entry (ancestor masks and
+  the `corrx0` DeltaNet short-convolution correction, which keeps chain replies bit-identical: 45/45).
+- **The accepted path** is committed through the existing chain routine: the selected DeltaNet pending state and
+  convolution rows are packed, the new KV rows compacted and the drafter's features gathered in path order. Sampled
+  requests (Pi, temperature 1.0) accept child by child with the chain's rejection rule.
+- **Across both engines.** At the 96K entry the verification's attention runs on the GPU between Neural Engine calls,
+  and the Metal kernel applies the same ancestor mask.
+- **Sliced KV widths (22 Nov).** Verify entries at 24K / 40K / 48K / 56K bind the KV segments of the next larger
+  entry and attend only over the prefix in use (logits identical on 471 checked calls).
+
+| measurement (M6, client tok/s) | result |
+|---|---|
+| greedy, 2K to 64K rungs | +1.9% to +6.5% over the chain (2K: 45.80 against 42.74) |
+| sampled (Pi-like), two 36-request blocks | +8.5% and +10.2% pooled; tool-agent subset -1.6% / -3.9% |
+| sliced widths, 19-turn Pi-like session (8.6K to 55.5K) | +3.4% pooled (+2.5% without one slow baseline seed; +5.7% at 32K to 57K), 152 of 152 replies identical |
+
+Wider trees do not pay on the Neural Engine: 16 or 32 verify rows cost +26-39% or +87-116% per call, and timing probes
+with replay put the best wider tree only 1.6% ahead at 8K. Also measured and not kept: per-cycle tree / chain choice, prompt
+lookup for Pi, JetSpec++ (projected 12-46% slower on the serial schedule), drafting ahead during the verify, and
+rescoring the tree. Switches: `TREE=0` serves the chain, `RUNG_SLICE=` (empty) the build without slicing. Write-up,
+prior art and every result: [research/v8_prefill/TREE_VERIFY.md](research/v8_prefill/TREE_VERIFY.md); deployment: [research/v8_prefill/hf/DEPLOY.md](research/v8_prefill/hf/DEPLOY.md).
 
 ## Contributing
 

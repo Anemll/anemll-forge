@@ -92,7 +92,37 @@ This is a research preview, not a release:
 - **M6 only** (FP8 attention), 32 GB of memory, macOS 27.3 (the kit's tables: build 26C5047e). Tested only on the
   M6 that made it.
 
-## Measured (M6, 32 GB, macOS 27.3)
+## Tree verification
+
+Decoding is speculative: the DFlash2 drafter proposes a block of 7 tokens per cycle on the Neural Engine (16
+candidates per position), and one 8-row target call verifies them. Tree verification (tree8, served since 21 Nov)
+keeps those 8 rows but fills them with a tree instead of one chain:
+
+- **The tree.** Row 0 is the anchor; the other 7 rows are the drafter's most probable continuations, chosen best first
+  on path probability (up to 4 children per node). Each row attends to the KV history and to its own ancestors only.
+  A draft with a single path runs on the served chain entry; only a fork pays for the tree entry (ancestor masks and
+  the `corrx0` DeltaNet short-convolution correction, which keeps chain replies bit-identical: 45/45).
+- **The accepted path** is committed through the existing chain routine: the selected DeltaNet pending state and
+  convolution rows are packed, the new KV rows compacted and the drafter's features gathered in path order. Sampled
+  requests (Pi, temperature 1.0) accept child by child with the chain's rejection rule.
+- **Across both engines.** At the 96K entry the verification's attention runs on the GPU between Neural Engine calls,
+  and the Metal kernel applies the same ancestor mask.
+- **Sliced KV widths (22 Nov).** Verify entries at 24K / 40K / 48K / 56K bind the KV segments of the next larger
+  entry and attend only over the prefix in use (logits identical on 471 checked calls).
+
+| measurement (M6, client tok/s) | result |
+|---|---|
+| greedy, 2K to 64K rungs | +1.9% to +6.5% over the chain (2K: 45.80 against 42.74) |
+| sampled (Pi-like), two 36-request blocks | +8.5% and +10.2% pooled; tool-agent subset -1.6% / -3.9% |
+| sliced widths, 19-turn Pi-like session (8.6K to 55.5K) | +3.4% pooled (+2.5% without one slow baseline seed; +5.7% at 32K to 57K), 152 of 152 replies identical |
+
+Wider trees do not pay on the Neural Engine: 16 or 32 verify rows cost +26-39% or +87-116% per call, and timing probes
+with replay put the best wider tree only 1.6% ahead at 8K. Also measured and not kept: per-cycle tree / chain choice, prompt
+lookup for Pi, JetSpec++ (projected 12-46% slower on the serial schedule), drafting ahead during the verify, and
+rescoring the tree. Switches: `TREE=0` serves the chain, `RUNG_SLICE=` (empty) the build without slicing. Write-up,
+prior art and every result: [TREE_VERIFY.md](code/anemll-forge/research/v8_prefill/TREE_VERIFY.md); deployment: [DEPLOY.md](DEPLOY.md).
+
+## Measured: prefill and chain decode (M6, 32 GB, macOS 27.3, 16 to 17 Nov)
 
 The server at 96K context, DFlash2 drafter, greedy decoding, thinking off, the GPU otherwise idle. Times to the first
 streamed token at the client. A follow-up is the second turn of the same conversation (the model's own answer plus 300
@@ -117,21 +147,6 @@ off and the cycle is unchanged.
 How busy each unit is (share of wall time): in prefill both work at once, the Neural Engine 98% and the GPU 95 to 97%
 at 6K, the Neural Engine 72% and the GPU 96% at 64K, where the GPU's attention is the bottleneck. In decode they take
 turns: up to 64K the Neural Engine does all of it; at 95K the GPU takes about 21% of each cycle.
-
-**Tree verification and sliced entries (21 to 22 Nov, the build in `coreai/m6-96k-dec8ts`).** Served decode, client
-tok/s, same Mac ([TREE_VERIFY.md](code/anemll-forge/research/v8_prefill/TREE_VERIFY.md), section 4):
-
-| measurement | chain (8-row) | tree8 |
-|---|---|---|
-| 2K / code / agent sets, greedy (21 Nov) | 42.74 / 39.46 / 54.48 | 45.80 / 40.66 / 54.04 |
-| sampled requests (Pi-like, temperature 1.0), overall | | +8.5% (tok/verify 3.91 to 4.35) |
-
-| long Pi-like session (19 turns, 8.6K to 55.5K), tree8 | without sliced entries | with sliced entries |
-|---|---|---|
-| 8-16K / 16-32K / 32-57K | 39.60 / 36.15 / 29.64 | 40.09 / 37.13 / 31.33 |
-| all | 34.65 | 35.82 (+3.4%) |
-
-Replies of the sliced entries are identical to the unsliced ones (KL 0).
 
 A comparison with splash 1.3.2 on the same Mac, the decisions behind the design and every rejected variant:
 [the article](code/anemll-forge/research/v8_prefill/ARTICLE_ANE_GPU_M6.md) and

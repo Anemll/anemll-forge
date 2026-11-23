@@ -44,6 +44,36 @@ with `V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib DEC_DYLIB=libdec_gpu_tree_uw.dylib`).
 - [PREFILL_RESEARCH.md](PREFILL_RESEARCH.md): what was tried, what was kept or rejected and why, numbers, lessons.
 - [pipe/V8_SERVER.md](pipe/V8_SERVER.md): the server (run, options, request flow, results, KV8 findings).
 
+## Tree verification (tree8)
+
+Decoding is speculative: the DFlash2 drafter proposes a block of 7 tokens per cycle on the Neural Engine (16
+candidates per position), and one 8-row target call verifies them. Tree verification (tree8, served since 21 Nov)
+keeps those 8 rows but fills them with a tree instead of one chain:
+
+- **The tree.** Row 0 is the anchor; the other 7 rows are the drafter's most probable continuations, chosen best first
+  on path probability (up to 4 children per node). Each row attends to the KV history and to its own ancestors only.
+  A draft with a single path runs on the served chain entry; only a fork pays for the tree entry (ancestor masks and
+  the `corrx0` DeltaNet short-convolution correction, which keeps chain replies bit-identical: 45/45).
+- **The accepted path** is committed through the existing chain routine: the selected DeltaNet pending state and
+  convolution rows are packed, the new KV rows compacted and the drafter's features gathered in path order. Sampled
+  requests (Pi, temperature 1.0) accept child by child with the chain's rejection rule.
+- **Across both engines.** At the 96K entry the verification's attention runs on the GPU between Neural Engine calls,
+  and the Metal kernel applies the same ancestor mask.
+- **Sliced KV widths (22 Nov).** Verify entries at 24K / 40K / 48K / 56K bind the KV segments of the next larger
+  entry and attend only over the prefix in use (logits identical on 471 checked calls).
+
+| measurement (M6, client tok/s) | result |
+|---|---|
+| greedy, 2K to 64K rungs | +1.9% to +6.5% over the chain (2K: 45.80 against 42.74) |
+| sampled (Pi-like), two 36-request blocks | +8.5% and +10.2% pooled; tool-agent subset -1.6% / -3.9% |
+| sliced widths, 19-turn Pi-like session (8.6K to 55.5K) | +3.4% pooled (+2.5% without one slow baseline seed; +5.7% at 32K to 57K), 152 of 152 replies identical |
+
+Wider trees do not pay on the Neural Engine: 16 or 32 verify rows cost +26-39% or +87-116% per call, and timing probes
+with replay put the best wider tree only 1.6% ahead at 8K. Also measured and not kept: per-cycle tree / chain choice, prompt
+lookup for Pi, JetSpec++ (projected 12-46% slower on the serial schedule), drafting ahead during the verify, and
+rescoring the tree. Switches: `TREE=0` serves the chain, `RUNG_SLICE=` (empty) the build without slicing. Write-up,
+prior art and every result: [TREE_VERIFY.md](TREE_VERIFY.md); deployment: [hf/DEPLOY.md](hf/DEPLOY.md).
+
 ## Requirements: root and SIP
 
 Core AI is not designed to run one model on the Neural Engine and the GPU at the same time: it gives the GPU no access

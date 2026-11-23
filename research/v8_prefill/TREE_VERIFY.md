@@ -37,8 +37,9 @@ These results apply to the recorded 32 GB M6, macOS 27.2/27.3, build and workloa
   draft-ahead; the drafter's inputs do not (Section 5.3).
 - **Memory at a context-entry switch.** On fresh launches, the 32K -> 64K switch added 1.06 GB of KV buffers
   (IOSurface) on both the sliced and the unsliced build, with swap flat; forge peaked at 6.6 GB over a 55.5K session.
-  The sliced build costs about 75 MB more. A 22 Nov watchdog kill came after 93 requests on one process, from state
-  accumulated over many turns, not from the switch.
+  The sliced build costs about 75 MB more. A 22 Nov watchdog kill (14.3 GB after 93 requests on one process) was a leak, not
+  the switch: the GPU engines kept the Metal wraps of KV segments freed at every context reset (+1.8 GB per cycle).
+  Fixed the same day; the footprint stays flat over alternating cold 2K / 56K requests (`results/22nov/memleak`).
 - **GPU clock hold on split decode.** Between short attention bursts the GPU ran at 502 MHz in the GPU-only test and about 860 MHz in the server. Keeping one SIMD group busy held 1735 MHz and took the split verify from 138.2 to 122.4 ms over four on/off pairs at 66–70K tokens, at +2.1 W combined. The served policy used a 60 ms hold. The ordinary ANE-only verify does not use this route.
 - **Cross-engine ordering.** A serial GPU round trip added about 0.65 ms beyond the kernel in the recorded probe. The tested Core AI compute stream on 27.3 failed to enforce the required cross-engine ordering, so the split runtime orders those operations on the host. A separate probe at drafter shapes stalled before producing a usable join timing.
 - **Concurrent calls to one function.** In the experimental prefill schedule, overlapping the same `ffn2_L` function with different bindings corrupted outputs. A per-function lock restored exact output in that test. Other functions and runtime releases require separate tests.
