@@ -31,7 +31,7 @@ tags:
   `code/anemll-forge/research/v8_prefill/hf/DEPLOY.md`).
 - **For coding agents:** [AGENTS.md](AGENTS.md): rules and the staged script `hf/agent_deploy.sh` (check, download,
   venv, bridge, compile, engines, tables, serve, smoke) with exit codes, including when a person must act.
-- **Tree verification, simply:** [TREE_VERIFY_SIMPLE.html](code/anemll-forge/research/v8_prefill/TREE_VERIFY_SIMPLE.html)
+- **Tree verification for hybrid ANE + GPU on Apple M6, simply:** [TREE_VERIFY_SIMPLE.html](code/anemll-forge/research/v8_prefill/TREE_VERIFY_SIMPLE.html)
   (plain language, illustrated; open it in a browser), the short companion to the paper.
 - **Tree verification write-up:** [TREE_VERIFY.md](code/anemll-forge/research/v8_prefill/TREE_VERIFY.md): the tree8
   drafter / verifier on the Neural Engine and GPU, what is new, measurements, what did not work.

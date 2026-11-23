@@ -1,8 +1,8 @@
 # Tree Speculative Decoding on a Split ANE + GPU Target: Qwen3.8-27B on Apple M6
 
-ANEMLL forge research notes, 20 to 22 November 2026. M6 runs are archived under `research/v8_prefill/results/{17,18,19,20,21,22}nov/`. Replay estimates and literature comparisons are identified separately.
+ANEMLL forge research notes, 20 to 22 November 2026. Author: Anemll (realanemll@gmail.com). M6 runs are archived under `research/v8_prefill/results/{17,18,19,20,21,22}nov/`. Replay estimates and literature comparisons are identified separately.
 
-**Short version:** [Tree verification, simply](TREE_VERIFY_SIMPLE.html) (plain language, illustrated).
+**Short version:** [Tree verification for hybrid ANE + GPU on Apple M6, simply](TREE_VERIFY_SIMPLE.html) (plain language, illustrated).
 
 **Jump to:** [What's new](#whats-new) · [M6-specific findings](#m6-specific-findings) · [Related work](#8-related-work) ·
 [References](#references)
