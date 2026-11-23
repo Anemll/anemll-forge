@@ -323,6 +323,13 @@ GPU runs the token mixers (DeltaNet and attention) from the same weights in memo
   between two Neural Engine calls whose programs are the same for every context length: the decode cycle drops from
   153 to 141 ms at 64K (8% faster) and from 155 to 149 ms at 95K (4%). Up to 32K, where the Neural Engine's attention
   is already short, decode is unchanged.
+- **Tree verification (21 to 22 Nov).** The verifier checks a tree of the drafter's best 7 continuations in one 8-row
+  Neural Engine call (tree8) instead of a single chain, for greedy and sampled requests: 2K 45.80 against 42.74 tok/s
+  for the chain, sampled (Pi-like) requests +8.5%. Sliced verify entries at 24K / 40K / 48K / 56K attend only over the
+  KV prefix in use: +3.4% over a 19-turn Pi-like session (+5.7% at 32K to 57K), identical replies. Write-up:
+  [TREE_VERIFY.md](research/v8_prefill/TREE_VERIFY.md).
+- **Deploy.** The served build (`coreai/m6-96k-dec8ts`) with a portable GPU-table kit and the build, deploy and test
+  steps: [research/v8_prefill/hf/DEPLOY.md](research/v8_prefill/hf/DEPLOY.md).
 
 **Why it needs SIP off and root.** Core AI is not designed to run one model on the Neural Engine and the GPU at the
 same time: it gives the GPU no way to use the weights the Neural Engine already holds. Apple may support this in the
@@ -335,8 +342,10 @@ own kernels; a GPU copy would need another 10.8 GiB on a 32 GB Mac. That directo
 normal user cannot open it: one `sudo chmod +a` grants your user read access (an inherited ACL; nothing is written to
 the cache). The cache also has macOS's `datavault` flag, which System Integrity Protection enforces even against root,
 so SIP must be disabled (from macOS Recovery), which lowers the security of the whole Mac: use a dedicated research
-machine. The GPU tables point into the compiled files and match only the M6 compiler's output, so they
-are rebuilt after every recompile (a macOS update or a cache purge), and other chips are not supported. Commands and
+machine. The GPU tables point into the compiled files and match only the M6 compiler's output: the Hugging Face kit
+ships the development M6's tables with a hash of each compiled program and installs them when the local compile
+matches (same macOS build); otherwise, and after every recompile (a macOS update or a cache purge), they are rebuilt
+from the public export. Other chips are not supported. Commands and
 details: [Requirements: root and SIP](research/v8_prefill/README.md#requirements-root-and-sip).
 
 ## Contributing
