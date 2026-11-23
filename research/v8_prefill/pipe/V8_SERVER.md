@@ -235,9 +235,48 @@ visible Chrome tab (the WebGL page under test) and Screen Sharing kept the GPU a
 the M6 the GPU's load takes ANE speed (the shared power budget), and the V8 prefill's GPU work and K8V16 fills waited
 too (fills 65 to 368 ms instead of 31 to 58 ms, a cold 45K summary at 387 tok/s). Benchmarks need that GPU idle.
 
+## Engine build and the KV-wrap leak fix (22 Nov 2026)
+
+The GPU engines are Swift dylibs that the server loads with ctypes; their Metal kernels compile at load time.
+`engine/build_engines.sh` builds them (Xcode command line tools, `swiftc -O -emit-library`):
+
+```
+zsh engine/build_engines.sh uw                 # libgpu_v8_f8q_uw.dylib + libdec_gpu_tree_uw.dylib (the leak fix)
+OUT=/some/dir zsh engine/build_engines.sh all  # also the 19 Nov sources as *_rebuilt.dylib; OUT keeps engine/ untouched
+```
+
+Never rebuild a dylib in place while a forge has it loaded: build into OUT and copy while the server is stopped. The
+builds are not byte-reproducible (each has a new LC_UUID); the script prints each dylib's sha256 (the server banner
+shows its first 16 hex digits), size and source hash, and checks the exported C API.
+
+The leak: both engines wrap the ANE's KV segment buffers zero-copy (`makeBuffer(bytesNoCopy:)`, `v8_wrap` /
+`dec_wrap`) and kept every wrap. A context reset (every cold request, such as Pi's compaction calls) frees the large
+entry's segments and the next fit binds new ones, but the old Metal buffers kept the freed pages resident
+(footprint(1): "Owned physical footprint (unmapped)"). The served forge grew from 4.0 to 14.3 GB in 2.7 hours and
+forge_watchdog.sh killed it (22 Nov 16:30). The fix adds `v8_unwrap` / `v8_kv8_clear` and `dec_unwrap`;
+`v8_engine._register_segments` clears each attention layer's segments, registers the current ones and drops the
+previous wraps, and `dec_split._sync_kv` drops its previous wraps. With the 19 Nov dylibs (no new symbols) the Python
+side behaves as before.
+
+Serve it: `V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib DEC_DYLIB=libdec_gpu_tree_uw.dylib v8_server_dec8_qk.sh` (the launcher
+defaults still name the 19 Nov dylibs). Test: `serve_t/memleak_ab.sh` (ARMS="old new", CYCLES, BIG = long prompt
+tokens): a fresh launch per arm with the 2K smoke (checksum 29aef2ec9db18a3f), then cold 2K / long alternation with
+the footprint after each request; the server is stopped at the end.
+
+| run | 19 Nov dylibs (MB) | fixed (MB) |
+|---|---|---|
+| 2K / 56K x3 | 4546 -> 9986 (+1806 unmapped per cycle) | 4546 -> 4412 (flat: 4.4 / 6.2 GB) |
+| 2K / 70K x2 (96K entry, decode GPU path) | 4546 -> 10240 | 4546 -> 7474 |
+
+Replies identical old vs new (12 of 12), smoke matched in all launches (results/22nov/memleak). Left: after a 96K
+request a small one keeps that 96K KV set resident (about 2.8 GB) until the next 96K visit replaces it
+(`dec_split._sync_kv` runs only on the 96K entry); bounded, not a leak.
+
 ## Files
 
 - `v8_server.py`, `v8_server.sh`, `v8_server_plain.sh`, `v8_server_dec8.sh`, `srv_stop.sh`
+- `engine/build_engines.sh` (GPU engine dylibs), `engine/gpu_v8_f8q.swift` + `engine/dec_gpu_tree.swift` (served
+  engines; `*.pre_unwrap.swift` = the 19 Nov sources), `serve_t/memleak_ab.sh` + `serve_t/memleak_alt.py` (leak A/B)
 - `dec_split.py` (SPLIT+GPU: runtime patch to load each 8-layer package once, the split verify, KV sync to the GPU),
   `engine/dec_gpu.swift`, `engine/dec_kernels.metal`; checks `unit/dec8_srv_check.py`, `unit/dec8_real_check.py`
 - `v8_engine.py` (V8Prefill: run, snapshots, handover, sync, K8V16 fill, can_start)

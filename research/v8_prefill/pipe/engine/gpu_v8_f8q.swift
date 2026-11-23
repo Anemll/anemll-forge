@@ -4,6 +4,11 @@
 // gpu_v8_fold.swift (18 Nov 2026) = gpu_v8.swift (libgpu_v8_srv3) + the softmax folded into QK / PV on the KV8 + K8V16
 // path: kernels_fold.metal (next to V8_KERNELS) appended to the source; FOLD=64|64s|128 (PV chunk form), FOLD_MIN=keys
 // (fold a call only when it attends to at least that many keys); v8_fold(mode, min) changes both at run time.
+// 22 Nov 2026: v8_unwrap(h) / v8_kv8_clear(layer): the runtime drops the wraps of KV segments a context reset replaced
+// (every wrap was kept, so freed segments stayed resident: served forge 4.0 -> 14.3 GB, killed by its watchdog;
+// results/22nov/memleak). Build (engine/build_engines.sh uw):
+//   swiftc -O -emit-library -module-name gpuv8 -o libgpu_v8_f8q_uw.dylib gpu_v8_f8q.swift -framework Metal -framework Accelerate
+// gpu_v8_f8q.pre_unwrap.swift = the 19 Nov source of the launcher default libgpu_v8_f8q.dylib.
 // gpu_v8_f8q.swift (19 Nov 2026) = gpu_v8_f8.swift + kernels_qk.metal: QKE=tg runs Q.K as attn_qk8isk_tg (the same
 // INT8 Q.K, the scores stored through threadgroup memory as coalesced half4 rows; bit-identical). QKE unset = served.
 // gpu_v8_f8.swift (18 Nov 2026) = gpu_v8_fold.swift + FP8 P.V (kernels_f8.metal): F8=c (V copy = e4m3 INT8 codes,

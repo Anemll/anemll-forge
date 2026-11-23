@@ -14,5 +14,19 @@
 P=/Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe
 export PORT=${PORT:-8765} V8_SRV_DYLIB=${V8_SRV_DYLIB:-libgpu_v8_f8q.dylib} QKE=${QKE-tg} NGRAM_DRAFT=${NGRAM_DRAFT:-0} DRAFT_RING_SNAP=${DRAFT_RING_SNAP:-fix}
 [ "${SERVED_TREE:-1}" = 0 ] && exec $P/v8_server_dec8.sh "$@"
-export BUILD=${BUILD:-/Volumes/SSD4TB/anemll-forge-research/v8_dec8tx} GM=${GM:-$P/w_dec8tx/manifest_best.json} TREE=${TREE-1} TREE_SAMPLED=${TREE_SAMPLED:-1}
+# 22 Nov 2026 (Anemll, deploy): sliced decode entries served. Build v8_dec8ts (= v8_dec8tx + sliced chain/tree
+# entries, same weights, 81 functions per chunk) with RUNG_SLICE=24,40,48,56 (KV bound at the 32K/64K entries, attention
+# over the prefix only): long session +2.5% (+3.4% incl. one slow served set), replies identical, KL 0 (results/22nov,
+# step B). GPU tables w_dec8ts. Rollback: SERVED_SLICE=0 v8_server_dec8_qk.sh (the 21 Nov v8_dec8tx config; =
+# v8_server_dec8_qk.pre_slice4.sh). RUNG_SLICE= (empty) keeps this build without slicing.
+if [ "${SERVED_SLICE:-1}" = 0 ]; then
+  export BUILD=${BUILD:-/Volumes/SSD4TB/anemll-forge-research/v8_dec8tx} GM=${GM:-$P/w_dec8tx/manifest_best.json}
+else
+  export BUILD=${BUILD:-/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts} GM=${GM:-$P/w_dec8ts/manifest_best.json} RUNG_SLICE=${RUNG_SLICE-24,40,48,56}
+fi
+export TREE=${TREE-1} TREE_SAMPLED=${TREE_SAMPLED:-1}
+# 22 Nov 2026: KV-wrap leak fix (forge grew 1.8 GB per context shrink and grow; results/22nov/memleak): engine/
+# build_engines.sh uw builds libgpu_v8_f8q_uw.dylib + libdec_gpu_tree_uw.dylib; serve them with
+# V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib DEC_DYLIB=libdec_gpu_tree_uw.dylib v8_server_dec8_qk.sh (served this way since 18:20,
+# replies identical). The defaults at the top still name the 19 Nov dylibs until Anemll approves the switch.
 exec $P/v8_server_tree.sh "$@"

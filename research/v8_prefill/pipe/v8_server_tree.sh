@@ -21,5 +21,11 @@ env MODEL=$B/model SILU=tanh MLP_SILU=tanh GDN_SQ=16 GDN_SV=64 MLP_DS=1 MLP_DS_D
     --runtime coreai --kv-cache-dtype auto --draft $B/drafter/all3/dflash2_lut4_gptq_nohead.aimodel --drafter $B/drafter/all3 \
     > $L/v8_server.log 2>&1 &
 G=$!; echo "server pid $G (port $PORT, log $L/v8_server.log)"
-/Volumes/SSD4TB/anemll-forge-research/tools/swap_watchdog.sh $G 1536 $L/watchdog_v8_server.log >/dev/null 2>&1 &
+# 22 Nov 2026 (Anemll): forge's own memory guard (footprint, not system swap: another job's swap killed forge at
+# 07:04 and a 64K entry switch at 11:59). FORGE_WD=swap: the old system-swap guard (+1536 MB).
+if [ "${FORGE_WD:-own}" = swap ]; then
+  /Volumes/SSD4TB/anemll-forge-research/tools/swap_watchdog.sh $G 1536 $L/watchdog_v8_server.log >/dev/null 2>&1 &
+else
+  /Volumes/SSD4TB/anemll-forge-research/tools/forge_watchdog.sh $G ${FORGE_FP_MAX_MB:-12288} $L/watchdog_v8_server.log >/dev/null 2>&1 &
+fi
 wait $G

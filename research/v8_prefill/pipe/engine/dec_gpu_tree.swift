@@ -1,3 +1,6 @@
+// 22 Nov 2026: dec_unwrap(h): the runtime (dec_split._sync_kv) drops the wraps of replaced KV segments (results/22nov/memleak).
+//   swiftc -O -emit-library -module-name dec_gpu_tree -o libdec_gpu_tree_uw.dylib dec_gpu_tree.swift -framework Metal
+// (engine/build_engines.sh uw). dec_gpu_tree.pre_unwrap.swift = the source of the launcher default libdec_gpu_tree.dylib.
 // dec_gpu_tree.swift (20 Nov 2026): dec_gpu_clk.swift + dec_set_tree (per-row ancestor masks; with dec_kernels_tree.metal).
 //   swiftc -O -emit-library -module-name dec_gpu_tree -o libdec_gpu_tree.dylib dec_gpu_tree.swift -framework Metal
 // dec_gpu_clk.swift (18 Nov 2026): engine/dec_gpu.swift (the served libdec_gpu.dylib, unchanged) + a GPU clock

@@ -291,3 +291,14 @@ at its first launch (labels reused from the 12:12 run; the bench refuses to over
    - With the A1 hit rates (B = 4: 0.42-0.47, B = 8: 0.53-0.57) and a 13 ms draft phase: B = 8 hides about 7.2 ms for
      +2.6-3.0 ms of verify, net about +4.2-4.6 ms of a 110-127 ms cycle, **about +3.5-4%** (estimate), if features that
      stop at the anchor do not cost acceptance. That is the parked `dflash_stale_replay.py` (needs a forge-stop window).
+
+## Forge KV-wrap leak: found, fixed, served with the fix (16:30 to 18:20)
+
+`memleak/README.md`, `serve_t/memleak_ab.sh`, `serve_t/memleak_alt.py`, raw files `memleak/`, `bench/memleak_*`.
+The served forge was killed by forge_watchdog.sh at 16:30 (14336 MB > 12288 MB). Cause: the GPU engines kept every
+zero-copy Metal wrap of the ANE KV segments, so the segments a context reset freed stayed resident (+1806 MB per
+cold 56K request after a reset). Fix: `libgpu_v8_f8q_uw.dylib` + `libdec_gpu_tree_uw.dylib` (`engine/build_engines.sh
+uw`; `pipe/V8_SERVER.md`, "Engine build and the KV-wrap leak fix"). A/B: 2K / 56K x3 old 4546 -> 9986 MB, new flat
+(4412); 2K / 70K x2 old 4546 -> 10240 MB, new 7474 MB; smoke 29aef2ec9db18a3f in all launches, replies identical.
+Restarted at 18:20 (Anemll: "run fixed") with `V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib DEC_DYLIB=libdec_gpu_tree_uw.dylib`
+for that launch only: smoke MATCH, 4.5 GB; the launcher defaults still name the 19 Nov dylibs.
