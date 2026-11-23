@@ -4,7 +4,7 @@
 Version 1 (November 17) covered V8 against Splash 1.3.2. A research build, separate from the release: it needs SIP
 turned off ([why](#research-environment-restrictions-why-it-needs-sip-off-and-root-permission-for-weights)).*
 
-**22 November follow-up.** The served eight-row tree now has direct comparisons with the eight-row chain. The illustrated paper includes both launch orders, the tool-agent regression, and the fixed-spine replay. [Read the tree-verification paper](TREE_VERIFY.html) Since 22 Nov the server also uses sliced verify entries at 24K / 40K / 48K / 56K (+3.4% pooled over a 19-turn Pi-like session, identical replies), and a fix for a GPU-engine memory leak at context switches (`results/22nov/memleak`). The build, a portable GPU-table kit and the build, deploy and test steps for another Mac: [hf/DEPLOY.md](hf/DEPLOY.md). [A shorter illustrated explainer](EXPLAINER_ANE_GPU_M6.html)
+**22 November follow-up.** The served eight-row tree now has direct comparisons with the eight-row chain. The illustrated paper includes both launch orders, the tool-agent regression, and the fixed-spine replay. [Read the tree-verification paper](TREE_VERIFY.html) Since 22 Nov the server also uses sliced verify entries at 24K / 40K / 48K / 56K (+3.4% pooled over a 19-turn Pi-like session, identical replies), and a fix for a GPU-engine memory leak at context switches (`results/22nov/memleak`). The build, a portable GPU-table kit and the build, deploy and test steps for another Mac: [hf/DEPLOY.md](hf/DEPLOY.md). [Tree verification, simply](TREE_VERIFY_SIMPLE.html) (a plain-language version)
 
 ![One model, two accelerators: how the Neural Engine and GPU share the work on M6](img/01-one-model-two-accelerators.png)
 

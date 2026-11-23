@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tree Verification, Simply</title>
+<meta name="description" content="A plain-language companion to the paper Tree Speculative Decoding on a Split ANE + GPU Target: how Qwen3.8-27B on an Apple M6 checks a tree of guesses in the same 8 rows, and what it bought.">
+<style>
+:root {
+  --bg: #fbfaf7; --card: #ffffff; --ink: #1b2733; --muted: #5a6772; --line: #dfe3e2;
+  --ane: #0b6e5c; --gpu: #b4581d; --accent: #2f5fa8; --soft-ane: #e3f1ed; --soft-gpu: #f8e9de; --soft-acc: #e6edf8;
+  --ok: #0b6e5c; --no: #a33a3a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161a; --card: #1a2026; --ink: #e7ecef; --muted: #a2adb5; --line: #2c353d;
+    --ane: #4fc3a8; --gpu: #f0965a; --accent: #8fb0ea; --soft-ane: #17312b; --soft-gpu: #3a2518; --soft-acc: #1d2a3d;
+    --ok: #4fc3a8; --no: #ee8a8a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161a; --card: #1a2026; --ink: #e7ecef; --muted: #a2adb5; --line: #2c353d;
+  --ane: #4fc3a8; --gpu: #f0965a; --accent: #8fb0ea; --soft-ane: #17312b; --soft-gpu: #3a2518; --soft-acc: #1d2a3d;
+  --ok: #4fc3a8; --no: #ee8a8a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", Arial, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: clamp(1.7rem, 5vw, 2.4rem); line-height: 1.15; margin: 0 0 .4em; letter-spacing: -.01em; }
+h2 { font-size: 1.3rem; margin: 2.2em 0 .5em; }
+p { margin: .6em 0; }
+a { color: var(--accent); }
+.lede { color: var(--muted); font-size: 1.05rem; }
+.tag { display: inline-block; font-size: .78rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; margin-bottom: 14px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.stat b { display: block; font-size: 1.6rem; line-height: 1.1; }
+.stat span { color: var(--muted); font-size: .9rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin: 16px 0; }
+.ane { color: var(--ane); font-weight: 600; } .gpu { color: var(--gpu); font-weight: 600; }
+figure { margin: 18px 0; } figcaption { color: var(--muted); font-size: .9rem; margin-top: 6px; }
+svg { width: 100%; height: auto; display: block; }
+svg.mask { max-width: 380px; margin: 0 auto; }
+svg text { font-family: inherit; fill: var(--ink); }
+.muted { color: var(--muted); }
+ul { padding-left: 1.2em; } li { margin: .3em 0; }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.links { display: grid; gap: 10px; margin-top: 12px; }
+.links a { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; text-decoration: none; }
+.links a b { display: block; color: var(--ink); } .links a span { color: var(--muted); font-size: .9rem; }
+footer { margin-top: 40px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+<span class="tag">ANEMLL Forge research · 22 Nov 2026 · the short version</span>
+<h1>Tree verification, simply: checking more guesses in the same 8 rows</h1>
+<p class="lede">A plain-language companion to the paper
+<a href="TREE_VERIFY.html">Tree Speculative Decoding on a Split ANE + GPU Target</a>. It explains the idea, how we
+made it work on the Apple Neural Engine, and what it bought for Qwen3.8-27B on an M6 Mac. Every number here comes
+from the paper, which has the methods, the controls and the prior art.</p>
+
+<div class="stats">
+  <div class="stat"><b>+8.5 / +10.2%</b><span>decode speed for Pi-like sampled requests (two benchmark blocks)</span></div>
+  <div class="stat"><b>+1.9 to 6.5%</b><span>for greedy requests, 2K to 64K context</span></div>
+  <div class="stat"><b>8 rows</b><span>the same verify call as before: about 2 to 4% more work per call</span></div>
+  <div class="stat"><b>+3.4%</b><span>more in long sessions from "sliced" checks, with identical replies</span></div>
+</div>
+
+<h2>1. The setup in one paragraph</h2>
+<p>We run Qwen3.8-27B on an M6 Mac with the <span class="ane">Neural Engine</span> and the <span class="gpu">GPU</span>
+working on the same model (the <a href="ARTICLE_ANE_GPU_M6.html">full article</a> explains that part). It writes its
+answer with <b>speculative decoding</b>: a small drafter guesses the next 7 tokens, and the big model checks them all in
+<b>one call of 8 rows</b> (the last confirmed token, called the anchor, plus 7 guesses). Guesses that match what the
+big model would write are kept; at the first miss the big model supplies the right token and the next round starts.
+The check costs about the same whether it keeps 1 token or 7, so every kept guess is nearly free speed.</p>
+
+<h2>2. The problem: a chain bets everything on one path</h2>
+<p>With a chain, the 7 guesses form one line. If guess 2 is wrong, guesses 3 to 7 were checked for nothing. The
+drafter actually knows more than one line: for every position it ranks <b>16 candidates</b>. Often its second choice
+is the right one, but a chain has no room for it.</p>
+
+<h2>3. The idea: spend the 8 rows on a tree</h2>
+<p>Keep the same 8 rows, but fill them with the drafter's <b>most likely branches</b>. Starting from the anchor, we
+repeatedly add the most probable next node (the product of the drafter's probabilities along its path), with up to 4
+children per node, until 7 nodes are placed. When the drafter is confident, the tree is just the chain again; when it
+hesitates, both options get a row.</p>
+<figure>
+<svg viewBox="0 0 720 250" role="img" aria-label="Chain versus tree in 8 rows: the chain bets 7 rows on one path, the tree splits rows between likely branches">
+  <text x="10" y="24" font-size="15" font-weight="600">Chain: 7 guesses on one path</text>
+  <g font-size="13">
+    <circle cx="30" cy="70" r="16" style="fill:var(--soft-acc);stroke:var(--accent)"/><text x="23" y="75">A</text>
+    <g style="stroke:var(--line)" stroke-width="2"><line x1="46" y1="70" x2="74" y2="70"/><line x1="106" y1="70" x2="134" y2="70"/><line x1="166" y1="70" x2="194" y2="70"/><line x1="226" y1="70" x2="254" y2="70"/><line x1="286" y1="70" x2="314" y2="70"/><line x1="346" y1="70" x2="374" y2="70"/></g>
+    <circle cx="90" cy="70" r="16" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="85" y="75">1</text>
+    <circle cx="150" cy="70" r="16" style="fill:var(--soft-gpu);stroke:var(--no)"/><text x="145" y="75">2</text>
+    <circle cx="210" cy="70" r="16" style="fill:none;stroke:var(--line)" stroke-dasharray="3 3"/><text x="205" y="75" style="fill:var(--muted)">3</text>
+    <circle cx="270" cy="70" r="16" style="fill:none;stroke:var(--line)" stroke-dasharray="3 3"/><text x="265" y="75" style="fill:var(--muted)">4</text>
+    <circle cx="330" cy="70" r="16" style="fill:none;stroke:var(--line)" stroke-dasharray="3 3"/><text x="325" y="75" style="fill:var(--muted)">5</text>
+    <circle cx="390" cy="70" r="16" style="fill:none;stroke:var(--line)" stroke-dasharray="3 3"/><text x="385" y="75" style="fill:var(--muted)">6</text>
+    <text x="420" y="66" style="fill:var(--muted)">guess 2 is wrong:</text><text x="420" y="84" style="fill:var(--muted)">rows 3 to 7 are wasted</text>
+  </g>
+  <text x="10" y="138" font-size="15" font-weight="600">Tree: the same rows, split where the drafter hesitates</text>
+  <g font-size="13">
+    <g style="stroke:var(--line)" stroke-width="2">
+      <line x1="46" y1="190" x2="74" y2="190"/><line x1="104" y1="182" x2="136" y2="165"/><line x1="104" y1="198" x2="136" y2="215"/>
+      <line x1="166" y1="165" x2="194" y2="165"/><line x1="166" y1="215" x2="194" y2="215"/><line x1="226" y1="215" x2="254" y2="215"/><line x1="286" y1="215" x2="314" y2="215"/>
+    </g>
+    <circle cx="30" cy="190" r="16" style="fill:var(--soft-acc);stroke:var(--accent)"/><text x="23" y="195">A</text>
+    <circle cx="90" cy="190" r="16" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="85" y="195">1</text>
+    <circle cx="150" cy="165" r="16" style="fill:var(--soft-gpu);stroke:var(--no)"/><text x="143" y="170">2a</text>
+    <circle cx="210" cy="165" r="16" style="fill:none;stroke:var(--line)" stroke-dasharray="3 3"/><text x="203" y="170" style="fill:var(--muted)">3a</text>
+    <circle cx="150" cy="215" r="16" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="142" y="220">2b</text>
+    <circle cx="210" cy="215" r="16" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="203" y="220">3b</text>
+    <circle cx="270" cy="215" r="16" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="263" y="220">4b</text>
+    <circle cx="330" cy="215" r="16" style="fill:none;stroke:var(--line)" stroke-dasharray="3 3"/><text x="323" y="220" style="fill:var(--muted)">5b</text>
+    <text x="360" y="200" style="fill:var(--muted)">the second choice for word 2 was right:</text><text x="360" y="218" style="fill:var(--muted)">4 tokens kept instead of 1</text>
+  </g>
+</svg>
+<figcaption>A = the anchor. Green = kept, red = rejected, dashed = not reached. Both layouts cost one 8-row call.</figcaption>
+</figure>
+
+<h2>4. Making the big model check a tree</h2>
+<p>Three changes let one call check a tree instead of a line:</p>
+<ul>
+<li><b>Each row sees only its own branch.</b> A row may look at the earlier text and at its own ancestors, not at its
+"cousins" on other branches. That is a mask: one 8 x 8 grid per call.</li>
+<li><b>Positions follow depth.</b> Two siblings are both "the next word", so they get the same position number.</li>
+<li><b>The recurrent layers get a path-aware fix.</b> 48 of the model's 64 layers are Gated DeltaNet layers: instead of
+looking back over all tokens, they carry a running memory and a short look-back over the last few tokens. In a tree,
+"the previous token" depends on the branch. We keep the original computation and add one small correction matrix per
+layer group (we call it <code>corrx0</code>). On plain chains it reproduces the served replies exactly: 45 of 45.</li>
+</ul>
+<figure>
+<svg class="mask" viewBox="0 0 330 290" role="img" aria-label="Ancestor mask: each of the 8 rows sees only its own branch">
+<text x="70" y="22" font-size="12" style="fill:var(--muted)">columns: rows it may look at</text>
+<text x="83.0" y="34" font-size="12" text-anchor="middle">0</text>
+<text x="109.0" y="34" font-size="12" text-anchor="middle">1</text>
+<text x="135.0" y="34" font-size="12" text-anchor="middle">2</text>
+<text x="161.0" y="34" font-size="12" text-anchor="middle">3</text>
+<text x="187.0" y="34" font-size="12" text-anchor="middle">4</text>
+<text x="213.0" y="34" font-size="12" text-anchor="middle">5</text>
+<text x="239.0" y="34" font-size="12" text-anchor="middle">6</text>
+<text x="265.0" y="34" font-size="12" text-anchor="middle">7</text>
+<text x="62" y="57.0" font-size="12" text-anchor="end" font-weight="700">anchor</text>
+<rect x="71" y="41" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="123" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="149" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="201" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="227" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="41" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="83.0" font-size="12" text-anchor="end" font-weight="400">row 1</text>
+<rect x="71" y="67" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="67" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="123" y="67" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="149" y="67" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="67" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="201" y="67" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="227" y="67" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="67" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="109.0" font-size="12" text-anchor="end" font-weight="700">row 2</text>
+<rect x="71" y="93" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="93" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="123" y="93" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="149" y="93" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="93" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="201" y="93" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="227" y="93" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="93" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="135.0" font-size="12" text-anchor="end" font-weight="400">row 3</text>
+<rect x="71" y="119" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="119" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="123" y="119" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="149" y="119" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="175" y="119" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="201" y="119" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="227" y="119" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="119" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="161.0" font-size="12" text-anchor="end" font-weight="700">row 4</text>
+<rect x="71" y="145" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="145" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="123" y="145" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="149" y="145" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="145" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="201" y="145" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="227" y="145" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="145" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="187.0" font-size="12" text-anchor="end" font-weight="700">row 5</text>
+<rect x="71" y="171" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="171" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="123" y="171" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="149" y="171" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="171" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="201" y="171" width="24" height="24" rx="3" style="fill:var(--ane);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="227" y="171" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="171" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="213.0" font-size="12" text-anchor="end" font-weight="400">row 6</text>
+<rect x="71" y="197" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="197" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="123" y="197" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="149" y="197" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="197" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="201" y="197" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="227" y="197" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="253" y="197" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<text x="62" y="239.0" font-size="12" text-anchor="end" font-weight="400">row 7</text>
+<rect x="71" y="223" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="97" y="223" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="123" y="223" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="149" y="223" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="175" y="223" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="201" y="223" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<rect x="227" y="223" width="24" height="24" rx="3" style="fill:none;fill-opacity:1;stroke:var(--line)"/>
+<rect x="253" y="223" width="24" height="24" rx="3" style="fill:var(--accent);fill-opacity:0.85;stroke:var(--line)"/>
+<text x="70" y="270" font-size="12" style="fill:var(--muted)">green: the accepted branch 0, 2, 4, 5</text>
+</svg>
+<figcaption>The mask for one example tree (parents: 1 and 2 under the anchor, 3 under 1, 4 and 6 under 2, 5 under 4,
+7 under 5). A filled cell means "this row may look at that row".</figcaption>
+</figure>
+<p>On the M6 the check runs on the Neural Engine, and past 64K tokens part of it (attention over the long history) runs
+on the GPU between Neural Engine calls; the GPU kernel applies the same mask. When the 7 nodes happen to form a single
+line, the server skips the tree entirely and runs the ordinary chain check, so confident stretches pay nothing extra.</p>
+
+<h2>5. Keeping the winner</h2>
+<p>After the check, we walk down from the anchor and follow the child the big model agrees with, as far as it goes.
+Then the winning branch is <b>packed into place</b> as if it had been a chain all along: its rows move to the front
+slots, along with their recurrent-layer state and their entries in the attention memory. From there the normal chain
+code takes over, so nothing downstream had to change.</p>
+<figure>
+<svg viewBox="0 0 640 150" role="img" aria-label="Commit: the accepted rows 0, 2, 4 and 5 are packed into slots 0 to 3">
+  <text x="10" y="22" font-size="13" style="fill:var(--muted)">verified rows</text>
+  <text x="10" y="122" font-size="13" style="fill:var(--muted)">committed, as a chain</text>
+  <g font-size="13">
+    <rect x="150" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="172" y="50" text-anchor="middle">0</text><rect x="208" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="230" y="50" text-anchor="middle">1</text><rect x="266" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="288" y="50" text-anchor="middle">2</text><rect x="324" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="346" y="50" text-anchor="middle">3</text><rect x="382" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="404" y="50" text-anchor="middle">4</text><rect x="440" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="462" y="50" text-anchor="middle">5</text><rect x="498" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="520" y="50" text-anchor="middle">6</text><rect x="556" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="578" y="50" text-anchor="middle">7</text>
+    <rect x="150" y="100" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="172" y="120" text-anchor="middle">0</text><rect x="208" y="100" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="230" y="120" text-anchor="middle">2</text><rect x="266" y="100" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="288" y="120" text-anchor="middle">4</text><rect x="324" y="100" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="346" y="120" text-anchor="middle">5</text>
+    AR<rect x="150" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="172" y="50" text-anchor="middle">0</text><rect x="208" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="230" y="50" text-anchor="middle">1</text><rect x="266" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="288" y="50" text-anchor="middle">2</text><rect x="324" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="346" y="50" text-anchor="middle">3</text><rect x="382" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="404" y="50" text-anchor="middle">4</text><rect x="440" y="30" width="44" height="30" rx="6" style="fill:var(--soft-ane);stroke:var(--ok)"/><text x="462" y="50" text-anchor="middle">5</text><rect x="498" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="520" y="50" text-anchor="middle">6</text><rect x="556" y="30" width="44" height="30" rx="6" style="fill:none;stroke:var(--line)"/><text x="578" y="50" text-anchor="middle">7</text>
+  </g>
+</svg>
+<figcaption>The accepted branch 0 → 2 → 4 → 5 becomes slots 0 to 3; the other rows are dropped.</figcaption>
+</figure>
+
+<h2>6. Sampling stays honest</h2>
+<p>Pi samples (temperature 1.0) instead of always taking the top word. For those requests, each node is checked child
+by child with the standard speculative-sampling rule: accept a child with the probability the big model gives it, else
+remove it and try the next sibling, else sample from what is left. The output then has the same distribution as plain
+sampling from the big model. For drafts like ours (the drafter's top candidates, not random samples) we show in the
+paper that no lossless rule can accept more.</p>
+
+<h2>7. Why exactly 8 rows</h2>
+<p>A bigger tree would keep more guesses, but on the Neural Engine more rows are expensive: in a four-layer probe,
+16 rows cost 26 to 39% more per call and 32 rows 87 to 116% more, mostly in the recurrent layers. Timing probes plus
+replay put the best wider tree only about 1.6% ahead at 8K, and behind at 32K. Eight rows is the sweet spot here.</p>
+
+<h2>8. Sliced checks for long chats</h2>
+<p>The model's attention memory comes in sizes of 8K, 16K, 32K, 64K and 96K tokens, and a check reads the whole size it
+is in. At 41K tokens of chat, that meant reading 64K. Four extra "sliced" checks at 24K, 40K, 48K and 56K read only the
+part in use, on the same memory. They matched the full check exactly on 471 tested calls, and over a 19-turn
+Pi-like session (8.6K to 55.5K tokens) they were 3.4% faster (2.5% without one slow baseline run), with all 152
+replies identical.</p>
+
+<h2>9. What it bought</h2>
+<div class="card">
+<table>
+<thead><tr><th>measured on one M6 (32 GB), tree vs chain</th><th>result</th></tr></thead>
+<tbody>
+<tr><td>Pi-like sampled requests, two 36-request blocks</td><td>+8.5% and +10.2%</td></tr>
+<tr><td>the tool-agent subset of those blocks</td><td>-1.6% and -3.9%</td></tr>
+<tr><td>greedy requests, 2K to 64K</td><td>+1.9% to +6.5% (2K: 45.80 vs 42.74 tok/s)</td></tr>
+<tr><td>extra cost of a tree call</td><td>about 2 to 4% per cycle</td></tr>
+<tr><td>sliced checks, long Pi-like session</td><td>+3.4%, 152 of 152 replies identical</td></tr>
+</tbody>
+</table>
+</div>
+<p class="muted">Small gains need care: two identical restarts of the same server differed by 4.4%, so the paper uses
+paired runs in both orders and reports where the tree loses (tool-heavy agent turns).</p>
+
+<h2>10. What did not help</h2>
+<ul>
+<li><b>Bigger trees</b> (16 or 32 rows): too expensive on the Neural Engine (section 7).</li>
+<li><b>Choosing the tree more cleverly</b> from the same 16 candidates: even the best possible 7 nodes would add only
+8.6 to 10.2%, and every cheap rescoring we tried (learned edge scores, token-trigram statistics from Pi's own outputs, one randomly sampled extra branch)
+lost a little. Bigger gains need a better drafter.</li>
+<li><b>Drafting the next round during the check</b>: the drafter needs the big model's internal features of the tokens
+it just confirmed, which do not exist yet; in replay it kept 48 to 63% fewer tokens.</li>
+<li><b>A 16-guess drafter (JetSpec++)</b>: more tokens per round, but on this serial schedule it projected 12 to 46%
+slower overall.</li>
+<li><b>Picking tree or chain per round with a cost model</b>: 5.9% slower over a long session.</li>
+</ul>
+
+<h2>11. Standing on prior work</h2>
+<p>Tree verification is not new: SpecInfer, Medusa, EAGLE-2, Sequoia and DDTree built and studied draft trees, and
+TreeWY, LumoTree and Multi-Future Drafting handle trees for DeltaNet-style hybrid models. What this work adds is
+making it fit and pay off in the fixed 8-row Neural Engine programs of an M6, with the check split across the Neural
+Engine and the GPU. The paper's <a href="TREE_VERIFY.html#whats-new">What's new</a> section lists each contribution
+against its closest prior work, and its references give the sources.</p>
+
+<h2>Read more</h2>
+<div class="links">
+  <a href="TREE_VERIFY.html"><b>The paper: Tree Speculative Decoding on a Split ANE + GPU Target</b><span>Method, what is new, every measurement, what did not work, prior art, correctness tests.</span></a>
+  <a href="ARTICLE_ANE_GPU_M6.html"><b>The article: One model, two accelerators</b><span>How the Neural Engine and the GPU share one model: prefill, decode, results against Splash.</span></a>
+  <a href="https://huggingface.co/anemll/anemll-forge-qwen3.8-27B-V8-96K"><b>The build on Hugging Face</b><span>Packages, drafter, GPU-table kit, code, and the build / deploy / test guide.</span></a>
+  <a href="hf/DEPLOY.md"><b>Run it yourself</b><span>DEPLOY.md (AGENTS.md for coding agents). Research build: needs SIP off on a dedicated M6.</span></a>
+</div>
+
+<footer>ANEMLL Forge research notes, 22 November 2026. Model: Qwen3.8-27B (Qwen team, Alibaba Cloud, Apache-2.0);
+drafter derived from ProCreations/Ternary-Bonsai-2-27B-DFlash2. Measured on one M6 with 32 GB and macOS 27.3; your
+numbers will vary with the text.</footer>
+</main>
+</body>
+</html>
