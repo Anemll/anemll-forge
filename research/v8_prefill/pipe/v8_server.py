@@ -705,6 +705,9 @@ def main():
     if os.environ.get("TREE") == "1":   # tree verify (20 Nov 2026, tree_verify.py): a dec8t build's t8 / tdva / tdvba entries
         import tree_verify
         tree_verify.install(engine, S.log)
+    if os.environ.get("STREAM_PACE") == "1":   # 22 Nov 2026 (stream_pace.py): a cycle's tokens spread over the next cycle
+        import stream_pace
+        stream_pace.install(engine, S.log)
     server = S.ThreadingHTTPServer((a.host, a.port), S.make_handler(engine))
     print(f"[{S.MODEL_ID}] serving OpenAI API on http://{a.host}:{a.port}/v1 (V8 prefill, "
           f"{'speculative ON' if a.draft else 'speculative OFF'}, ctx {a.ctx})", flush=True)

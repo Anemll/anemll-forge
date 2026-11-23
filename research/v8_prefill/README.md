@@ -34,6 +34,13 @@ length. Served by `pipe/v8_server_dec8.sh` (the split runs in the 96K entry only
 at 95K 155 → 149 ms (splash 1.3.2: 141 / 148), unchanged at 2K to 32K. Details and the rejected variants:
 [pipe/unit/DECODE_GPU_ATTENTION.md](pipe/unit/DECODE_GPU_ATTENTION.md).
 
+**Served since 22 Nov: tree8 + sliced entries (`v8_dec8ts`).** The 8-layer build with tree verify entries (tree8, 21
+Nov) and sliced verify entries at 24K / 40K / 48K / 56K (22 Nov), the KV-wrap memory fix (22 Nov) and the GPU-table
+kit. Write-up: [TREE_VERIFY.md](TREE_VERIFY.md). Build, deploy and test on another Mac: [hf/DEPLOY.md](hf/DEPLOY.md)
+(the portable launcher `hf/serve_v8_96k.sh`, `pipe/engine/build_engines.sh`, `pipe/gpu_tables_kit.py`,
+`pipe/build_gpu_tables.sh`). On the development M6: `pipe/v8_server_dec8_qk.sh` (defaults in its header; the leak fix
+with `V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib DEC_DYLIB=libdec_gpu_tree_uw.dylib`).
+
 - [PREFILL_RESEARCH.md](PREFILL_RESEARCH.md): what was tried, what was kept or rejected and why, numbers, lessons.
 - [pipe/V8_SERVER.md](pipe/V8_SERVER.md): the server (run, options, request flow, results, KV8 findings).
 
@@ -71,8 +78,9 @@ stand in the way:
 
 The GPU tables point into those compiled files, so they are rebuilt after every recompile (a macOS update or a cache
 purge; Build chain, step 3). Building them needs the public release 0.2 export ([anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI): `export/release_vq3pA_mixh_s600_k1_mat/` and `model/` for the
-small tensors, byte-identical to ours) and the HWX parser, and they match only this
-compiler's output (M6, macOS 27.3 build 26C5035r): other chips and macOS builds are untested.
+small tensors, byte-identical to ours; no HWX parser: the package -> `model.hwx` lookup reads the Core AI cache
+manifest), and they match only this compiler's output (M6, macOS 27.3; the kit of `hf/DEPLOY.md`: build 26C5047e):
+other chips and macOS builds are untested.
 
 The research scripts are committed as they ran: they use absolute paths on the M6 (below). The release-code
 commits of this branch hold the builder and runtime changes they need (`coreai/`, `scripts/` of this checkout = the
@@ -111,6 +119,11 @@ commits of this branch hold the builder and runtime changes they need (`coreai/`
 | `a8probe/` | A8 and long-context run scripts, A8 probe results (json) | `SSD/a8probe` |
 | `splash132/` | splash 1.3.2 serve and bench scripts, `cmp_96k.sh` (the same requests on V8 and splash 1.3.2), `cmp_96k_gpu.sh` (splash 1.3.2 GPU only), `serve_pi.sh` | `C/v8_work/splash132` |
 | `tools/swap_watchdog.sh` | swap guard used by every long job | `SSD/tools` |
+| `tools/forge_watchdog.sh` | the served forge's own memory guard (footprint) | `SSD/tools` |
+| `tools/deploy_journal.py` | portable copy of the deployment journal (root `DEPLOY_JOURNAL_ROOT`) for `hf/serve_v8_96k.sh` | `C/claude_full96_prep/freeze_eight_row_v4` |
+| `hf/` | the Hugging Face card, `DEPLOY.md`, `serve_v8_96k.sh` | |
+| `pipe/tree_verify.py`, `rung_slice.py`, `stream_pace.py`, `gpu_tables_kit.py`, `build_gpu_tables.sh`, `prep_engine_par.py`, `engine/build_engines.sh` | tree8 verify, sliced entries, stream pacing (research, off), the GPU-table kit and full rebuild, parallel table prep, engine build | `C/v8_work/pipe` |
+| `bench_tree/` | tree benches (`tree_bench.py`, prompt sets incl. `smoke_2k_v1.json`, `run_arm.sh`) | `C/v8_work/bench/tree` |
 | `results/` | server matrix, K8V16 64K run, splash 1.3.2 runs, `cmp_{v8,splash}_96k.jsonl`, `cmp_splash_gpu_96k.jsonl`, `cmp_v8dec8_96k.jsonl`; `results/17nov/` (indexed) | `SSD/coreai_seg_logs` |
 
 Absolute paths in the scripts:
@@ -171,11 +184,19 @@ Downloaded, or generated on your Mac, so they do not need to be in this reposito
    `v8/dec8_srv_manifest.py` (16 logical chunks with aliases; the file-level manifest stays as `manifest_files.json`).
    Decode attention: `cd pipe/engine && swiftc -O -emit-library -o libdec_gpu.dylib dec_gpu.swift -framework Metal`
    (`dec_kernels.metal` is compiled at load).
+7. Tree8 + sliced build (v8_dec8ts, served since 22 Nov), replacing v8_dec8: `v8/build_dec8ts_all.sh` (each package by
+   `v8/build_dec8t_one.sh` -> `v8/build_dec8t_chunk.py` with `TREE_FORM=corrx0 TREE_SLICED=24576,40960,49152,57344`,
+   compiled while the next one exports; guards for internal disk space), then `v8/build_dec8ts_tables.sh` (tables with
+   `pipe/prep_engine_par.py` + `prep_kv8.py`, the server manifest, the 8-HWX check). GPU engines:
+   `zsh pipe/engine/build_engines.sh uw` (`libgpu_v8_f8q_uw.dylib`, `libdec_gpu_tree_uw.dylib`). Portable table kit:
+   `pipe/gpu_tables_kit.py pack | install | verify`. All of it for another Mac: [hf/DEPLOY.md](hf/DEPLOY.md).
 
 ## Run
 
 ```
-PORT=8765 pipe/v8_server_dec8.sh        # served since 17 Nov: SPLIT+GPU (v8_dec8, w_dec8), the port Pi's ane-qwen38 provider uses
+PORT=8765 pipe/v8_server_dec8_qk.sh     # served since 22 Nov: tree8 + sliced (v8_dec8ts, w_dec8ts); SERVED_SLICE=0 / SERVED_TREE=0 roll back
+REPO=<HF download> hf/serve_v8_96k.sh    # the same configuration on another Mac (hf/DEPLOY.md)
+PORT=8765 pipe/v8_server_dec8.sh        # 17 to 20 Nov: SPLIT+GPU chain only (v8_dec8, w_dec8), the port Pi's ane-qwen38 provider uses
 pipe/v8_server.sh                       # the 16-chunk v8_shared2 server without the split: port 8767 (PORT=...), ctx 98304 (CTX=...)
 splash132/serve_pi.sh                   # splash 1.3.2 for Pi (provider splash-local, port 8000); one server at a time
 pipe/srv_stop.sh                        # stops whatever listens on $PORT

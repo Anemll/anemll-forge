@@ -11,6 +11,7 @@ import argparse, hashlib, json, re, statistics, sys, time
 from pathlib import Path
 
 sys.path.insert(0, "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/scripts")
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))   # 22 Nov: the same scripts/ inside a checkout or the HF code snapshot
 from m6_compare_bench import Power, chat  # noqa: E402
 
 LOG = Path("/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs/v8_server.log")
@@ -31,7 +32,10 @@ def banner(log):
             keep["tree"] = ln.split("tree: BANNER", 1)[1].strip()
         elif "prompt-lookup drafts:" in ln:   # U1: the engine's ngram drafter (NGRAM_DRAFT)
             keep["lookup"] = ln.split("prompt-lookup drafts:", 1)[1].strip()[:120]
+        elif "slice: BANNER" in ln:   # 22 Nov 2026: sliced decode entries (pipe/rung_slice.py, RUNG_SLICE; research)
+            keep["slice"] = ln.split("slice: BANNER", 1)[1].strip()[:160]
     keep.setdefault("tree", "mode=chain (no tree banner: the served chain path)")
+    keep.setdefault("slice", "off (no slice banner)")
     keep.setdefault("lookup", "off (no prompt-lookup line)")
     return keep
 

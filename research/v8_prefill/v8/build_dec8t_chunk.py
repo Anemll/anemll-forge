@@ -11,6 +11,11 @@ path is the served one) plus single-call tree verify entries on the same weight 
   tdva, tdvba                  dva / dvba (the split verify's ANE parts) with anc / ctap the same way (dvb has no
                                DeltaNet layer and serves both)
 TREE_CTXS (default 8192,16384,32768,65536: the entries the server runs without the split) picks the t8 contexts.
+TREE_SLICED (22 Nov 2026, research/v8_prefill/results/22nov, NEXT.md item 1; default empty = the build as before): widths
+(e.g. 24576,40960,49152,57344) of sliced decode entries per group, g<i>_v8s_<w>k (the chain verify) and g<i>_t8s_<w>k
+(the tree verify). Each binds the KV segments of the next ladder entry (32K for 24K, 64K for 40K / 48K / 56K: no extra
+bound tensors, the ~51 limit) but attends over the first w keys (tile loop and mask (1, w) stop at w). The 22 Nov
+probe (build_rung_probe.py): bit-exact against the bigger entry with keys >= w masked, ANE cost linear in w.
 Original notes:
 8-layer shared-weight package for the decode-verify split (17 Nov 2026): two target groups (layers L0..L0+3 and
 L0+4..L0+7, the attention layer last in each) in ONE package, every entry on the same weight constants:
@@ -118,6 +123,45 @@ class TreeV(B.Entry):
             _tree_off()
 
 
+TREE_SLICED = [int(c) for c in os.environ.get("TREE_SLICED", "").split(",") if c]
+
+
+class _Sliced:
+    """A decode entry that binds the segments of `bind` rows but attends over the first `width` keys (TREE_SLICED)."""
+    def slice(self, width, bind):
+        assert self.nseg and width < bind and width % B.ATT_BLOCK == 0, (width, bind, self.nseg)
+        self.bind, self.width, self.ctx = bind, width, width     # ctx: the attention's tile loop and the mask width
+        return self
+
+    def example(self):
+        c = self.ctx
+        self.ctx = self.bind          # segment shapes of the bound ladder entry
+        try:
+            ex, names = list(super().example()), self.input_names()
+        finally:
+            self.ctx = c
+        ex[names.index("mask")] = torch.zeros(1, self.width, dtype=torch.float16)
+        return tuple(ex)
+
+
+class SlicedV(_Sliced, B.Entry):
+    pass
+
+
+class SlicedTreeV(_Sliced, TreeV):
+    pass
+
+
+def _same_bindings(e, ref):
+    """e binds exactly ref's inputs (names and shapes) except the mask, which is (1, e.width)."""
+    ne, nr = e.input_names(), ref.input_names()
+    assert ne == nr, (ne, nr)
+    for n, a, b in zip(ne, e.example(), ref.example()):
+        want = (1, e.width) if n == "mask" else tuple(b.shape)
+        assert tuple(a.shape) == want, (n, tuple(a.shape), want)
+    return len(ne) + len(e.output_names())
+
+
 class TreeDecA(DecA):
     def input_names(self):
         return super().input_names() + ["anc", "ctap"]
@@ -171,6 +215,17 @@ def main():
             e = TreeV(g, c, 8, kv_cache_dtype=mode)
             entries.append((f"g{gi}_t8_{c // 1024}k", e, e.input_names(), e.output_names()))
             names[f"t8_{c // 1024}k"] = f"g{gi}_t8_{c // 1024}k"
+        for w in TREE_SLICED:   # sliced decode entries (22 Nov 2026): the next ladder entry's bindings, w keys attended
+            bind = min(c for c in CTXS if c > w)
+            assert w not in CTXS and bind in TREE_CTXS, (w, bind)
+            for kind, cls, ref in (("v8s", SlicedV, B.Entry), ("t8s", SlicedTreeV, TreeV)):
+                e = cls(g, bind, 8, kv_cache_dtype=mode).slice(w, bind)
+                nb = _same_bindings(e, ref(g, bind, 8, kv_cache_dtype=mode))
+                assert nb <= 51, (kind, w, nb)
+                nm = f"{kind}_{w // 1024}k"
+                print(f"g{gi}_{nm}: attends {e.ctx} keys, binds the {bind // 1024}K entry's {e.nseg} segments, {nb} tensors", flush=True)
+                entries.append((f"g{gi}_{nm}", e, e.input_names(), e.output_names()))
+                names[nm] = f"g{gi}_{nm}"
         assert e0.att_j == [3], f"group {gi}: the attention layer must be last ({e0.att_j})"
         ginfo.append({"layers": [g[0].i, g[-1].i], "gdn_j": e0.gdn_j, "att_j": e0.att_j, "taps": e0.taps, "entries": names})
     for m in mods:   # V8 FFN / mixer entries (build_shared_chunk)
@@ -202,7 +257,8 @@ def main():
     mb = B.save_program(entries, out / fname)
     info = {"file": fname, "layers": [layers[0], layers[-1]], "entries": [x[0] for x in entries], "groups": ginfo,
             "split": {n: {"in": i, "out": o} for n, _, i, o in split}, "y_prev_tap": groups[0][-1].i in taps_all,
-            "mb": round(mb), "split_ffn": V.SPLIT, "tree": {"form": TREE_FORM, "ctxs": TREE_CTXS, "rows": 8}}
+            "mb": round(mb), "split_ffn": V.SPLIT, "tree": {"form": TREE_FORM, "ctxs": TREE_CTXS, "rows": 8,
+                                                                  "sliced": {str(w): min(c for c in CTXS if c > w) for w in TREE_SLICED}}}
     (out / f"{fname}.info.json").write_text(json.dumps(info, indent=1))
     print(f"{fname}: {len(entries)} entries, {mb:.0f} MB in {time.time() - t0:.0f}s", flush=True)
 

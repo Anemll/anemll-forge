@@ -15,6 +15,7 @@ tags:
   - long-context
   - gpu-ane-prefill
   - hybrid
+  - tree-verification
 ---
 
 # ANEMLL Forge · Qwen3.8-27B · hybrid Neural Engine + GPU build, 96K context (research preview)
@@ -26,6 +27,10 @@ tags:
 
 **Start here:**
 
+- **Build, deploy and test this build:** [DEPLOY.md](DEPLOY.md) (the same file as
+  `code/anemll-forge/research/v8_prefill/hf/DEPLOY.md`).
+- **Tree verification write-up:** [TREE_VERIFY.md](code/anemll-forge/research/v8_prefill/TREE_VERIFY.md): the tree8
+  drafter / verifier on the Neural Engine and GPU, what is new, measurements, what did not work.
 - **Article:** [One model, two accelerators](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/ARTICLE_ANE_GPU_M6.md): why, results against splash 1.3.2, how
   prefill and decode were optimized, the decisions and the research environment restrictions.
 - **Research branch:** [`v8-gpu-ane-prefill`, research/v8_prefill](https://github.com/Anemll/anemll-forge/tree/v8-gpu-ane-prefill/research/v8_prefill): code, notes, benchmarks and every result.
@@ -40,9 +45,12 @@ with a context of up to **98,304 tokens (96K)**, rebuilt for the hybrid schedule
 
 - **Prefill:** every FFN runs on the Neural Engine and every token mixer (Gated DeltaNet and attention) on the GPU, both
   at once, sharing one copy of the weights: the GPU reads them straight from the Neural Engine's compiled programs.
-- **Decode:** speculative, with the included Core AI DFlash2 drafter (8-row verification on the Neural Engine). Past
-  64K tokens the verification's attention over the KV history runs on the GPU between Neural Engine calls
-  (SPLIT+GPU); the Neural Engine programs are the same for every context length.
+- **Decode:** speculative, with the included Core AI DFlash2 drafter. Since 21 Nov the verification is a tree
+  (tree8: the drafter's best 7 continuations in one 8-row Neural Engine call, for greedy and sampled requests); since
+  22 Nov sliced verify entries at 24K / 40K / 48K / 56K attend only over the KV prefix in use. At the 96K entry the
+  verification's attention over the KV history runs on the GPU between Neural Engine calls (SPLIT+GPU).
+- **Build:** [coreai/m6-96k-dec8ts/](coreai/m6-96k-dec8ts) (22 Nov), 8 packages with every entry point on one copy of
+  the weights, and [gpu/w_dec8ts/](gpu/w_dec8ts), a portable kit of the GPU engine's tables.
 
 ANEMLL independently converts and quantizes [Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B). Credit for
 the target belongs to the **Qwen Team and Alibaba Cloud**, with upstream **Copyright 2026 Alibaba Cloud** and
@@ -68,15 +76,21 @@ This is a research preview, not a release:
   [research/v8_prefill/](code/anemll-forge/research/v8_prefill) the server, the GPU engine and decode attention, the
   GPU-table prep, the build scripts and the notes). The release 0.2 server alone does not load these packages (they
   use a segmented KV cache).
-- The research scripts run with absolute paths of the development machine (listed in
+- The deployment path of this build is portable: [DEPLOY.md](DEPLOY.md) with `hf/serve_v8_96k.sh` (the served
+  configuration, every path a variable), `pipe/engine/build_engines.sh` (GPU engine dylibs) and
+  `pipe/gpu_tables_kit.py` / `pipe/build_gpu_tables.sh` (GPU tables). The other research scripts run with absolute
+  paths of the development machine (listed in
   [research/v8_prefill/README.md](code/anemll-forge/research/v8_prefill/README.md)); adjust them to your layout.
-- The GPU engine's tables are generated on each machine after its first compile, from that machine's compiled Neural
-  Engine programs: `prep_engine.py` and `prep_kv8.py` read them with the `hwx_parsing` tool of
-  [freedomtan/coreml_to_ane_hwx](https://github.com/freedomtan/coreml_to_ane_hwx) (BSD-3-Clause, built with `make`)
-  and also read the public release 0.2 export, [anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI): `export/release_vq3pA_mixh_s600_k1_mat/` (the same files this
-  build was made from) and the small tensors in `model/`. The table step needs the builder environment (torch and the
-  Core AI Python tools); a portable table kit, with our tables and a check against the local compile, is the next step.
-- **M6 only** (FP8 attention), 32 GB of memory, macOS 27.3.
+- The GPU engine's tables point into this Mac's compiled Neural Engine programs. [gpu/w_dec8ts/](gpu/w_dec8ts) ships
+  the tables of the development M6 with a sha256 of each compiled program's weight section: after the first compile,
+  `gpu_tables_kit.py install` checks the local programs against them and installs the tables in seconds (on the M6 the
+  installed tables are byte-identical to the served ones). If the programs differ (another macOS build or compiler),
+  `build_gpu_tables.sh` rebuilds them from the public release 0.2 export,
+  [anemll/anemll-quantized-qwen3.8-27b-for-CoreAI](https://huggingface.co/anemll/anemll-quantized-qwen3.8-27b-for-CoreAI)
+  (`export/release_vq3pA_mixh_s600_k1_mat/` and the small tensors in `model/`), with the builder environment (torch
+  and the Core AI Python tools).
+- **M6 only** (FP8 attention), 32 GB of memory, macOS 27.3 (the kit's tables: build 26C5047e). Tested only on the
+  M6 that made it.
 
 ## Measured (M6, 32 GB, macOS 27.3)
 
@@ -104,6 +118,21 @@ How busy each unit is (share of wall time): in prefill both work at once, the Ne
 at 6K, the Neural Engine 72% and the GPU 96% at 64K, where the GPU's attention is the bottleneck. In decode they take
 turns: up to 64K the Neural Engine does all of it; at 95K the GPU takes about 21% of each cycle.
 
+**Tree verification and sliced entries (21 to 22 Nov, the build in `coreai/m6-96k-dec8ts`).** Served decode, client
+tok/s, same Mac ([TREE_VERIFY.md](code/anemll-forge/research/v8_prefill/TREE_VERIFY.md), section 4):
+
+| measurement | chain (8-row) | tree8 |
+|---|---|---|
+| 2K / code / agent sets, greedy (21 Nov) | 42.74 / 39.46 / 54.48 | 45.80 / 40.66 / 54.04 |
+| sampled requests (Pi-like, temperature 1.0), overall | | +8.5% (tok/verify 3.91 to 4.35) |
+
+| long Pi-like session (19 turns, 8.6K to 55.5K), tree8 | without sliced entries | with sliced entries |
+|---|---|---|
+| 8-16K / 16-32K / 32-57K | 39.60 / 36.15 / 29.64 | 40.09 / 37.13 / 31.33 |
+| all | 34.65 | 35.82 (+3.4%) |
+
+Replies of the sliced entries are identical to the unsliced ones (KL 0).
+
 A comparison with splash 1.3.2 on the same Mac, the decisions behind the design and every rejected variant:
 [the article](code/anemll-forge/research/v8_prefill/ARTICLE_ANE_GPU_M6.md) and
 [PREFILL_RESEARCH.md](code/anemll-forge/research/v8_prefill/PREFILL_RESEARCH.md).
@@ -114,27 +143,35 @@ A comparison with splash 1.3.2 on the same Mac, the decisions behind the design 
 hf download anemll/anemll-forge-qwen3.8-27B-V8-96K --local-dir ~/Models/anemll-forge-qwen3.8-27B-V8-96K
 ```
 
-Download the whole repository: the server needs every folder below. Then follow the deployment steps of the research
-README: [requirements (root and SIP)](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#requirements-root-and-sip),
+For this build only (about 15 GB), and the steps after it, see [DEPLOY.md](DEPLOY.md) (sections 3 to 7: download,
+compile, GPU engine, GPU tables, serve, smoke test with a fixed output checksum). The earlier builds follow the
+research README: [requirements (root and SIP)](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#requirements-root-and-sip),
 [build chain](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#build-chain) (compile, GPU tables, GPU libraries) and [run](https://github.com/Anemll/anemll-forge/blob/v8-gpu-ane-prefill/research/v8_prefill/README.md#run) (the same
 file is in this repository at `code/anemll-forge/research/v8_prefill/README.md`).
 
 ## Files
 
-- [coreai/m6-96k-dec8/](coreai/m6-96k-dec8): 8 packages of 8 layers (verify, prefill, hybrid and SPLIT+GPU entry
-  points on one copy of the weights), the output head and the server manifest.
+- [coreai/m6-96k-dec8ts/](coreai/m6-96k-dec8ts) (22 Nov, served): 8 packages of 8 layers, 81 entry points each on
+  one copy of the weights (verify and prefill per context, hybrid prefill parts, SPLIT+GPU `dva` / `dvba` / `dvb`,
+  tree verify `t8_*`, sliced verify `v8s_*` / `t8s_*`), the output head and the server manifest.
+- [gpu/w_dec8ts/](gpu/w_dec8ts): the GPU-table kit (1344 files, 0.9 GB, `kit.json` with every sha256).
+- [DEPLOY.md](DEPLOY.md): build, deploy and test.
+- [coreai/m6-96k-dec8/](coreai/m6-96k-dec8) (17 Nov) and [coreai/m6-96k-v8/](coreai/m6-96k-v8) (16 Nov): the earlier
+  chain-only builds, kept for comparison.
 - [drafter/all3/](drafter/all3): the DFlash2 drafter package with configuration, selector table, the target head's
   norm gain, licenses and provenance (as in release 0.2.1).
 - [model/](model): tokenizer, configuration and FP16 host embedding table, byte-identical to release 0.2.
 - [config.json](config.json): copy of `model/config.json` for Hub discovery.
 - [code/anemll-forge/](code/anemll-forge): the source snapshot (MIT), see Status.
 
-Disk: about 14 GB to download, plus Core AI's compile cache and the system's compiled programs.
+Disk: about 15 GB for this build (DEPLOY.md, section 3), about 35 GB for the whole repository with the two earlier
+builds, plus Core AI's compile cache and the system's compiled programs (about 25 GB on the internal disk).
 
 ## Limitations
 
-- Research preview: SIP off and a root permission are required, the included scripts use the development machine's
-  paths, and the GPU-table step needs the public release export and the builder environment (see Status).
+- Research preview: SIP off and a root permission are required; outside the deployment path of DEPLOY.md the
+  included scripts use the development machine's paths; a table rebuild (when the kit does not match) needs the public
+  release export and the builder environment (see Status). Nobody has yet deployed it on a second Mac.
 - Quality: the weights and their quantization are those of release 0.2 (KL and perplexity measured there, up to 64K).
   The hybrid prefill computes the same model on the GPU and the Neural Engine; its logits differ from the
   Neural-Engine-only path by a small, length-dependent KL (last-token KL 0.010 at 2K, 0.058 at 64K). SPLIT+GPU's

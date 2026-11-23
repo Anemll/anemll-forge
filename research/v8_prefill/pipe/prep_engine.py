@@ -6,7 +6,7 @@ import json, os, re, struct, subprocess, sys
 from pathlib import Path
 import numpy as np
 
-V02 = "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02"
+V02 = os.environ.get("V8_V02", "/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v02")   # the release tree (22 Nov: env, as v8_server.py)
 sys.path[:0] = [V02 + "/coreai", V02 + "/scripts"]
 import qwen38_coreai_build as B  # noqa: E402
 import qwen38_ane_model as M  # noqa: E402
@@ -100,6 +100,8 @@ def main():
     w16 = lambda name, a: (np.ascontiguousarray(a, np.float16).tofile(out / name), name)[1]  # noqa: E731
     for i in range(l0, l1):
         ch = next(c for c in man["chunks"] if c["layers"][0] <= i <= c["layers"][1])
+        for f0 in [f for f in kern_bytes if f != ch["file"]]:   # 22 Nov: keep one chunk's HWX weights in memory (layers run in order)
+            del kern_bytes[f0]
         if ch["file"] not in hwx_idx:
             mp = subprocess.run([sys.executable, V02 + "/scripts/m6_hwx_inspect.py", "map", str(build / ch["file"])],
                                 capture_output=True, text=True, env={**os.environ, "HWX_PARSING": PARSER}).stdout
