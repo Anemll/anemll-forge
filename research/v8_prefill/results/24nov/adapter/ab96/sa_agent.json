@@ -1,0 +1,579 @@
+{
+ "label": "sa_agent",
+ "banner": "BANNER [sa_agent] prompts u1_code_agent.json sha dd1cee6ce18b40f3 gen 320 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q_uwlr.dylib sha256 20e5ff8f0e8df057 | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree_uw.dylib sha256 4412c02bc68744cadd30d9042f0bbe98b7c6c1a9e09721e8461c03c082846f80 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_sa | lookup off | slice: sliced decode entries [24, 40, 48, 56]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volu | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q_uwlr.dylib sha256 20e5ff8f0e8df057",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree_uw.dylib sha256 4412c02bc68744cadd30d9042f0bbe98b7c6c1a9e09721e8461c03c082846f80 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_sa | lookup off",
+  "slice": "sliced decode entries [24, 40, 48, 56]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volu",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "dd1cee6ce18b40f3",
+ "gen": 320,
+ "temp": 0.0,
+ "think": 0,
+ "seed": -1,
+ "started": "2026-11-24 07:06:43",
+ "rungs": {
+  "agent": [
+   {
+    "t0": 1795532825.423533,
+    "t_first": 1795532834.8495119,
+    "t_last": 1795532838.528296,
+    "t_end": 1795532838.529394,
+    "ttft_s": 9.425978899002075,
+    "completion_tokens": 217,
+    "prompt_tokens": 4386,
+    "tool_calls": 2,
+    "decode_tps": 58.71505156306839,
+    "usage": {
+     "prompt_tokens": 4386,
+     "completion_tokens": 217,
+     "total_tokens": 4603,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 217,
+     "tps": 54.8,
+     "tok_verify": 6.58,
+     "accept_pct": 80,
+     "hist": "0:0% 1:9% 2:6% 3:3% 4:9% 5:6% 6:6% 7:61%",
+     "ms_cycle": 120,
+     "draft_ms": 12.8,
+     "verify_ms": 105.7,
+     "tree_cycles": 4,
+     "tree_tv": 3.5,
+     "tree_ms": 110.5,
+     "chain_cycles": 29,
+     "chain_tv": 7.0,
+     "chain_ms": 105.0,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_hwx_inspect.py\", \"oldText\": \"def hwx_paths(package: Path, executable: str = \\\"python\\\", target: str = \\\"h18g\\\") -> list[Path]:\", \"newText\": \"def hwx_paths_v2(package: Path, executable: str = \\\"python\\\", target: str = \\\"h18g\\\") -> list[Path]:\"}<tool:edit>{\"path\": \"scripts/m6_hwx_inspect.py\", \"oldText\": \"        hwxs = [p] if p.suffix == \\\".hwx\\\" else hwx_paths(p)\", \"newText\": \"        hwxs = [p] if p.suffix == \\\".hwx\\\" else hwx_paths_v2(p)\"}",
+    "server_prefill": [
+     [
+      4386,
+      9.1
+     ]
+    ],
+    "sha": "055584d339f6b7d0",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 3.678784132003784,
+     "mean_w": {
+      "system_power": 29.851754197601135,
+      "total_power": 36.465267181396484,
+      "cpu_power": 1.9380744574677293,
+      "gpu_power": 1.2981696159196006,
+      "ane_power": 0.0,
+      "dram_power": 3.37726891040802
+     },
+     "energy_j": 134.14784627619974,
+     "net_total_w": 30.443986117839813,
+     "net_energy_j": 111.99685304525259
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 0
+   },
+   {
+    "t0": 1795532838.840502,
+    "t_first": 1795532845.835517,
+    "t_last": 1795532848.3264341,
+    "t_end": 1795532848.447232,
+    "ttft_s": 6.995014905929565,
+    "completion_tokens": 146,
+    "prompt_tokens": 4439,
+    "tool_calls": 1,
+    "decode_tps": 58.211489190310864,
+    "usage": {
+     "prompt_tokens": 4439,
+     "completion_tokens": 146,
+     "total_tokens": 4585,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 146,
+     "tps": 51.0,
+     "tok_verify": 6.08,
+     "accept_pct": 73,
+     "hist": "0:4% 1:8% 2:12% 3:0% 4:12% 5:0% 6:12% 7:50%",
+     "ms_cycle": 119,
+     "draft_ms": 12.8,
+     "verify_ms": 105.0,
+     "tree_cycles": 5,
+     "tree_tv": 2.6,
+     "tree_ms": 109.1,
+     "chain_cycles": 19,
+     "chain_tv": 7.0,
+     "chain_ms": 103.9,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_int8_probe.py\", \"oldText\": \"def build(variant: str, form: str, a, dst: Path) -> dict:\\n    import coreai_torch\", \"newText\": \"def build(variant: str, form: str, a, dst: Path, verbose: bool = False) -> dict:\\n    if verbose:\\n        print(f\\\"   build args: variant={variant} form={form} a={a} dst={dst}\\\", flush=True)\\n    import coreai_torch\"}",
+    "server_prefill": [
+     [
+      3799,
+      6.7
+     ]
+    ],
+    "sha": "8ea9885707008e78",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.490917205810547,
+     "mean_w": {
+      "system_power": 31.687836318003974,
+      "total_power": 36.94665241241455,
+      "cpu_power": 1.8655001165361695,
+      "gpu_power": 0.005476422134051704,
+      "ane_power": 0.0,
+      "dram_power": 3.3878395557403564
+     },
+     "energy_j": 92.03105219118515,
+     "net_total_w": 30.92537134885788,
+     "net_energy_j": 77.03253958895061
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 1
+   },
+   {
+    "t0": 1795532848.7559319,
+    "t_first": 1795532854.275153,
+    "t_last": 1795532862.7221189,
+    "t_end": 1795532862.7231748,
+    "ttft_s": 5.519221067428589,
+    "completion_tokens": 320,
+    "prompt_tokens": 3473,
+    "tool_calls": 1,
+    "decode_tps": 37.76503925031435,
+    "usage": {
+     "prompt_tokens": 3473,
+     "completion_tokens": 320,
+     "total_tokens": 3793,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 36.8,
+     "tok_verify": 4.44,
+     "accept_pct": 50,
+     "hist": "0:14% 1:15% 2:15% 3:10% 4:8% 5:7% 6:10% 7:21%",
+     "ms_cycle": 121,
+     "draft_ms": 12.9,
+     "verify_ms": 106.5,
+     "tree_cycles": 47,
+     "tree_tv": 3.19,
+     "tree_ms": 107.3,
+     "chain_cycles": 25,
+     "chain_tv": 6.88,
+     "chain_ms": 105.0,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/m6_layer_ablation.py\", \"oldText\": \"def _gdn_prefill_stub(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T):\", \"newText\": \"def _gdn_prefill_stub(self, h, conv_rows, conv_sel, conv_sel_out, rec, pend, commit, commit_last, valid, T):\\n    \\\"\\\"\\\"Timing probe for the GDN prefill entry with the core removed (no_gdn_core).\\n\\n    Parameters:\\n        self: the GDN mix module; only `proj` and `out` are used.\\n        h: input hidden states, shape (1, T, hidden).\\n        conv_rows: rows of the conv1d weight matrix (the part the real prefill would convolve over).\\n        conv_sel: selector matrix applied to conv_rows to form the conv input rows.\\n        conv_sel_out: selector matrix applied to the conv input rows to form the conv output.\\n        rec: recurrent state (scaled by 0.5 and passed through, as in the verify stub).\\n        pend: pending state (zeroed out here).\\n        commit: commit flag (unused).\\n        commit_last: commit-last flag (unused).\\n        valid: valid-row mask (unused).\\n        T: sequence length.\\n    \\\"\\\"\\\"\"}",
+    "server_prefill": [
+     [
+      2833,
+      5.2
+     ]
+    ],
+    "sha": "2ecbc4615968eeeb",
+    "decode_power": {
+     "samples": 7,
+     "seconds": 8.44696593284607,
+     "mean_w": {
+      "system_power": 23.960177859954662,
+      "total_power": 29.138843536376953,
+      "cpu_power": 1.7171723781038808,
+      "gpu_power": 0.0049689262175781615,
+      "ane_power": 0.0,
+      "dram_power": 3.45652437210083
+     },
+     "energy_j": 246.134818674308,
+     "net_total_w": 23.117562472820282,
+     "net_energy_j": 195.27326265835364
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 2
+   },
+   {
+    "t0": 1795532863.034734,
+    "t_first": 1795532868.988312,
+    "t_last": 1795532871.38195,
+    "t_end": 1795532871.383253,
+    "ttft_s": 5.953577995300293,
+    "completion_tokens": 115,
+    "prompt_tokens": 3709,
+    "tool_calls": 1,
+    "decode_tps": 47.62625132661563,
+    "usage": {
+     "prompt_tokens": 3709,
+     "completion_tokens": 115,
+     "total_tokens": 3824,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 115,
+     "tps": 43.0,
+     "tok_verify": 5.23,
+     "accept_pct": 60,
+     "hist": "0:0% 1:9% 2:27% 3:5% 4:14% 5:9% 6:9% 7:27%",
+     "ms_cycle": 121,
+     "draft_ms": 12.9,
+     "verify_ms": 106.6,
+     "tree_cycles": 12,
+     "tree_tv": 3.83,
+     "tree_ms": 109.1,
+     "chain_cycles": 10,
+     "chain_tv": 6.9,
+     "chain_ms": 103.6,
+     "other_cycles": 0
+    },
+    "content": "The \"input\" here is the fixture's prompt ids. Add a check in `main` after `fixture` returns.\n\n<tool:edit>{\"path\": \"scripts/m6_server_bench.py\", \"oldText\": \"    messages, ids = fixture(tok, a.ctx)\", \"newText\": \"    messages, ids = fixture(tok, a.ctx)\\n    if not ids:\\n        raise ValueError(\\\"empty input\\\")\"}",
+    "server_prefill": [
+     [
+      3069,
+      5.6
+     ]
+    ],
+    "sha": "1958fc76eac6eaeb",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.3936378955841064,
+     "mean_w": {
+      "system_power": 37.64209362380977,
+      "total_power": 46.123477935791016,
+      "cpu_power": 2.2224773916233778,
+      "gpu_power": 2.8490683631145175,
+      "ane_power": 0.0,
+      "dram_power": 3.409838557243347
+     },
+     "energy_j": 110.40290466324677,
+     "net_total_w": 40.102196872234344,
+     "net_energy_j": 95.99013812955455
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 3
+   },
+   {
+    "t0": 1795532871.696394,
+    "t_first": 1795532877.331126,
+    "t_last": 1795532879.381469,
+    "t_end": 1795532879.382538,
+    "ttft_s": 5.634732007980347,
+    "completion_tokens": 85,
+    "prompt_tokens": 3478,
+    "tool_calls": 1,
+    "decode_tps": 40.96875425157115,
+    "usage": {
+     "prompt_tokens": 3478,
+     "completion_tokens": 85,
+     "total_tokens": 3563,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 85,
+     "tps": 36.8,
+     "tok_verify": 4.47,
+     "accept_pct": 50,
+     "hist": "0:16% 1:16% 2:16% 3:11% 4:5% 5:5% 6:0% 7:32%",
+     "ms_cycle": 121,
+     "draft_ms": 13.1,
+     "verify_ms": 106.9,
+     "tree_cycles": 6,
+     "tree_tv": 2.67,
+     "tree_ms": 109.2,
+     "chain_cycles": 13,
+     "chain_tv": 5.31,
+     "chain_ms": 105.9,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_attn_chunk_probe.py\", \"oldText\": \"def _save(prog, var):\", \"newText\": \"def _save(prog: Program, var: str) -> tuple[Path, \\\"ct.models.ModelDescription\\\"]:\"}",
+    "server_prefill": [
+     [
+      2838,
+      5.3
+     ]
+    ],
+    "sha": "20d78dc9079f069b",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.0503430366516113,
+     "mean_w": {
+      "system_power": 33.15268911453363,
+      "total_power": 42.0660285949707,
+      "cpu_power": 2.205020474724974,
+      "gpu_power": 3.196654019101685,
+      "ane_power": 0.0,
+      "dram_power": 3.5116649866104126
+     },
+     "energy_j": 86.24978880928575,
+     "net_total_w": 36.04474753141403,
+     "net_energy_j": 73.90409710890012
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 4
+   },
+   {
+    "t0": 1795532879.692068,
+    "t_first": 1795532887.010717,
+    "t_last": 1795532892.06811,
+    "t_end": 1795532892.068175,
+    "ttft_s": 7.318648815155029,
+    "completion_tokens": 320,
+    "prompt_tokens": 4485,
+    "tool_calls": 1,
+    "decode_tps": 63.07597517735512,
+    "usage": {
+     "prompt_tokens": 4485,
+     "completion_tokens": 320,
+     "total_tokens": 4805,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 60.4,
+     "tok_verify": 7.11,
+     "accept_pct": 89,
+     "hist": "0:0% 1:4% 2:4% 3:4% 4:4% 5:0% 6:0% 7:82%",
+     "ms_cycle": 118,
+     "draft_ms": 12.8,
+     "verify_ms": 103.4,
+     "tree_cycles": 2,
+     "tree_tv": 2.5,
+     "tree_ms": 109.6,
+     "chain_cycles": 43,
+     "chain_tv": 7.42,
+     "chain_ms": 103.1,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_chat.py\", \"oldText\": \"def main():\\n    import coreai_compile_guide as G\\n    G.watch_parent()\\n    a = parse()\\n    chat = Chat(a)\\n    if a.prompt:\\n        chat.reply(a.prompt)\\n        return\\n    while True:\\n        try:\\n            line = input(\\\"\\\\n\\\\033[1mYou:\\\\033[0m \\\").strip()\\n            if not line:\\n                continue\\n            if line.startswith(\\\"/\\\"):\\n                chat.command(line)\\n                continue\\n            print(\\\"\\\\033[1mQwen3.8-27B (ANE):\\\\033[0m \\\", end=\\\"\\\", flush=True)\\n            chat.reply(line)\\n        except (EOFError, KeyboardInterrupt):\\n            print(\\\"\\\\nbye\\\")\\n            break\", \"newText\": \"def _main_body():\\n    import coreai_compile_guide as G\\n    G.watch_parent()\\n    a = parse()\\n    chat = Chat(a)\\n    if a.prompt:\\n        chat.reply(a.prompt)\\n        return\\n    while True:\\n        try:\\n            line = input(\\\"\\\\n\\\\033[1mYou:\\\\033[0m \\\").strip()\\n            if not line:\\n                continue\\n            if line.startswith(\\\"/\\\"):\\n                chat.command(line)\\n                continue\\n            print(\\\"\\\\",
+    "server_prefill": [
+     [
+      3845,
+      7.0
+     ]
+    ],
+    "sha": "46cbe2232845be45",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 5.0573930740356445,
+     "mean_w": {
+      "system_power": 25.563592859518884,
+      "total_power": 30.88620901107788,
+      "cpu_power": 1.7208814495084672,
+      "gpu_power": 0.004422430455529383,
+      "ane_power": 0.0,
+      "dram_power": 3.597312271595001
+     },
+     "energy_j": 156.2036995358426,
+     "net_total_w": 24.86492794752121,
+     "net_energy_j": 125.7517143881891
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 5
+   },
+   {
+    "t0": 1795532892.3808699,
+    "t_first": 1795532897.738438,
+    "t_last": 1795532899.2901068,
+    "t_end": 1795532899.291472,
+    "ttft_s": 5.357568025588989,
+    "completion_tokens": 77,
+    "prompt_tokens": 3245,
+    "tool_calls": 1,
+    "decode_tps": 48.97952189639762,
+    "usage": {
+     "prompt_tokens": 3245,
+     "completion_tokens": 77,
+     "total_tokens": 3322,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 77,
+     "tps": 42.7,
+     "tok_verify": 5.13,
+     "accept_pct": 59,
+     "hist": "0:0% 1:13% 2:7% 3:7% 4:33% 5:13% 6:20% 7:7%",
+     "ms_cycle": 120,
+     "draft_ms": 12.9,
+     "verify_ms": 105.6,
+     "tree_cycles": 5,
+     "tree_tv": 5.4,
+     "tree_ms": 107.7,
+     "chain_cycles": 10,
+     "chain_tv": 5.0,
+     "chain_ms": 104.5,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_decode_ref.py\", \"oldText\": \"import json\\nimport os\\nfrom pathlib import Path\", \"newText\": \"import json\\nimport logging\\nimport os\\nfrom pathlib import Path\"}",
+    "server_prefill": [
+     [
+      2605,
+      5.1
+     ]
+    ],
+    "sha": "b40d9535c6bde32c",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 1.5516688823699951,
+     "mean_w": {
+      "system_power": 35.76164228530294,
+      "total_power": 40.50865173339844,
+      "cpu_power": 1.9607192419728092,
+      "gpu_power": 0.0038755313637740224,
+      "ane_power": 0.0,
+      "dram_power": 2.782414674758911
+     },
+     "energy_j": 62.85601436147772,
+     "net_total_w": 34.487370669841766,
+     "net_energy_j": 53.51297990315312
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 6
+   },
+   {
+    "t0": 1795532899.607141,
+    "t_first": 1795532905.180192,
+    "t_last": 1795532905.6720269,
+    "t_end": 1795532905.672139,
+    "ttft_s": 5.5730509757995605,
+    "completion_tokens": 16,
+    "prompt_tokens": 3563,
+    "tool_calls": 0,
+    "decode_tps": 30.498040384797168,
+    "usage": {
+     "prompt_tokens": 3563,
+     "completion_tokens": 16,
+     "total_tokens": 3579,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 16,
+     "tps": 25.5,
+     "tok_verify": 3.2,
+     "accept_pct": 31,
+     "hist": "0:20% 1:20% 2:20% 3:20% 4:0% 5:20% 6:0% 7:0%",
+     "ms_cycle": 126,
+     "draft_ms": 13.2,
+     "verify_ms": 111.2,
+     "tree_cycles": 5,
+     "tree_tv": 3.2,
+     "tree_ms": 111.2,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "The `ref` function already uses f-strings throughout. No changes needed.",
+    "server_prefill": [
+     [
+      2923,
+      5.4
+     ]
+    ],
+    "sha": "3a6ea54a06d840e2",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 7
+   },
+   {
+    "t0": 1795532905.987705,
+    "t_first": 1795532912.325991,
+    "t_last": 1795532913.7433321,
+    "t_end": 1795532913.744756,
+    "ttft_s": 6.33828592300415,
+    "completion_tokens": 81,
+    "prompt_tokens": 3721,
+    "tool_calls": 1,
+    "decode_tps": 56.44371177305728,
+    "usage": {
+     "prompt_tokens": 3721,
+     "completion_tokens": 81,
+     "total_tokens": 3802,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 81,
+     "tps": 48.6,
+     "tok_verify": 5.79,
+     "accept_pct": 68,
+     "hist": "0:0% 1:7% 2:14% 3:7% 4:21% 5:0% 6:14% 7:36%",
+     "ms_cycle": 119,
+     "draft_ms": 12.9,
+     "verify_ms": 104.9,
+     "tree_cycles": 2,
+     "tree_tv": 3.5,
+     "tree_ms": 108.9,
+     "chain_cycles": 12,
+     "chain_tv": 6.17,
+     "chain_ms": 104.2,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/qwen38_kv_cache.py\", \"oldText\": \"    if manifest.get(\\\"ptp\\\"):\", \"newText\": \"    if manifest is None:\\n        return {}\\n    if manifest.get(\\\"ptp\\\"):\"}",
+    "server_prefill": [
+     [
+      3081,
+      6.1
+     ]
+    ],
+    "sha": "40120ce854e86a27",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 1.4173412322998047,
+     "mean_w": {
+      "system_power": 37.59516516197321,
+      "total_power": 43.768035888671875,
+      "cpu_power": 2.737544802504514,
+      "gpu_power": 0.4272263682249108,
+      "ane_power": 0.0,
+      "dram_power": 3.0080995559692383
+     },
+     "energy_j": 62.03424192179227,
+     "net_total_w": 37.746754825115204,
+     "net_energy_j": 53.50003199914738
+    },
+    "cat": "agent",
+    "set": "pi-edit",
+    "index": 8
+   }
+  ]
+ },
+ "idle": {
+  "samples": 16,
+  "seconds": 20.00512409210205,
+  "mean_w": {
+   "system_power": 4.848184953239274,
+   "total_power": 6.021281063556671,
+   "cpu_power": 1.0333468731991158,
+   "gpu_power": 0.004546816242851618,
+   "ane_power": 0.0,
+   "dram_power": 0.1352024208754301
+  },
+  "energy_j": 120.45647486987542
+ },
+ "ended": "2026-11-24 07:08:34"
+}

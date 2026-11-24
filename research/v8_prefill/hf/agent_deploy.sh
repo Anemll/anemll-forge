@@ -9,12 +9,19 @@
 # Variables: REPO (~/Models/anemll-forge-qwen3.8-27B-V8-96K), PY ($REPO/.venv/bin/python: its file name must be
 # "python", the compile cache is keyed by it), PORT (8765), LOGDIR (~/Library/Logs/anemll-forge), GUARD_GB (25),
 # tables-rebuild: EXPORT_DIR, MODEL, BPY (DEPLOY.md 5b).
+# VARIANT=sa (24 Nov 2026): the super-adapter repo anemll/anemll-forge-qwen3.8-27B-V8-96K-SuperAdapter (build
+# coreai/m6-96k-dec8ts-sa, kit gpu/w_dec8ts_sa, its own smoke checksum); default: the V8-96K repo.
 set -u
-REPO=${REPO:-$HOME/Models/anemll-forge-qwen3.8-27B-V8-96K}; REPO=${REPO:a}
+if [ "${VARIANT:-base}" = sa ]; then
+  HF_DEF=anemll/anemll-forge-qwen3.8-27B-V8-96K-SuperAdapter; BN=m6-96k-dec8ts-sa; KN=w_dec8ts_sa; SMOKE_DEF=9756d8d8e446b83f
+else
+  HF_DEF=anemll/anemll-forge-qwen3.8-27B-V8-96K; BN=m6-96k-dec8ts; KN=w_dec8ts; SMOKE_DEF=29aef2ec9db18a3f
+fi
+REPO=${REPO:-$HOME/Models/${HF_DEF:t}}; REPO=${REPO:a}
 CODE=$REPO/code/anemll-forge; V=$CODE/research/v8_prefill
 PY=${PY:-$REPO/.venv/bin/python}; PORT=${PORT:-8765}; LOGDIR=${LOGDIR:-$HOME/Library/Logs/anemll-forge}
-GUARD_GB=${GUARD_GB:-25}; BUILD=$REPO/coreai/m6-96k-dec8ts; KIT=$REPO/gpu/w_dec8ts; TABLES=${TABLES:-$REPO/gpu/w_dec8ts_local}
-SMOKE=29aef2ec9db18a3f; KIT_OS=26C5047e; HF_ID=anemll/anemll-forge-qwen3.8-27B-V8-96K
+GUARD_GB=${GUARD_GB:-25}; BUILD=$REPO/coreai/$BN; KIT=$REPO/gpu/$KN; TABLES=${TABLES:-$REPO/gpu/${KN}_local}
+SMOKE=${SMOKE:-$SMOKE_DEF}; KIT_OS=26C5047e; HF_ID=${HF_ID:-$HF_DEF}
 DRAFT=$REPO/drafter/all3/dflash2_lut4_gptq_nohead.aimodel
 mkdir -p $LOGDIR
 say() { print -r -- "$*"; }
@@ -52,7 +59,7 @@ download() {
   local HF=$(command -v hf || true); [ -x $REPO/.venv/bin/hf ] && HF=$REPO/.venv/bin/hf
   [ -n "$HF" ] || done_ download "FAIL: no hf CLI (python3 -m pip install --user 'huggingface_hub>=1.0', then retry)" 1
   mkdir -p $REPO
-  $HF download $HF_ID --local-dir $REPO --include "coreai/m6-96k-dec8ts/*" "gpu/w_dec8ts/*" "drafter/*" "model/*" \
+  $HF download $HF_ID --local-dir $REPO --include "coreai/$BN/*" "gpu/$KN/*" "drafter/*" "model/*" \
     "code/*" "*.md" "*.json" LICENSE NOTICE || done_ download FAIL 1
   [ -e $BUILD/manifest.json ] && [ -e $KIT/kit.json ] && [ -e $V/hf/serve_v8_96k.sh ] || done_ download "FAIL: files missing after download" 1
   done_ download "PASS ($(du -sh $REPO | cut -f1))"
@@ -106,7 +113,7 @@ tables_rebuild() {
 
 serve() {
   port_busy && done_ serve "FAIL: port $PORT in use" 4
-  REPO=$REPO TABLES=$TABLES PORT=$PORT LOGDIR=$LOGDIR PY=$PY nohup zsh $V/hf/serve_v8_96k.sh > $LOGDIR/agent_serve.out 2>&1 &
+  REPO=$REPO BUILD=$BUILD TABLES=$TABLES PORT=$PORT LOGDIR=$LOGDIR PY=$PY nohup zsh $V/hf/serve_v8_96k.sh > $LOGDIR/agent_serve.out 2>&1 &
   local L=$LOGDIR/v8_server.log i
   for i in $(seq 1 300); do
     grep -q "serving OpenAI API" $L 2>/dev/null && break

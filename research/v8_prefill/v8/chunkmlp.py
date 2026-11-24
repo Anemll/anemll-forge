@@ -23,6 +23,15 @@ def sub(W, key, rows=None, cols=None):
     return B.QConv(d, key)
 
 
+def _conv(w):
+    """fp16 1x1 conv with weight w (Cout, Cin), not palettized."""
+    w = np.ascontiguousarray(np.asarray(w, np.float16))
+    c = nn.Conv2d(w.shape[1], w.shape[0], 1, bias=False)
+    import torch
+    c.weight = nn.Parameter(torch.from_numpy(w).view(w.shape[0], w.shape[1], 1, 1), requires_grad=False)
+    return c
+
+
 class ChunkMLP(nn.Module):
     def __init__(self, W, layer, sizes):
         super().__init__()
@@ -34,7 +43,19 @@ class ChunkMLP(nn.Module):
         assert c == I and all(s % 1024 == 0 for s in sizes)
         k = lambda m: f"{i}/mlp.{m}_proj.weight"  # noqa: E731
         for m in ("gate", "up", "down"):
-            assert f"{k(m)}/lr_a" not in W and f"{k(m)}/lut" in W, m
+            assert f"{k(m)}/lut" in W, m
+        # 24 Nov 2026: optional fp16 low-rank factors (an adapter, adapter/adapter_export.py) in the conv input's basis,
+        # y += a (b x) like qwen38_coreai_build.QConv: gate / up share one b x per input and take their rows of a; down
+        # sums b over the chunks' columns, then one a. Without factors no module is added (the same graph as before).
+        self.lr = all(f"{k(m)}/lr_a" in W for m in ("gate", "up", "down"))
+        assert self.lr or not any(f"{k(m)}/lr_a" in W for m in ("gate", "up", "down")), "low-rank on some FFN matrices only"
+        if self.lr:
+            c1 = lambda w: _conv(w)  # noqa: E731
+            self.lgb, self.lub = c1(W[f"{k('gate')}/lr_b"]), c1(W[f"{k('up')}/lr_b"])
+            self.lga = nn.ModuleList(c1(W[f"{k('gate')}/lr_a"][b0:b1]) for b0, b1 in bounds)
+            self.lua = nn.ModuleList(c1(W[f"{k('up')}/lr_a"][b0:b1]) for b0, b1 in bounds)
+            self.ldb = nn.ModuleList(c1(W[f"{k('down')}/lr_b"][:, b0:b1]) for b0, b1 in bounds)
+            self.lda = c1(W[f"{k('down')}/lr_a"])
         self.g = nn.ModuleList(sub(W, k("gate"), rows=b) for b in bounds)
         self.u = nn.ModuleList(sub(W, k("up"), rows=b) for b in bounds)
         self.d = nn.ModuleList(sub(W, k("down"), cols=b) for b in bounds)
@@ -52,10 +73,18 @@ class ChunkMLP(nn.Module):
         h = B.rms_hidden(x, L.ln2)
         h = L.rin(h) if L.rin is not None else h
         y = None
-        for g, u, hd, d in zip(self.g, self.u, self.h, self.d):
-            a = hd(B.silu(g(h), B.MLP_SILU) * u(h))
-            p = d(a)
+        if not self.lr:
+            for g, u, hd, d in zip(self.g, self.u, self.h, self.d):
+                a = hd(B.silu(g(h), B.MLP_SILU) * u(h))
+                p = d(a)
+                y = p if y is None else y + p
+            return x + y
+        tg, tu, td = self.lgb(h), self.lub(h), None
+        for g, u, hd, d, ga, ua, db in zip(self.g, self.u, self.h, self.d, self.lga, self.lua, self.ldb):
+            a = hd(B.silu(g(h) + ga(tg), B.MLP_SILU) * (u(h) + ua(tu)))
+            p, t = d(a), db(a)
             y = p if y is None else y + p
-        return x + y
+            td = t if td is None else td + t
+        return x + (y + self.lda(td))
 
 

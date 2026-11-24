@@ -34,6 +34,10 @@ A=$REPO/code/anemll-forge/research/v8_prefill/hf/agent_deploy.sh
 zsh $A check
 ```
 
+Super-adapter repo (`anemll/anemll-forge-qwen3.8-27B-V8-96K-SuperAdapter`): `export VARIANT=sa` before every
+stage (and `REPO=~/Models/anemll-forge-qwen3.8-27B-V8-96K-SuperAdapter`, `hf download` of that repo in the
+bootstrap). It selects the adapter build, its GPU-table kit and its smoke checksum; rules and exit codes are the same.
+
 ## Stages
 
 Run them in this order (`zsh $A all` runs them in sequence and stops at the first failure):

@@ -7,7 +7,8 @@
 #   lookup off, ctx 98304, the KV-wrap leak fix (the *_uw dylibs), forge's own memory watchdog.
 #   TREE=0: the same build with the 8-row chain verifier (tree vs chain comparisons); TREE_SAMPLED=0: chain for
 #   sampled requests only; RUNG_SLICE= (empty): no sliced entries.
-#   REPO=<HF repo download> [TABLES=<GPU table dir>] [PORT=8765] [LOGDIR=~/Library/Logs/anemll-forge] [PY=python3]
+#   REPO=<HF repo download> [BUILD=<build dir>] [TABLES=<GPU table dir>] [PORT=8765] [LOGDIR=~/Library/Logs/anemll-forge] [PY=python3]
+#   (super-adapter repo: BUILD=$REPO/coreai/m6-96k-dec8ts-sa TABLES=$REPO/gpu/w_dec8ts_sa_local; agent_deploy.sh VARIANT=sa sets both)
 #   zsh code/anemll-forge/research/v8_prefill/hf/serve_v8_96k.sh [extra v8_server.py options]
 # Before the first run (DEPLOY.md): forge.py compile of the build and the drafter, the GPU tables
 # (pipe/gpu_tables_kit.py install, TABLES defaults to $REPO/gpu/w_dec8ts_local), the engine dylibs

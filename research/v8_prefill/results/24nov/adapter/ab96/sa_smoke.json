@@ -1,0 +1,131 @@
+{
+ "label": "sa_smoke",
+ "banner": "BANNER [sa_smoke] prompts smoke_2k_v1.json sha dbc1fced091ac294 gen 320 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q_uwlr.dylib sha256 20e5ff8f0e8df057 | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree_uw.dylib sha256 4412c02bc68744cadd30d9042f0bbe98b7c6c1a9e09721e8461c03c082846f80 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_sa | lookup off | slice: sliced decode entries [24, 40, 48, 56]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volu | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q_uwlr.dylib sha256 20e5ff8f0e8df057",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree_uw.dylib sha256 4412c02bc68744cadd30d9042f0bbe98b7c6c1a9e09721e8461c03c082846f80 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_sa | lookup off",
+  "slice": "sliced decode entries [24, 40, 48, 56]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volu",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "dbc1fced091ac294",
+ "gen": 320,
+ "temp": 0.0,
+ "think": 0,
+ "seed": -1,
+ "started": "2026-11-24 06:57:53",
+ "rungs": {
+  "2k": [
+   {
+    "t0": 1795532278.747297,
+    "t_first": 1795532279.899387,
+    "t_last": 1795532287.287345,
+    "t_end": 1795532287.28741,
+    "ttft_s": 1.1520898342132568,
+    "completion_tokens": 320,
+    "prompt_tokens": 279,
+    "decode_tps": 43.17837186551851,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 279,
+     "completion_tokens": 320,
+     "total_tokens": 599,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 42.4,
+     "tok_verify": 5.16,
+     "accept_pct": 60,
+     "hist": "0:2% 1:15% 2:11% 3:15% 4:10% 5:11% 6:18% 7:19%",
+     "ms_cycle": 121,
+     "draft_ms": 13.3,
+     "verify_ms": 106.5,
+     "tree_cycles": 39,
+     "tree_tv": 4.38,
+     "tree_ms": 107.9,
+     "chain_cycles": 23,
+     "chain_tv": 6.52,
+     "chain_ms": 104.2,
+     "other_cycles": 0
+    },
+    "content": "To solve the problem of finding the odd numbers in the Collatz sequence for a given positive integer `n`, we need to:\n\n1. Generate the Collatz sequence starting from `n` until we reach 1.\n2. Collect all the odd numbers encountered during this process.\n3. Return these odd numbers sorted in increasing order.\n\n### Key Points:\n- The Collatz sequence starts with `n`.\n- If the current number is even, the next number is `current // 2`.\n- If the current number is odd, the next number is `3 * current + 1`.\n- The sequence ends when we reach 1.\n- We need to collect all odd numbers in the sequence (including `n` if it's odd, and 1 at the end).\n- The result should be sorted in increasing order.\n\n### Approach:\n1. Initialize a set to store odd numbers (using a set avoids duplicates, though in the Collatz sequence, numbers are typically unique until they cycle, but since we stop at 1, there are no cycles before 1 for positive integers).\n2. Start with `n` and follow the Collatz rules until we reach 1.\n3. At each step, if the current number is odd, add it to the set.\n4. After the sequence is complete, convert the set to a sorted list.\n\n### Edge Cases:\n- If `n` is 1, the sequence is just `[1]`, so the odd numbers are `[1]",
+    "server_prefill": [
+     [
+      279,
+      1.0
+     ]
+    ],
+    "sha": "fde68879f5ed8e0f",
+    "decode_power": {
+     "mean_w": {
+      "total_power": NaN
+     }
+    },
+    "cat": "code",
+    "set": "humaneval-t0",
+    "index": 1
+   },
+   {
+    "t0": 1795532287.599998,
+    "t_first": 1795532288.2328372,
+    "t_last": 1795532302.0606332,
+    "t_end": 1795532302.060701,
+    "ttft_s": 0.6328392028808594,
+    "completion_tokens": 320,
+    "prompt_tokens": 74,
+    "decode_tps": 23.069475454145127,
+    "reasoning_chars": 0,
+    "usage": {
+     "prompt_tokens": 74,
+     "completion_tokens": 320,
+     "total_tokens": 394,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "server": {
+     "gen": 320,
+     "tps": 22.9,
+     "tok_verify": 2.81,
+     "accept_pct": 26,
+     "hist": "0:13% 1:29% 2:32% 3:20% 4:4% 5:2% 6:0% 7:1%",
+     "ms_cycle": 122,
+     "draft_ms": 13.7,
+     "verify_ms": 107.5,
+     "tree_cycles": 113,
+     "tree_tv": 2.77,
+     "tree_ms": 107.5,
+     "chain_cycles": 1,
+     "chain_tv": 8.0,
+     "chain_ms": 106.2,
+     "other_cycles": 0
+    },
+    "content": "The first blow doesn\u2019t feel like pain, exactly. It feels like a sudden, violent tearing of the air.\n\nFor a century, I have been still. I have been the anchor of this place. My roots are tangled with the earth\u2019s memory, my bark is a map of every storm, every drought, and every gentle rain that has passed through my life. I am not just wood; I am a living archive, a home for the owls, the beetles, the moss, and the fungi that feed on my decay. I am the lungs of this small valley.\n\nWhen the chainsaw roars to life, it is a sound I have never heard before. It is not the wind, not the birds, not the rustle of leaves. It is a mechanical, hungry scream. It vibrates through my trunk, shaking the leaves above, startling the squirrels from their nests. I feel a deep, resonant fear\u2014not of death, but of *severance*.\n\nAs the blade bites into my bark, I feel a sharp, hot sting. It is not just physical damage; it is an assault on my identity. Each cut is a betrayal. The wood that was once strong and whole is now being reduced to splinters and dust. I can feel the sap, my lifeblood, leaking out, sticky and warm, staining the ground. It is a slow hemorrhage of my being.\n\nI feel a profound sense of injustice. I did not ask to be here, but I grew into this role. I provided shade, oxygen,",
+    "server_prefill": [
+     [
+      74,
+      0.5
+     ]
+    ],
+    "sha": "11852ccb43d5e353",
+    "decode_power": {
+     "mean_w": {
+      "total_power": NaN
+     }
+    },
+    "cat": "chat",
+    "set": "mt-bench-t0",
+    "index": 2
+   }
+  ]
+ },
+ "idle": {
+  "mean_w": {
+   "total_power": NaN
+  }
+ },
+ "ended": "2026-11-24 06:58:22"
+}

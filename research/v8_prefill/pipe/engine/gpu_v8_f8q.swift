@@ -138,7 +138,8 @@ let FA2P = FA2.split(separator: "_").map { Int($0) ?? 0 }   // [RM, KN] or s_..:
 let FA2RM = FA2.isEmpty ? 0 : (FA2P[0] == 0 ? FA2P[1] : FA2P[0]), FA2NSG = (FA2P.first == 0 && FA2P.count > 3) ? FA2P[3] : 4
 let FA2NS = Int(ProcessInfo.processInfo.environment["FA2NS"] ?? "0")!
 let PVW = ProcessInfo.processInfo.environment["PVW"] != "0"
-let G = buf(INTER * T * 4), U = buf(INTER * T * 4), A16 = buf(INTER * T * 2), TR = buf(64 * T * 4), TR16 = buf(64 * T * 2)
+let LRMAX = 192   // largest low-rank correction (lowrank())
+let G = buf(INTER * T * 4), U = buf(INTER * T * 4), A16 = buf(INTER * T * 2), TR = buf(LRMAX * T * 4), TR16 = buf(LRMAX * T * 2)
 let IN16 = buf(HID * T * 2)
 let PART = buf(4 * 1024 * 1024)
 let RP = buf(16 * T * 4)
@@ -185,10 +186,15 @@ func denseSplit(_ e: Enc, _ w: MTLBuffer, _ x16: MTLBuffer, _ y: MTLBuffer, M: I
     e.run(pso("splitk_reduce"), [PART, y, nil, nil, nil, y16 ?? y], [(UInt32(M * T), 2), (UInt32(splits), 3), (UInt32(mode), 4)],
           grid: sz(M * T), tg: sz(256), groups: false)
 }
+// 24 Nov 2026: the rank r of a low-rank correction comes from its B buffer (r x cin fp16): 64 for the release's own
+// corrections (unchanged), up to LRMAX (192) when an adapter is appended (adapter/adapter_export.py, padded to a multiple
+// of 64 for denseSplit's 64-row tiles). TR / TR16 hold r x T.
 func lowrank(_ e: Enc, _ l: L, _ key: String, _ x16: MTLBuffer, _ y: MTLBuffer, cout: Int, cin: Int) {
     guard let a = l.bufs["lra_" + key], let b = l.bufs["lrb_" + key] else { return }
-    denseSplit(e, b, x16, TR, M: 64, K: cin, mode: 2, y16: TR16)
-    e.run(pso("dense_gemm", acc: true), [a, TR16, y], [(UInt32(cout), 3), (UInt32(64), 4)], grid: sz(cout / 64), tg: sz(128))
+    let r = b.length / (cin * 2)
+    precondition(r % 64 == 0 && r <= LRMAX && a.length == cout * r * 2, "low-rank \(key): rank \(r) (multiple of 64, <= \(LRMAX))")
+    denseSplit(e, b, x16, TR, M: r, K: cin, mode: 2, y16: TR16)
+    e.run(pso("dense_gemm", acc: true), [a, TR16, y], [(UInt32(cout), 3), (UInt32(r), 4)], grid: sz(cout / 64), tg: sz(128))
 }
 let EPI = ProcessInfo.processInfo.environment["EPI"] == "1"  // output projection accumulates into X (no add_into)
 let REC16 = ProcessInfo.processInfo.environment["REC16"] == "1"  // gdn_rec16: 16 steps staged per barrier pair

@@ -174,6 +174,16 @@ package by `v8/build_dec8t_one.sh` -> `v8/build_dec8t_chunk.py` with `TREE_FORM=
 builder Python. These scripts carry the development machine's absolute paths (table in
 [README: Layout](../README.md#layout)); adjust them to your layout.
 
+## 8b. The super-adapter variant
+
+The repo `anemll/anemll-forge-qwen3.8-27B-V8-96K-SuperAdapter` carries the same tree8 + sliced build with the
+harness-hub super-adapter (a LoRA trained for pi, Hermes Agent and OpenCode) as exact fp16 low-rank side paths next to
+the unchanged 3-bit weights (`research/v8_prefill/adapter/`, results `results/24nov/adapter/`). Every step above
+applies with three names changed: the build `coreai/m6-96k-dec8ts-sa`, the GPU-table kit `gpu/w_dec8ts_sa` and the
+smoke checksum `9756d8d8e446b83f`. `agent_deploy.sh` switches all three with `VARIANT=sa`; by hand, launch with
+`BUILD=$REPO/coreai/m6-96k-dec8ts-sa TABLES=$REPO/gpu/w_dec8ts_sa_local`. The engine dylibs are the same
+(`build_engines.sh uw`). The adapter build runs both arms of the A/B in the card at 5-12 % lower decode speed.
+
 ## 9. Known gaps
 
 - The research scripts other than `hf/serve_v8_96k.sh`, `pipe/gpu_tables_kit.py`, `pipe/build_gpu_tables.sh` and

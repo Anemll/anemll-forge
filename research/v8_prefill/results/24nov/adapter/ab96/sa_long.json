@@ -1,0 +1,1045 @@
+{
+ "label": "sa_long",
+ "banner": "BANNER [sa_long] prompts long_agent_v1.json sha 3d75cb7684c06fa6 gen 512 | v8: F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q_uwlr.dylib sha256 20e5ff8f0e8df057 | dec8: decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree_uw.dylib sha256 4412c02bc68744cadd30d9042f0bbe98b7c6c1a9e09721e8461c03c082846f80 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto | tree: mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_sa | lookup off | slice: sliced decode entries [24, 40, 48, 56]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volu | lookup: off (no prompt-lookup line)",
+ "banner_parts": {
+  "v8": "F8=x F8VS=1.0 FOLD=off KV8=true K8V16=true QK8=true TK=2048 Lmax=98304 T=128 | prep=attn_prep8qv_f8v qk=attn_qk8isk_tg softmax=attn_softmax8n_f8x pv=attn_pv_f8v fill=kv8_v_to_f8v | V copy=e4m3 (fp16 value x 1.0), 1 B | mask=boundary chunk only exp=half P=e4m3 | dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libgpu_v8_f8q_uwlr.dylib sha256 20e5ff8f0e8df057",
+  "dec8": "decode GPU dylib /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/libdec_gpu_tree_uw.dylib sha256 4412c02bc68744cadd30d9042f0bbe98b7c6c1a9e09721e8461c03c082846f80 | kernels /Users/anemll/Documents/Codex/ios-prefill-20261030/v8_work/pipe/engine/dec_kernels_tree.metal sha256 674918fb1e682a2c5a780a72c1d4c579ee61655cefad1f514fc51a42ec207641 | attn=dec_attn_r4 (served dylib: no dec_variant) | V8_DEC8=auto",
+  "tree": "mode=tree8 policy=branched topc=4 tau=1.5 sampled=on t8 contexts [8, 16, 32, 64]K | split tree on (tdva/tdvba + dec_set_tree) | build /Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_sa | lookup off",
+  "slice": "sliced decode entries [24, 40, 48, 56]K (binding the [32, 64]K entries' KV) | chain v8s + tree t8s | check off | runtime call sha c9994f2c35817642 | build /Volu",
+  "lookup": "off (no prompt-lookup line)"
+ },
+ "prompts_sha": "3d75cb7684c06fa6",
+ "gen": 512,
+ "temp": 0.0,
+ "think": 0,
+ "seed": -1,
+ "started": "2026-11-24 07:08:35",
+ "rungs": {
+  "long": [
+   {
+    "t0": 1795532936.3656168,
+    "t_first": 1795532951.139908,
+    "t_last": 1795532955.4461691,
+    "t_end": 1795532955.574882,
+    "ttft_s": 14.774291276931763,
+    "completion_tokens": 223,
+    "prompt_tokens": 8622,
+    "tool_calls": 2,
+    "decode_tps": 51.5528428889132,
+    "usage": {
+     "prompt_tokens": 8622,
+     "completion_tokens": 223,
+     "total_tokens": 8845,
+     "prompt_tokens_details": {
+      "cached_tokens": 640
+     }
+    },
+    "server": {
+     "gen": 223,
+     "tps": 48.5,
+     "tok_verify": 6.03,
+     "accept_pct": 72,
+     "hist": "0:3% 1:5% 2:11% 3:16% 4:5% 5:5% 6:0% 7:54%",
+     "ms_cycle": 124,
+     "draft_ms": 12.8,
+     "verify_ms": 110.0,
+     "tree_cycles": 13,
+     "tree_tv": 3.69,
+     "tree_ms": 113.6,
+     "chain_cycles": 24,
+     "chain_tv": 7.29,
+     "chain_ms": 108.1,
+     "other_cycles": 0
+    },
+    "content": "Public functions: `user_home`, `os_build`, `du`, `stale_compile_dirs`, `failed_specializations`, `program_refs`, `main`. Most already have hints; `failed_specializations` and `main` don't.\n\n<tool:edit>{\"path\": \"scripts/ane_cache_cleanup.py\", \"oldText\": \"def failed_specializations(entries, mode: int | None, cutoff: float) -> list[tuple[Path, str]]:\", \"newText\": \"def failed_specializations(entries: dict[Path, set[str]], mode: int | None, cutoff: float) -> list[tuple[Path, str]]:\"}<tool:edit>{\"path\": \"scripts/ane_cache_cleanup.py\", \"oldText\": \"def main():\", \"newText\": \"def main() -> None:\"}",
+    "server_prefill": [
+     [
+      7982,
+      14.6
+     ]
+    ],
+    "sha": "ff9baffef720f2b5",
+    "decode_power": {
+     "samples": 4,
+     "seconds": 4.30626106262207,
+     "mean_w": {
+      "system_power": 26.098765018268036,
+      "total_power": 31.748627185821533,
+      "cpu_power": 2.28231737443444,
+      "gpu_power": 0.004515253533944917,
+      "ane_power": 0.0,
+      "dram_power": 3.3630295395851135
+     },
+     "energy_j": 136.71787704200779,
+     "net_total_w": 26.520665645599365,
+     "net_energy_j": 114.20490982446336
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 0
+   },
+   {
+    "t0": 1795532955.885704,
+    "t_first": 1795532960.159272,
+    "t_last": 1795532962.8721762,
+    "t_end": 1795532962.996777,
+    "ttft_s": 4.2735679149627686,
+    "completion_tokens": 157,
+    "prompt_tokens": 10446,
+    "tool_calls": 1,
+    "decode_tps": 57.502951687554294,
+    "usage": {
+     "prompt_tokens": 10446,
+     "completion_tokens": 157,
+     "total_tokens": 10603,
+     "prompt_tokens_details": {
+      "cached_tokens": 8622
+     }
+    },
+    "server": {
+     "gen": 157,
+     "tps": 50.7,
+     "tok_verify": 6.28,
+     "accept_pct": 75,
+     "hist": "0:4% 1:4% 2:4% 3:4% 4:16% 5:12% 6:12% 7:44%",
+     "ms_cycle": 124,
+     "draft_ms": 12.8,
+     "verify_ms": 109.5,
+     "tree_cycles": 8,
+     "tree_tv": 4.5,
+     "tree_ms": 111.4,
+     "chain_cycles": 17,
+     "chain_tv": 7.12,
+     "chain_ms": 108.6,
+     "other_cycles": 0
+    },
+    "content": "<tool:edit>{\"path\": \"scripts/ane_compile_mode.py\", \"oldText\": \"if __name__ == \\\"__main__\\\":  # quick manual classification, e.g. `python scripts/ane_compile_mode.py`\\n    info = detect_soc()\", \"newText\": \"if __name__ == \\\"__main__\\\":  # quick manual classification, e.g. `python scripts/ane_compile_mode.py`\\n    if len(sys.argv) == 1:\\n        print(\\\"usage: python scripts/ane_compile_mode.py  (prints this Mac's SoC classification and policy mode)\\\")\\n    info = detect_soc()\"}",
+    "server_prefill": [
+     [
+      1824,
+      4.0
+     ]
+    ],
+    "sha": "da003af88aae56d9",
+    "decode_power": {
+     "samples": 2,
+     "seconds": 2.712904214859009,
+     "mean_w": {
+      "system_power": 30.54707973420723,
+      "total_power": 35.94649696350098,
+      "cpu_power": 1.9638675812173894,
+      "gpu_power": 0.02765324857837146,
+      "ane_power": 0.0,
+      "dram_power": 3.407896399497986
+     },
+     "energy_j": 97.51940312169836,
+     "net_total_w": 30.71853542327881,
+     "net_energy_j": 83.33644422410885
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 1
+   },
+   {
+    "t0": 1795532963.3072698,
+    "t_first": 1795532972.010998,
+    "t_last": 1795532972.388543,
+    "t_end": 1795532972.388609,
+    "ttft_s": 8.703728199005127,
+    "completion_tokens": 19,
+    "prompt_tokens": 14850,
+    "tool_calls": 0,
+    "decode_tps": 47.67645108611224,
+    "usage": {
+     "prompt_tokens": 14850,
+     "completion_tokens": 19,
+     "total_tokens": 14869,
+     "prompt_tokens_details": {
+      "cached_tokens": 10446
+     }
+    },
+    "server": {
+     "gen": 19,
+     "tps": 37.3,
+     "tok_verify": 4.75,
+     "accept_pct": 54,
+     "hist": "0:0% 1:0% 2:50% 3:0% 4:0% 5:25% 6:25% 7:0%",
+     "ms_cycle": 127,
+     "draft_ms": 13.1,
+     "verify_ms": 111.9,
+     "tree_cycles": 4,
+     "tree_tv": 4.75,
+     "tree_ms": 111.9,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "The only class is `ConvChain`, which already has a docstring. No changes needed.",
+    "server_prefill": [
+     [
+      4404,
+      8.5
+     ]
+    ],
+    "sha": "899f057d667baf45",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 2
+   },
+   {
+    "t0": 1795532972.699282,
+    "t_first": 1795532975.83542,
+    "t_last": 1795532976.71022,
+    "t_end": 1795532976.7102878,
+    "ttft_s": 3.1361379623413086,
+    "completion_tokens": 29,
+    "prompt_tokens": 16187,
+    "tool_calls": 0,
+    "decode_tps": 32.007308448922345,
+    "usage": {
+     "prompt_tokens": 16187,
+     "completion_tokens": 29,
+     "total_tokens": 16216,
+     "prompt_tokens_details": {
+      "cached_tokens": 14850
+     }
+    },
+    "server": {
+     "gen": 29,
+     "tps": 28.5,
+     "tok_verify": 3.62,
+     "accept_pct": 38,
+     "hist": "0:0% 1:25% 2:25% 3:25% 4:12% 5:12% 6:0% 7:0%",
+     "ms_cycle": 127,
+     "draft_ms": 13.2,
+     "verify_ms": 112.3,
+     "tree_cycles": 7,
+     "tree_tv": 3.86,
+     "tree_ms": 112.5,
+     "chain_cycles": 1,
+     "chain_tv": 2.0,
+     "chain_ms": 110.5,
+     "other_cycles": 0
+    },
+    "content": "No bare `except:` clauses exist in this file \u2014 the only `except` is already `except Exception as exc:`. No changes needed.",
+    "server_prefill": [
+     [
+      1337,
+      2.9
+     ]
+    ],
+    "sha": "37aa7abd12afe990",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 0.8748002052307129,
+     "mean_w": {
+      "system_power": 39.078819303848974,
+      "total_power": 46.74352264404297,
+      "cpu_power": 2.5306370723501743,
+      "gpu_power": 1.5512761315065398,
+      "ane_power": 0.0,
+      "dram_power": 3.5827901363372803
+     },
+     "energy_j": 40.891243202215264,
+     "net_total_w": 41.5155611038208,
+     "net_energy_j": 36.31782137389064
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 3
+   },
+   {
+    "t0": 1795532977.023168,
+    "t_first": 1795532982.152256,
+    "t_last": 1795532982.2864692,
+    "t_end": 1795532982.286537,
+    "ttft_s": 5.129087924957275,
+    "completion_tokens": 13,
+    "prompt_tokens": 18207,
+    "tool_calls": 0,
+    "decode_tps": 89.4099774217444,
+    "usage": {
+     "prompt_tokens": 18207,
+     "completion_tokens": 13,
+     "total_tokens": 18220,
+     "prompt_tokens_details": {
+      "cached_tokens": 16187
+     }
+    },
+    "server": {
+     "gen": 13,
+     "tps": 40.6,
+     "tok_verify": 6.5,
+     "accept_pct": 79,
+     "hist": "0:0% 1:0% 2:0% 3:0% 4:0% 5:50% 6:50% 7:0%",
+     "ms_cycle": 160,
+     "draft_ms": 15.0,
+     "verify_ms": 137.3,
+     "tree_cycles": 2,
+     "tree_tv": 6.5,
+     "tree_ms": 137.3,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/coreai_chunk_ref.py` as requested.",
+    "server_prefill": [
+     [
+      2020,
+      4.9
+     ]
+    ],
+    "sha": "f0dcb835e01540d8",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 4
+   },
+   {
+    "t0": 1795532982.595967,
+    "t_first": 1795532987.395664,
+    "t_last": 1795532987.524897,
+    "t_end": 1795532987.524978,
+    "ttft_s": 4.799696922302246,
+    "completion_tokens": 12,
+    "prompt_tokens": 20134,
+    "tool_calls": 0,
+    "decode_tps": 85.11749805827213,
+    "usage": {
+     "prompt_tokens": 20134,
+     "completion_tokens": 12,
+     "total_tokens": 20146,
+     "prompt_tokens_details": {
+      "cached_tokens": 18220
+     }
+    },
+    "server": {
+     "gen": 12,
+     "tps": 33.4,
+     "tok_verify": 6.0,
+     "accept_pct": 71,
+     "hist": "0:0% 1:0% 2:0% 3:50% 4:0% 5:0% 6:0% 7:50%",
+     "ms_cycle": 180,
+     "draft_ms": 14.2,
+     "verify_ms": 163.6,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 2,
+     "chain_tv": 6.0,
+     "chain_ms": 163.6,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/coreai_compile.py` as requested.",
+    "server_prefill": [
+     [
+      1914,
+      4.5
+     ]
+    ],
+    "sha": "d078dc3b48737ada",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 5
+   },
+   {
+    "t0": 1795532987.8360991,
+    "t_first": 1795532997.460889,
+    "t_last": 1795532997.845902,
+    "t_end": 1795532997.845994,
+    "ttft_s": 9.624789953231812,
+    "completion_tokens": 13,
+    "prompt_tokens": 24208,
+    "tool_calls": 0,
+    "decode_tps": 31.167789673538465,
+    "usage": {
+     "prompt_tokens": 24208,
+     "completion_tokens": 13,
+     "total_tokens": 24221,
+     "prompt_tokens_details": {
+      "cached_tokens": 20146
+     }
+    },
+    "server": {
+     "gen": 13,
+     "tps": 19.2,
+     "tok_verify": 2.6,
+     "accept_pct": 23,
+     "hist": "0:20% 1:40% 2:20% 3:0% 4:20% 5:0% 6:0% 7:0%",
+     "ms_cycle": 135,
+     "draft_ms": 13.0,
+     "verify_ms": 121.3,
+     "tree_cycles": 3,
+     "tree_tv": 3.33,
+     "tree_ms": 118.9,
+     "chain_cycles": 2,
+     "chain_tv": 1.5,
+     "chain_ms": 124.9,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/coreai_compile_guide.py` as requested.",
+    "server_prefill": [
+     [
+      4062,
+      9.3
+     ]
+    ],
+    "sha": "dbed09cfc553a7bb",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 6
+   },
+   {
+    "t0": 1795532998.157444,
+    "t_first": 1795533002.0305128,
+    "t_last": 1795533002.1651971,
+    "t_end": 1795533002.165262,
+    "ttft_s": 3.8730688095092773,
+    "completion_tokens": 13,
+    "prompt_tokens": 25649,
+    "tool_calls": 0,
+    "decode_tps": 89.09722839334616,
+    "usage": {
+     "prompt_tokens": 25649,
+     "completion_tokens": 13,
+     "total_tokens": 25662,
+     "prompt_tokens_details": {
+      "cached_tokens": 24221
+     }
+    },
+    "server": {
+     "gen": 13,
+     "tps": 41.4,
+     "tok_verify": 6.5,
+     "accept_pct": 79,
+     "hist": "0:0% 1:0% 2:0% 3:0% 4:50% 5:0% 6:0% 7:50%",
+     "ms_cycle": 157,
+     "draft_ms": 14.0,
+     "verify_ms": 141.1,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 2,
+     "chain_tv": 6.5,
+     "chain_ms": 141.1,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/coreml_entry_share.py` as requested.",
+    "server_prefill": [
+     [
+      1428,
+      3.6
+     ]
+    ],
+    "sha": "ecd902aee54fe06d",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 7
+   },
+   {
+    "t0": 1795533002.476685,
+    "t_first": 1795533008.308806,
+    "t_last": 1795533008.5726368,
+    "t_end": 1795533008.572713,
+    "ttft_s": 5.832120895385742,
+    "completion_tokens": 12,
+    "prompt_tokens": 27807,
+    "tool_calls": 0,
+    "decode_tps": 41.693372504827906,
+    "usage": {
+     "prompt_tokens": 27807,
+     "completion_tokens": 12,
+     "total_tokens": 27819,
+     "prompt_tokens_details": {
+      "cached_tokens": 25662
+     }
+    },
+    "server": {
+     "gen": 12,
+     "tps": 20.8,
+     "tok_verify": 3.0,
+     "accept_pct": 29,
+     "hist": "0:25% 1:25% 2:0% 3:25% 4:25% 5:0% 6:0% 7:0%",
+     "ms_cycle": 144,
+     "draft_ms": 13.0,
+     "verify_ms": 130.0,
+     "tree_cycles": 4,
+     "tree_tv": 3.0,
+     "tree_ms": 130.0,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/ctx_variant.py` as requested.",
+    "server_prefill": [
+     [
+      2145,
+      5.5
+     ]
+    ],
+    "sha": "52ab09d87fb2c08a",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 0.26383090019226074,
+     "mean_w": {
+      "system_power": 36.38243255204459,
+      "total_power": 46.28595733642578,
+      "cpu_power": 1.6261451547586887,
+      "gpu_power": 4.46734082461457,
+      "ane_power": 0.0,
+      "dram_power": 3.8100388050079346
+     },
+     "energy_j": 12.21166579032979,
+     "net_total_w": 41.05799579620361,
+     "net_energy_j": 10.832367991002457
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 8
+   },
+   {
+    "t0": 1795533008.884659,
+    "t_first": 1795533015.3790479,
+    "t_last": 1795533015.650503,
+    "t_end": 1795533015.650583,
+    "ttft_s": 6.494388818740845,
+    "completion_tokens": 15,
+    "prompt_tokens": 30175,
+    "tool_calls": 0,
+    "decode_tps": 51.57391628936424,
+    "usage": {
+     "prompt_tokens": 30175,
+     "completion_tokens": 15,
+     "total_tokens": 30190,
+     "prompt_tokens_details": {
+      "cached_tokens": 27819
+     }
+    },
+    "server": {
+     "gen": 15,
+     "tps": 26.2,
+     "tok_verify": 3.75,
+     "accept_pct": 39,
+     "hist": "0:25% 1:0% 2:25% 3:0% 4:25% 5:25% 6:0% 7:0%",
+     "ms_cycle": 143,
+     "draft_ms": 13.1,
+     "verify_ms": 128.3,
+     "tree_cycles": 3,
+     "tree_tv": 3.33,
+     "tree_ms": 130.3,
+     "chain_cycles": 1,
+     "chain_tv": 5.0,
+     "chain_ms": 122.4,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/dflash2_coreai_compare.py` as requested.",
+    "server_prefill": [
+     [
+      2356,
+      6.1
+     ]
+    ],
+    "sha": "77efafff8891fd28",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 9
+   },
+   {
+    "t0": 1795533015.962979,
+    "t_first": 1795533024.7706602,
+    "t_last": 1795533025.46838,
+    "t_end": 1795533025.46846,
+    "ttft_s": 8.8076810836792,
+    "completion_tokens": 17,
+    "prompt_tokens": 33336,
+    "tool_calls": 0,
+    "decode_tps": 22.93184128614577,
+    "usage": {
+     "prompt_tokens": 33336,
+     "completion_tokens": 17,
+     "total_tokens": 33353,
+     "prompt_tokens_details": {
+      "cached_tokens": 30190
+     }
+    },
+    "server": {
+     "gen": 17,
+     "tps": 16.4,
+     "tok_verify": 2.43,
+     "accept_pct": 20,
+     "hist": "0:29% 1:14% 2:43% 3:14% 4:0% 5:0% 6:0% 7:0%",
+     "ms_cycle": 148,
+     "draft_ms": 12.9,
+     "verify_ms": 133.3,
+     "tree_cycles": 6,
+     "tree_tv": 2.17,
+     "tree_ms": 132.1,
+     "chain_cycles": 1,
+     "chain_tv": 4.0,
+     "chain_ms": 140.0,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/dflash2_coreai_drafter.py` as requested.",
+    "server_prefill": [
+     [
+      3146,
+      8.4
+     ]
+    ],
+    "sha": "7492449d53d4d3ce",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 0.6977198123931885,
+     "mean_w": {
+      "system_power": 37.54084292994315,
+      "total_power": 45.195945739746094,
+      "cpu_power": 1.8962351163437472,
+      "gpu_power": 2.8879870896689086,
+      "ane_power": 0.0,
+      "dram_power": 2.870880603790283
+     },
+     "energy_j": 31.53410678246837,
+     "net_total_w": 39.967984199523926,
+     "net_energy_j": 27.886454437425755
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 10
+   },
+   {
+    "t0": 1795533025.7770948,
+    "t_first": 1795533038.4341671,
+    "t_last": 1795533038.852569,
+    "t_end": 1795533038.852648,
+    "ttft_s": 12.657072305679321,
+    "completion_tokens": 16,
+    "prompt_tokens": 38007,
+    "tool_calls": 0,
+    "decode_tps": 35.85069277254324,
+    "usage": {
+     "prompt_tokens": 38007,
+     "completion_tokens": 16,
+     "total_tokens": 38023,
+     "prompt_tokens_details": {
+      "cached_tokens": 33353
+     }
+    },
+    "server": {
+     "gen": 16,
+     "tps": 21.7,
+     "tok_verify": 3.2,
+     "accept_pct": 31,
+     "hist": "0:20% 1:20% 2:40% 3:0% 4:0% 5:0% 6:20% 7:0%",
+     "ms_cycle": 147,
+     "draft_ms": 13.0,
+     "verify_ms": 132.6,
+     "tree_cycles": 4,
+     "tree_tv": 2.25,
+     "tree_ms": 132.9,
+     "chain_cycles": 1,
+     "chain_tv": 7.0,
+     "chain_ms": 131.4,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/dflash2_drafter_ref.py` as requested.",
+    "server_prefill": [
+     [
+      4654,
+      12.3
+     ]
+    ],
+    "sha": "545da735902df2b2",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 11
+   },
+   {
+    "t0": 1795533039.1651871,
+    "t_first": 1795533044.145642,
+    "t_last": 1795533044.283304,
+    "t_end": 1795533044.2833889,
+    "ttft_s": 4.980454921722412,
+    "completion_tokens": 14,
+    "prompt_tokens": 39497,
+    "tool_calls": 0,
+    "decode_tps": 94.43423923962064,
+    "usage": {
+     "prompt_tokens": 39497,
+     "completion_tokens": 14,
+     "total_tokens": 39511,
+     "prompt_tokens_details": {
+      "cached_tokens": 38023
+     }
+    },
+    "server": {
+     "gen": 14,
+     "tps": 44.0,
+     "tok_verify": 7.0,
+     "accept_pct": 86,
+     "hist": "0:0% 1:0% 2:0% 3:0% 4:0% 5:50% 6:0% 7:50%",
+     "ms_cycle": 159,
+     "draft_ms": 14.2,
+     "verify_ms": 141.6,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 2,
+     "chain_tv": 7.0,
+     "chain_ms": 141.6,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/dflash2_head_analysis.py` as requested.",
+    "server_prefill": [
+     [
+      1474,
+      4.7
+     ]
+    ],
+    "sha": "ec219fdf54424f11",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 12
+   },
+   {
+    "t0": 1795533044.5913558,
+    "t_first": 1795533056.0223129,
+    "t_last": 1795533056.441448,
+    "t_end": 1795533056.4415119,
+    "ttft_s": 11.430957078933716,
+    "completion_tokens": 13,
+    "prompt_tokens": 43285,
+    "tool_calls": 0,
+    "decode_tps": 28.63038714888679,
+    "usage": {
+     "prompt_tokens": 43285,
+     "completion_tokens": 13,
+     "total_tokens": 43298,
+     "prompt_tokens_details": {
+      "cached_tokens": 39511
+     }
+    },
+    "server": {
+     "gen": 13,
+     "tps": 17.2,
+     "tok_verify": 2.6,
+     "accept_pct": 23,
+     "hist": "0:60% 1:0% 2:0% 3:20% 4:0% 5:20% 6:0% 7:0%",
+     "ms_cycle": 151,
+     "draft_ms": 13.1,
+     "verify_ms": 136.2,
+     "tree_cycles": 5,
+     "tree_tv": 2.6,
+     "tree_ms": 136.2,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/dflash2_quant.py` as requested.",
+    "server_prefill": [
+     [
+      3774,
+      11.1
+     ]
+    ],
+    "sha": "f901d7bf31e14ef8",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 13
+   },
+   {
+    "t0": 1795533056.751164,
+    "t_first": 1795533063.067969,
+    "t_last": 1795533063.2096698,
+    "t_end": 1795533063.2097542,
+    "ttft_s": 6.316805124282837,
+    "completion_tokens": 15,
+    "prompt_tokens": 45212,
+    "tool_calls": 0,
+    "decode_tps": 98.79976309696872,
+    "usage": {
+     "prompt_tokens": 45212,
+     "completion_tokens": 15,
+     "total_tokens": 45227,
+     "prompt_tokens_details": {
+      "cached_tokens": 43298
+     }
+    },
+    "server": {
+     "gen": 15,
+     "tps": 44.3,
+     "tok_verify": 7.5,
+     "accept_pct": 93,
+     "hist": "0:0% 1:0% 2:0% 3:0% 4:0% 5:0% 6:50% 7:50%",
+     "ms_cycle": 169,
+     "draft_ms": 14.3,
+     "verify_ms": 151.3,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 2,
+     "chain_tv": 7.5,
+     "chain_ms": 151.3,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/dflash2_ref_replay.py` as requested.",
+    "server_prefill": [
+     [
+      1914,
+      6.1
+     ]
+    ],
+    "sha": "4feebbd5bd1c43c4",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 14
+   },
+   {
+    "t0": 1795533063.524608,
+    "t_first": 1795533069.93261,
+    "t_last": 1795533070.0740821,
+    "t_end": 1795533070.074167,
+    "ttft_s": 6.408002138137817,
+    "completion_tokens": 14,
+    "prompt_tokens": 47116,
+    "tool_calls": 0,
+    "decode_tps": 91.89090915219161,
+    "usage": {
+     "prompt_tokens": 47116,
+     "completion_tokens": 14,
+     "total_tokens": 47130,
+     "prompt_tokens_details": {
+      "cached_tokens": 45227
+     }
+    },
+    "server": {
+     "gen": 14,
+     "tps": 42.8,
+     "tok_verify": 7.0,
+     "accept_pct": 86,
+     "hist": "0:0% 1:0% 2:0% 3:0% 4:0% 5:50% 6:0% 7:50%",
+     "ms_cycle": 163,
+     "draft_ms": 14.6,
+     "verify_ms": 145.1,
+     "tree_cycles": 0,
+     "tree_tv": 0.0,
+     "tree_ms": 0.0,
+     "chain_cycles": 2,
+     "chain_tv": 7.0,
+     "chain_ms": 145.1,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/enum_shape_share_probe.py` as requested.",
+    "server_prefill": [
+     [
+      1889,
+      6.2
+     ]
+    ],
+    "sha": "3ee489937c89d37c",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 0.14147210121154785,
+     "mean_w": {
+      "system_power": 29.501785027244996,
+      "total_power": 43.27286148071289,
+      "cpu_power": 1.734193279269202,
+      "gpu_power": 8.571372805851524,
+      "ane_power": 0.0,
+      "dram_power": 3.465510368347168
+     },
+     "energy_j": 6.1219026391127045,
+     "net_total_w": 38.04489994049072,
+     "net_energy_j": 5.382291934964314
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 15
+   },
+   {
+    "t0": 1795533070.388034,
+    "t_first": 1795533077.889015,
+    "t_last": 1795533078.320866,
+    "t_end": 1795533078.320957,
+    "ttft_s": 7.500980854034424,
+    "completion_tokens": 17,
+    "prompt_tokens": 49297,
+    "tool_calls": 0,
+    "decode_tps": 37.049803043645085,
+    "usage": {
+     "prompt_tokens": 49297,
+     "completion_tokens": 17,
+     "total_tokens": 49314,
+     "prompt_tokens_details": {
+      "cached_tokens": 47130
+     }
+    },
+    "server": {
+     "gen": 17,
+     "tps": 21.7,
+     "tok_verify": 3.4,
+     "accept_pct": 34,
+     "hist": "0:20% 1:20% 2:0% 3:20% 4:40% 5:0% 6:0% 7:0%",
+     "ms_cycle": 156,
+     "draft_ms": 13.2,
+     "verify_ms": 140.5,
+     "tree_cycles": 5,
+     "tree_tv": 3.4,
+     "tree_ms": 140.5,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/kl512_gguf.py` as requested.",
+    "server_prefill": [
+     [
+      2167,
+      7.1
+     ]
+    ],
+    "sha": "c6e3709375c20a59",
+    "decode_power": {
+     "samples": 1,
+     "seconds": 0.4318511486053467,
+     "mean_w": {
+      "system_power": 35.50372832672221,
+      "total_power": 43.91291809082031,
+      "cpu_power": 2.385942904105942,
+      "gpu_power": 3.082997655356542,
+      "ane_power": 0.0,
+      "dram_power": 2.94024920463562
+     },
+     "energy_j": 18.96384411613326,
+     "net_total_w": 38.684956550598145,
+     "net_energy_j": 16.70614292012374
+    },
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 16
+   },
+   {
+    "t0": 1795533078.6345448,
+    "t_first": 1795533090.412979,
+    "t_last": 1795533090.999816,
+    "t_end": 1795533090.999948,
+    "ttft_s": 11.778434038162231,
+    "completion_tokens": 15,
+    "prompt_tokens": 52813,
+    "tool_calls": 0,
+    "decode_tps": 23.8567076180652,
+    "usage": {
+     "prompt_tokens": 52813,
+     "completion_tokens": 15,
+     "total_tokens": 52828,
+     "prompt_tokens_details": {
+      "cached_tokens": 49314
+     }
+    },
+    "server": {
+     "gen": 15,
+     "tps": 16.3,
+     "tok_verify": 2.5,
+     "accept_pct": 21,
+     "hist": "0:17% 1:33% 2:33% 3:17% 4:0% 5:0% 6:0% 7:0%",
+     "ms_cycle": 154,
+     "draft_ms": 13.0,
+     "verify_ms": 139.1,
+     "tree_cycles": 4,
+     "tree_tv": 2.75,
+     "tree_ms": 140.4,
+     "chain_cycles": 2,
+     "chain_tv": 2.0,
+     "chain_ms": 136.6,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/lut_fp8_coreml.py` as requested.",
+    "server_prefill": [
+     [
+      3499,
+      11.4
+     ]
+    ],
+    "sha": "e2cda23fa0b2b07f",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 17
+   },
+   {
+    "t0": 1795533091.313935,
+    "t_first": 1795533100.667101,
+    "t_last": 1795533100.958873,
+    "t_end": 1795533100.9589581,
+    "ttft_s": 9.353165864944458,
+    "completion_tokens": 12,
+    "prompt_tokens": 55454,
+    "tool_calls": 0,
+    "decode_tps": 37.70065395687627,
+    "usage": {
+     "prompt_tokens": 55454,
+     "completion_tokens": 12,
+     "total_tokens": 55466,
+     "prompt_tokens_details": {
+      "cached_tokens": 52828
+     }
+    },
+    "server": {
+     "gen": 12,
+     "tps": 19.2,
+     "tok_verify": 3.0,
+     "accept_pct": 29,
+     "hist": "0:25% 1:25% 2:25% 3:0% 4:0% 5:25% 6:0% 7:0%",
+     "ms_cycle": 156,
+     "draft_ms": 13.5,
+     "verify_ms": 140.7,
+     "tree_cycles": 4,
+     "tree_tv": 3.0,
+     "tree_ms": 140.7,
+     "chain_cycles": 0,
+     "chain_tv": 0.0,
+     "chain_ms": 0.0,
+     "other_cycles": 0
+    },
+    "content": "I updated `scripts/lut_rules.py` as requested.",
+    "server_prefill": [
+     [
+      2626,
+      9.0
+     ]
+    ],
+    "sha": "d665859c2133499f",
+    "decode_power": null,
+    "cat": "agent",
+    "set": "pi-long",
+    "index": 18
+   }
+  ]
+ },
+ "idle": {
+  "samples": 15,
+  "seconds": 20.00506901741028,
+  "mean_w": {
+   "system_power": 4.2085907507800675,
+   "total_power": 5.227961540222168,
+   "cpu_power": 0.9677219260555775,
+   "gpu_power": 0.005184823007793804,
+   "ane_power": 0.0,
+   "dram_power": 0.046464040378729504
+  },
+  "energy_j": 104.58573143251101
+ },
+ "ended": "2026-11-24 07:11:41"
+}

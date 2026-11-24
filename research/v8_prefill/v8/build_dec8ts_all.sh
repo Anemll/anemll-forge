@@ -12,8 +12,11 @@
 #   OUT=... GW=... TREE_SLICED=... GUARD=15 build_dec8ts_all.sh
 L=/Volumes/SSD4TB/anemll-forge-research/coreai_seg_logs; W=${0:a:h}
 O=${OUT:-/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts}; GWD=${GW:-/Volumes/SSD4TB/anemll-forge-research/v8_dec8ts_w}
-LT=dec8ts; GUARD=${GUARD:-15}; NEED=$((GUARD + 3))
-R=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/v8_prefill/results/22nov/sliced
+LT=${LT:-dec8ts}; GUARD=${GUARD:-15}; NEED=$((GUARD + 3))
+R=${RDIR:-/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge-v8/research/v8_prefill/results/22nov/sliced}
+# 24 Nov 2026: EXPORT_DIR (exported: the package builder and the GPU tables), LT (log tag), RDIR (results) from the
+# environment; the defaults are the 22 Nov build's
+export EXPORT_DIR=${EXPORT_DIR:-/Users/anemll/Models/vq27b/export/release_vq3pA_mixh_s600_k1_mat}
 PY=/Users/anemll/SourceRelease/GITHUB/ML_playground/anemll-forge/.venv/bin/python
 BPY=/Users/anemll/SourceRelease/GITHUB/ML_playground/ane-vector-lut/coreai/.venv/bin/python
 WD=/Volumes/SSD4TB/anemll-forge-research/tools/swap_watchdog.sh
@@ -72,7 +75,7 @@ guard_watch() {
   done
 }
 guard_watch $$ &
-glog "start: OUT $O, TREE_FORM $TREE_FORM, TREE_SLICED $TREE_SLICED, guard $GUARD GiB"
+glog "start: OUT $O, EXPORT_DIR $EXPORT_DIR, TREE_FORM $TREE_FORM, TREE_SLICED $TREE_SLICED, guard $GUARD GiB"
 for f in $(seq ${FIRST:-0} ${LAST:-7}); do
   a=$((8*f)); n=$(printf "chunk_L%02d-%02d.aimodel" $a $((a+7)))
   if [ ! -f $O/$n.info.json ]; then
@@ -89,11 +92,11 @@ compile_wait
 if [ -n "$PAUSED" ]; then glog "PAUSED at the disk guard: exports done to $(ls $O/*.info.json | wc -l | tr -d ' ') packages; compile incomplete"; exit 3; fi
 glog "all packages compiled; GPU tables -> $GWD"
 mkdir -p $GWD
-cd $P && PREP_NO_FFN=1 EXPORT_DIR=/Users/anemll/Models/vq27b/export/release_vq3pA_mixh_s600_k1_mat MODEL=/Volumes/SSD4TB/Qwen3.8-27B \
+cd $P && PREP_NO_FFN=1 EXPORT_DIR=$EXPORT_DIR MODEL=/Volumes/SSD4TB/Qwen3.8-27B \
   nice -n 10 $BPY prep_engine_par.py $O $GWD 2048 4 > $L/v8_prep_${LT}.log 2>&1 & BP=$!   # 22 Nov: 4 parts, = serial (sliced/prep_par_check.txt)
 $WD $BP 1024 $L/watchdog_v8_prep_${LT}.log >/dev/null 2>&1 &
 wait $BP || { glog "GPU tables failed (see $L/v8_prep_${LT}.log)"; exit 1; }
-cd $P && EXPORT_DIR=/Users/anemll/Models/vq27b/export/release_vq3pA_mixh_s600_k1_mat MODEL=/Volumes/SSD4TB/Qwen3.8-27B \
+cd $P && EXPORT_DIR=$EXPORT_DIR MODEL=/Volumes/SSD4TB/Qwen3.8-27B \
   $BPY prep_kv8.py $GWD/manifest.json $GWD/manifest_best.json > $L/v8_prep_kv8_${LT}.log 2>&1 || { glog "kv8 tables failed"; exit 1; }
 $PY $W/dec8_srv_manifest.py $O || exit 1
 GWD=$GWD $PY - <<'Y' || exit 1

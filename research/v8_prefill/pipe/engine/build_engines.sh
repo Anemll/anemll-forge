@@ -5,7 +5,9 @@
 #   zsh engine/build_engines.sh [all|uw|served]   (default uw)
 #     uw      libgpu_v8_f8q_uw.dylib + libdec_gpu_tree_uw.dylib: the KV-wrap leak fix (v8_unwrap / v8_kv8_clear /
 #             dec_unwrap; results/22nov/memleak). Serve with V8_SRV_DYLIB=libgpu_v8_f8q_uw.dylib
-#             DEC_DYLIB=libdec_gpu_tree_uw.dylib v8_server_dec8_qk.sh
+#             DEC_DYLIB=libdec_gpu_tree_uw.dylib v8_server_dec8_qk.sh. Since 24 Nov 2026 the GPU engine's low-rank
+#             correction takes its rank from the table files (64 as before, up to 192: the super-adapter build
+#             v8_dec8ts_sa, adapter/); identical output at rank 64 (smoke 29aef2ec9db18a3f).
 #     served  the launcher defaults' names, from the *.pre_unwrap.swift sources (the 19 Nov builds, leak included);
 #             written as *_rebuilt.dylib so the served files are never overwritten
 #     all     both
